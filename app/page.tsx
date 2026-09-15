@@ -16,10 +16,17 @@ import { createClient } from "../lib/supabase/client";
    CONFIG
 ========================================================= */
 
-// REEMPLAZÁ POR TU WHATSAPP REAL.
-// Argentina: 549 + código de área + número.
-// SIN +, SIN ESPACIOS, SIN GUIONES.
-const SUPPORT_WHATSAPP = "549XXXXXXXXXX";
+// Lee el número real desde NEXT_PUBLIC_SUPPORT_WHATSAPP.
+// Si viene sin el prefijo de país (Argentina: 549), se lo agrega.
+function normalizeWhatsApp(raw: string) {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.startsWith("54")) return digits;
+  return `549${digits.replace(/^0+/, "")}`;
+}
+
+const SUPPORT_WHATSAPP = normalizeWhatsApp(
+  process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP ?? "549XXXXXXXXXX"
+);
 
 type Theme = "dark" | "light";
 
