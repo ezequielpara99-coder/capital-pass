@@ -8,7 +8,7 @@ import {
 
 import Link from "next/link";
 
-import { createClient } from "../../lib/supabase/client";
+import { createRecoveryClient } from "../../lib/supabase/client";
 
 // ============================================================
 // RECUPERAR CONTRASEÑA
@@ -17,7 +17,7 @@ import { createClient } from "../../lib/supabase/client";
 export default function RecoverPasswordPage() {
   const supabase =
     useMemo(
-      () => createClient(),
+      () => createRecoveryClient(),
       []
     );
 

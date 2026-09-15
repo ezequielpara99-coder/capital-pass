@@ -2,11 +2,11 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "../../lib/supabase/client";
+import { createRecoveryClient } from "../../lib/supabase/client";
 
 export default function CreatePasswordPage() {
   const router = useRouter();
-  const [supabase] = useState(() => createClient());
+  const [supabase] = useState(() => createRecoveryClient());
 
   const [checking, setChecking] = useState(true);
   const [validSession, setValidSession] = useState(false);
