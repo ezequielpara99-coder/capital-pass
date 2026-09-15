@@ -1,0 +1,925 @@
+[
+  {
+    "seccion": "columnas",
+    "objeto": "organization_members",
+    "detalle": [
+      {
+        "tipo": "uuid",
+        "nombre": "id",
+        "default": "gen_random_uuid()",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "uuid",
+        "nombre": "organization_id",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "uuid",
+        "nombre": "user_id",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "organization_member_role",
+        "nombre": "role",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "membership_status",
+        "nombre": "status",
+        "default": "'active'::membership_status",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "created_at",
+        "default": "now()",
+        "nullable": "NO"
+      }
+    ]
+  },
+  {
+    "seccion": "columnas",
+    "objeto": "organization_subscriptions",
+    "detalle": [
+      {
+        "tipo": "uuid",
+        "nombre": "id",
+        "default": "gen_random_uuid()",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "uuid",
+        "nombre": "organization_id",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "uuid",
+        "nombre": "plan_id",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "uuid",
+        "nombre": "signup_id",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "text",
+        "nombre": "provider",
+        "default": "'mercado_pago'::text",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "provider_subscription_id",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "text",
+        "nombre": "provider_payer_id",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "text",
+        "nombre": "status",
+        "default": "'pending'::text",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "current_period_start",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "current_period_end",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "next_payment_at",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "cancelled_at",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "paused_at",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "created_at",
+        "default": "now()",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "updated_at",
+        "default": "now()",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "organization_name",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "text",
+        "nombre": "plan_name",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "numeric",
+        "nombre": "amount_minor",
+        "default": "0",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "currency",
+        "default": "'ARS'::text",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "payer_email",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "text",
+        "nombre": "mercadopago_preapproval_id",
+        "default": null,
+        "nullable": "YES"
+      }
+    ]
+  },
+  {
+    "seccion": "columnas",
+    "objeto": "organizations",
+    "detalle": [
+      {
+        "tipo": "uuid",
+        "nombre": "id",
+        "default": "gen_random_uuid()",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "name",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "slug",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "contact_email",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "text",
+        "nombre": "contact_phone",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "bool",
+        "nombre": "active",
+        "default": "true",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "created_at",
+        "default": "now()",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "updated_at",
+        "default": "now()",
+        "nullable": "NO"
+      }
+    ]
+  },
+  {
+    "seccion": "columnas",
+    "objeto": "platform_admins",
+    "detalle": [
+      {
+        "tipo": "uuid",
+        "nombre": "user_id",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "created_at",
+        "default": "now()",
+        "nullable": "NO"
+      }
+    ]
+  },
+  {
+    "seccion": "columnas",
+    "objeto": "profiles",
+    "detalle": [
+      {
+        "tipo": "uuid",
+        "nombre": "id",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "first_name",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "last_name",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "phone",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "bool",
+        "nombre": "active",
+        "default": "true",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "created_at",
+        "default": "now()",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "updated_at",
+        "default": "now()",
+        "nullable": "NO"
+      }
+    ]
+  },
+  {
+    "seccion": "columnas",
+    "objeto": "subscription_plans",
+    "detalle": [
+      {
+        "tipo": "uuid",
+        "nombre": "id",
+        "default": "gen_random_uuid()",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "code",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "name",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "description",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "int8",
+        "nombre": "price_minor",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "currency",
+        "default": "'ARS'::text",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "billing_interval",
+        "default": "'monthly'::text",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "bool",
+        "nombre": "active",
+        "default": "true",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "created_at",
+        "default": "now()",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "updated_at",
+        "default": "now()",
+        "nullable": "NO"
+      }
+    ]
+  },
+  {
+    "seccion": "columnas",
+    "objeto": "subscription_signups",
+    "detalle": [
+      {
+        "tipo": "uuid",
+        "nombre": "id",
+        "default": "gen_random_uuid()",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "uuid",
+        "nombre": "plan_id",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "first_name",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "last_name",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "organization_name",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "email",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "whatsapp",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "text",
+        "nombre": "status",
+        "default": "'pending'::text",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "provider",
+        "default": "'mercado_pago'::text",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "provider_checkout_id",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "text",
+        "nombre": "provider_subscription_id",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "text",
+        "nombre": "provider_payment_id",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "approved_at",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "account_created_at",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "created_at",
+        "default": "now()",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "updated_at",
+        "default": "now()",
+        "nullable": "NO"
+      },
+      {
+        "tipo": "text",
+        "nombre": "mercadopago_preapproval_id",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "text",
+        "nombre": "mercadopago_external_reference",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "timestamptz",
+        "nombre": "receipt_sent_at",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "tipo": "text",
+        "nombre": "receipt_error",
+        "default": null,
+        "nullable": "YES"
+      }
+    ]
+  },
+  {
+    "seccion": "funciones_de_acceso",
+    "objeto": "can_view_member_profile",
+    "detalle": {
+      "definicion": "CREATE OR REPLACE FUNCTION public.can_view_member_profile(p_user_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\r\n  select exists (\r\n    select 1\r\n    from public.organization_members me\r\n    join public.organization_members target\r\n      on target.organization_id = me.organization_id\r\n    where me.user_id = auth.uid()\r\n      and me.status = 'active'\r\n      and me.role = 'organizer'\r\n      and target.user_id = p_user_id\r\n      and target.status = 'active'\r\n  );\r\n$function$\n"
+    }
+  },
+  {
+    "seccion": "funciones_de_acceso",
+    "objeto": "create_sale",
+    "detalle": {
+      "definicion": "CREATE OR REPLACE FUNCTION public.create_sale(p_event_id uuid, p_ticket_type_id uuid, p_quantity integer, p_buyer_first_name text, p_buyer_last_name text, p_buyer_dni text, p_buyer_phone text, p_buyer_email text DEFAULT NULL::text)\n RETURNS TABLE(sale_id uuid, buyer_id uuid, total_minor bigint, tickets_created integer)\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\r\ndeclare\r\n\r\n  v_organization_id uuid;\r\n  v_event_status public.event_status;\r\n\r\n  v_rrpp_sales_enabled boolean;\r\n  v_rrpp_sales_cutoff_at timestamptz;\r\n\r\n  v_door_sales_enabled boolean;\r\n  v_door_sales_start_at timestamptz;\r\n  v_door_sales_end_at timestamptz;\r\n\r\n  v_ticket_price bigint;\r\n  v_ticket_currency text;\r\n  v_ticket_capacity integer;\r\n  v_ticket_active boolean;\r\n  v_ticket_status public.ticket_type_status;\r\n\r\n  v_sales_start timestamptz;\r\n  v_sales_end timestamptz;\r\n\r\n  v_sold integer;\r\n\r\n  v_seller_member_id uuid;\r\n  v_seller_role public.organization_member_role;\r\n  v_sale_channel public.sale_channel;\r\n\r\n  v_buyer_id uuid;\r\n  v_sale_id uuid;\r\n  v_sale_item_id uuid;\r\n\r\n  v_total bigint;\r\n\r\nbegin\r\n\r\n  -- =======================================================\r\n  -- 1. Usuario autenticado\r\n  -- =======================================================\r\n\r\n  if auth.uid() is null then\r\n    raise exception 'Debes iniciar sesión para registrar una venta';\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 2. Cantidad\r\n  -- =======================================================\r\n\r\n  if p_quantity is null or p_quantity <= 0 then\r\n    raise exception 'La cantidad debe ser mayor a cero';\r\n  end if;\r\n\r\n  if p_quantity > 100 then\r\n    raise exception 'No se pueden vender más de 100 entradas en una sola operación';\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 3. Datos obligatorios del comprador\r\n  -- =======================================================\r\n\r\n  if p_buyer_first_name is null\r\n     or btrim(p_buyer_first_name) = '' then\r\n    raise exception 'El nombre del comprador es obligatorio';\r\n  end if;\r\n\r\n  if p_buyer_last_name is null\r\n     or btrim(p_buyer_last_name) = '' then\r\n    raise exception 'El apellido del comprador es obligatorio';\r\n  end if;\r\n\r\n  if p_buyer_dni is null\r\n     or btrim(p_buyer_dni) = '' then\r\n    raise exception 'El DNI del comprador es obligatorio';\r\n  end if;\r\n\r\n  if p_buyer_phone is null\r\n     or btrim(p_buyer_phone) = '' then\r\n    raise exception 'El WhatsApp del comprador es obligatorio';\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 4. Evento + tanda\r\n  -- Bloqueamos la tanda durante la venta.\r\n  -- =======================================================\r\n\r\n  select\r\n    e.organization_id,\r\n    e.status,\r\n\r\n    e.rrpp_sales_enabled,\r\n    e.rrpp_sales_cutoff_at,\r\n\r\n    e.door_sales_enabled,\r\n    e.door_sales_start_at,\r\n    e.door_sales_end_at,\r\n\r\n    tt.price_minor,\r\n    tt.currency,\r\n    tt.capacity,\r\n    tt.active,\r\n    tt.status,\r\n\r\n    tt.sales_start_at,\r\n    tt.sales_end_at\r\n\r\n  into\r\n    v_organization_id,\r\n    v_event_status,\r\n\r\n    v_rrpp_sales_enabled,\r\n    v_rrpp_sales_cutoff_at,\r\n\r\n    v_door_sales_enabled,\r\n    v_door_sales_start_at,\r\n    v_door_sales_end_at,\r\n\r\n    v_ticket_price,\r\n    v_ticket_currency,\r\n    v_ticket_capacity,\r\n    v_ticket_active,\r\n    v_ticket_status,\r\n\r\n    v_sales_start,\r\n    v_sales_end\r\n\r\n  from public.ticket_types tt\r\n\r\n  join public.events e\r\n    on e.id = tt.event_id\r\n\r\n  where tt.id = p_ticket_type_id\r\n    and tt.event_id = p_event_id\r\n\r\n  for update of tt;\r\n\r\n\r\n  if not found then\r\n    raise exception 'La tanda no existe para este evento';\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 5. Evento habilitado para vender\r\n  -- =======================================================\r\n\r\n  if v_event_status not in ('upcoming', 'active') then\r\n    raise exception 'Este evento no está habilitado para vender entradas';\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 6. Identificamos vendedor y rol\r\n  -- =======================================================\r\n\r\n  select\r\n    om.id,\r\n    om.role\r\n\r\n  into\r\n    v_seller_member_id,\r\n    v_seller_role\r\n\r\n  from public.organization_members om\r\n\r\n  where om.organization_id = v_organization_id\r\n    and om.user_id = auth.uid()\r\n    and om.status = 'active'\r\n\r\n  limit 1;\r\n\r\n\r\n  if v_seller_member_id is null then\r\n    raise exception 'No perteneces a la organización de este evento';\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 7. ORGANIZADOR\r\n  -- =======================================================\r\n\r\n  if v_seller_role = 'organizer' then\r\n\r\n    v_sale_channel := 'organizer';\r\n\r\n\r\n  -- =======================================================\r\n  -- 8. RRPP\r\n  -- =======================================================\r\n\r\n  elsif v_seller_role = 'rrpp' then\r\n\r\n    if not exists (\r\n      select 1\r\n      from public.event_staff es\r\n      where es.event_id = p_event_id\r\n        and es.organization_member_id = v_seller_member_id\r\n        and es.staff_role = 'rrpp'\r\n        and es.active = true\r\n    ) then\r\n\r\n      raise exception 'No estás asignado como RRPP a este evento';\r\n\r\n    end if;\r\n\r\n\r\n    if v_rrpp_sales_enabled = false then\r\n      raise exception 'Las ventas de RRPP están bloqueadas';\r\n    end if;\r\n\r\n\r\n    if v_rrpp_sales_cutoff_at is not null\r\n       and now() > v_rrpp_sales_cutoff_at then\r\n\r\n      raise exception 'Finalizó el horario de venta para RRPP';\r\n\r\n    end if;\r\n\r\n\r\n    v_sale_channel := 'rrpp';\r\n\r\n\r\n  -- =======================================================\r\n  -- 9. VENDEDOR DE PUERTA\r\n  -- =======================================================\r\n\r\n  elsif v_seller_role = 'door_seller' then\r\n\r\n    if not exists (\r\n      select 1\r\n      from public.event_staff es\r\n      where es.event_id = p_event_id\r\n        and es.organization_member_id = v_seller_member_id\r\n        and es.staff_role = 'door_seller'\r\n        and es.active = true\r\n    ) then\r\n\r\n      raise exception 'No estás asignado a la venta en puerta de este evento';\r\n\r\n    end if;\r\n\r\n\r\n    if v_event_status <> 'active' then\r\n      raise exception 'La venta en puerta sólo está disponible con el evento activo';\r\n    end if;\r\n\r\n\r\n    if v_door_sales_enabled = false then\r\n      raise exception 'La venta en puerta está deshabilitada';\r\n    end if;\r\n\r\n\r\n    if v_door_sales_start_at is not null\r\n       and now() < v_door_sales_start_at then\r\n\r\n      raise exception 'La venta en puerta todavía no comenzó';\r\n\r\n    end if;\r\n\r\n\r\n    if v_door_sales_end_at is not null\r\n       and now() > v_door_sales_end_at then\r\n\r\n      raise exception 'Finalizó el horario de venta en puerta';\r\n\r\n    end if;\r\n\r\n\r\n    v_sale_channel := 'door';\r\n\r\n\r\n  -- =======================================================\r\n  -- 10. CONTROLADOR u otro rol\r\n  -- =======================================================\r\n\r\n  else\r\n\r\n    raise exception 'Tu usuario no tiene permiso para registrar ventas';\r\n\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 11. Estado de la tanda\r\n  -- =======================================================\r\n\r\n  if v_ticket_active = false then\r\n    raise exception 'Esta tanda está deshabilitada';\r\n  end if;\r\n\r\n  if v_ticket_status = 'upcoming' then\r\n    raise exception 'Esta tanda todavía no está disponible';\r\n  end if;\r\n\r\n  if v_ticket_status = 'paused' then\r\n    raise exception 'La venta de esta tanda está pausada';\r\n  end if;\r\n\r\n  if v_ticket_status = 'sold_out' then\r\n    raise exception 'Esta tanda está agotada';\r\n  end if;\r\n\r\n  if v_ticket_status <> 'available' then\r\n    raise exception 'Esta tanda no está disponible';\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 12. Fechas propias de la tanda\r\n  -- =======================================================\r\n\r\n  if v_sales_start is not null\r\n     and now() < v_sales_start then\r\n    raise exception 'La venta de esta tanda todavía no comenzó';\r\n  end if;\r\n\r\n  if v_sales_end is not null\r\n     and now() > v_sales_end then\r\n    raise exception 'La venta de esta tanda ya finalizó';\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 13. Entradas vendidas\r\n  -- =======================================================\r\n\r\n  select count(*)::integer\r\n  into v_sold\r\n\r\n  from public.tickets t\r\n\r\n  where t.ticket_type_id = p_ticket_type_id\r\n    and t.status <> 'cancelled';\r\n\r\n\r\n  -- =======================================================\r\n  -- 14. Control de cupo\r\n  -- =======================================================\r\n\r\n  if v_sold + p_quantity > v_ticket_capacity then\r\n\r\n    raise exception\r\n      'No hay suficientes entradas disponibles. Disponibles: %',\r\n      v_ticket_capacity - v_sold;\r\n\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 15. Crear comprador\r\n  -- =======================================================\r\n\r\n  insert into public.buyers (\r\n    organization_id,\r\n    first_name,\r\n    last_name,\r\n    dni,\r\n    phone,\r\n    email\r\n  )\r\n\r\n  values (\r\n    v_organization_id,\r\n    btrim(p_buyer_first_name),\r\n    btrim(p_buyer_last_name),\r\n    btrim(p_buyer_dni),\r\n    btrim(p_buyer_phone),\r\n    nullif(btrim(p_buyer_email), '')\r\n  )\r\n\r\n  returning id\r\n  into v_buyer_id;\r\n\r\n\r\n  -- =======================================================\r\n  -- 16. Total\r\n  -- =======================================================\r\n\r\n  v_total :=\r\n    v_ticket_price * p_quantity::bigint;\r\n\r\n\r\n  -- =======================================================\r\n  -- 17. Crear venta\r\n  -- =======================================================\r\n\r\n  insert into public.sales (\r\n    organization_id,\r\n    event_id,\r\n    buyer_id,\r\n    seller_member_id,\r\n    status,\r\n    total_minor,\r\n    currency,\r\n    channel,\r\n    confirmed_at\r\n  )\r\n\r\n  values (\r\n    v_organization_id,\r\n    p_event_id,\r\n    v_buyer_id,\r\n    v_seller_member_id,\r\n    'confirmed',\r\n    v_total,\r\n    v_ticket_currency,\r\n    v_sale_channel,\r\n    now()\r\n  )\r\n\r\n  returning id\r\n  into v_sale_id;\r\n\r\n\r\n  -- =======================================================\r\n  -- 18. Detalle\r\n  -- =======================================================\r\n\r\n  insert into public.sale_items (\r\n    sale_id,\r\n    event_id,\r\n    ticket_type_id,\r\n    quantity,\r\n    unit_price_minor\r\n  )\r\n\r\n  values (\r\n    v_sale_id,\r\n    p_event_id,\r\n    p_ticket_type_id,\r\n    p_quantity,\r\n    v_ticket_price\r\n  )\r\n\r\n  returning id\r\n  into v_sale_item_id;\r\n\r\n\r\n  -- =======================================================\r\n  -- 19. Tickets individuales\r\n  -- =======================================================\r\n\r\n  insert into public.tickets (\r\n    sale_item_id,\r\n    sale_id,\r\n    event_id,\r\n    ticket_type_id,\r\n    status\r\n  )\r\n\r\n  select\r\n    v_sale_item_id,\r\n    v_sale_id,\r\n    p_event_id,\r\n    p_ticket_type_id,\r\n    'issued'\r\n\r\n  from generate_series(1, p_quantity);\r\n\r\n\r\n  -- =======================================================\r\n  -- 20. Agotamiento automático\r\n  -- =======================================================\r\n\r\n  if v_sold + p_quantity >= v_ticket_capacity then\r\n\r\n    update public.ticket_types\r\n\r\n    set\r\n      status = 'sold_out',\r\n      updated_at = now()\r\n\r\n    where id = p_ticket_type_id;\r\n\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 21. Auditoría\r\n  -- =======================================================\r\n\r\n  insert into public.audit_logs (\r\n    actor_user_id,\r\n    organization_id,\r\n    event_id,\r\n    action,\r\n    entity_type,\r\n    entity_id,\r\n    metadata\r\n  )\r\n\r\n  values (\r\n    auth.uid(),\r\n    v_organization_id,\r\n    p_event_id,\r\n    'SALE_CREATED',\r\n    'sale',\r\n    v_sale_id,\r\n\r\n    jsonb_build_object(\r\n      'quantity', p_quantity,\r\n      'ticket_type_id', p_ticket_type_id,\r\n      'total_minor', v_total,\r\n      'channel', v_sale_channel\r\n    )\r\n  );\r\n\r\n\r\n  -- =======================================================\r\n  -- 22. Resultado\r\n  -- =======================================================\r\n\r\n  return query\r\n  select\r\n    v_sale_id,\r\n    v_buyer_id,\r\n    v_total,\r\n    p_quantity;\r\n\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "seccion": "funciones_de_acceso",
+    "objeto": "is_active_org_member",
+    "detalle": {
+      "definicion": "CREATE OR REPLACE FUNCTION public.is_active_org_member(p_organization_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\r\n  select exists (\r\n    select 1\r\n    from public.organization_members\r\n    where organization_id = p_organization_id\r\n      and user_id = auth.uid()\r\n      and status = 'active'\r\n  );\r\n$function$\n"
+    }
+  },
+  {
+    "seccion": "funciones_de_acceso",
+    "objeto": "is_assigned_to_event",
+    "detalle": {
+      "definicion": "CREATE OR REPLACE FUNCTION public.is_assigned_to_event(p_event_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\r\n  select exists (\r\n    select 1\r\n    from public.event_staff es\r\n    join public.organization_members om\r\n      on om.id = es.organization_member_id\r\n    where es.event_id = p_event_id\r\n      and es.active = true\r\n      and om.user_id = auth.uid()\r\n      and om.status = 'active'\r\n  );\r\n$function$\n"
+    }
+  },
+  {
+    "seccion": "funciones_de_acceso",
+    "objeto": "is_event_organizer",
+    "detalle": {
+      "definicion": "CREATE OR REPLACE FUNCTION public.is_event_organizer(p_event_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\r\n  select exists (\r\n    select 1\r\n    from public.events e\r\n    join public.organization_members om\r\n      on om.organization_id = e.organization_id\r\n    where e.id = p_event_id\r\n      and om.user_id = auth.uid()\r\n      and om.role = 'organizer'\r\n      and om.status = 'active'\r\n  );\r\n$function$\n"
+    }
+  },
+  {
+    "seccion": "funciones_de_acceso",
+    "objeto": "is_org_organizer",
+    "detalle": {
+      "definicion": "CREATE OR REPLACE FUNCTION public.is_org_organizer(p_organization_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\r\n  select exists (\r\n    select 1\r\n    from public.organization_members\r\n    where organization_id = p_organization_id\r\n      and user_id = auth.uid()\r\n      and status = 'active'\r\n      and role = 'organizer'\r\n  );\r\n$function$\n"
+    }
+  },
+  {
+    "seccion": "funciones_de_acceso",
+    "objeto": "is_own_membership",
+    "detalle": {
+      "definicion": "CREATE OR REPLACE FUNCTION public.is_own_membership(p_member_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\r\n  select exists (\r\n    select 1\r\n    from public.organization_members om\r\n    where om.id = p_member_id\r\n      and om.user_id = auth.uid()\r\n      and om.status = 'active'\r\n  );\r\n$function$\n"
+    }
+  },
+  {
+    "seccion": "funciones_de_acceso",
+    "objeto": "is_sale_seller",
+    "detalle": {
+      "definicion": "CREATE OR REPLACE FUNCTION public.is_sale_seller(p_sale_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\r\n  select exists (\r\n    select 1\r\n    from public.sales s\r\n    join public.organization_members om\r\n      on om.id = s.seller_member_id\r\n    where s.id = p_sale_id\r\n      and om.user_id = auth.uid()\r\n      and om.status = 'active'\r\n  );\r\n$function$\n"
+    }
+  },
+  {
+    "seccion": "funciones_de_acceso",
+    "objeto": "shares_organization_with",
+    "detalle": {
+      "definicion": "CREATE OR REPLACE FUNCTION public.shares_organization_with(p_user_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\r\n  select exists (\r\n    select 1\r\n    from public.organization_members me\r\n    join public.organization_members other_member\r\n      on other_member.organization_id = me.organization_id\r\n    where me.user_id = auth.uid()\r\n      and me.status = 'active'\r\n      and other_member.user_id = p_user_id\r\n      and other_member.status = 'active'\r\n  );\r\n$function$\n"
+    }
+  },
+  {
+    "seccion": "funciones_de_acceso",
+    "objeto": "validate_event_staff_organization",
+    "detalle": {
+      "definicion": "CREATE OR REPLACE FUNCTION public.validate_event_staff_organization()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\r\ndeclare\r\n  event_org uuid;\r\n  member_org uuid;\r\nbegin\r\n\r\n  select organization_id\r\n  into event_org\r\n  from public.events\r\n  where id = new.event_id;\r\n\r\n  select organization_id\r\n  into member_org\r\n  from public.organization_members\r\n  where id = new.organization_member_id;\r\n\r\n  if event_org is null then\r\n    raise exception 'Evento inexistente';\r\n  end if;\r\n\r\n  if member_org is null then\r\n    raise exception 'Miembro inexistente';\r\n  end if;\r\n\r\n  if event_org <> member_org then\r\n    raise exception\r\n      'El miembro y el evento pertenecen a organizaciones diferentes';\r\n  end if;\r\n\r\n  return new;\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "seccion": "funciones_de_acceso",
+    "objeto": "validate_ticket_manual",
+    "detalle": {
+      "definicion": "CREATE OR REPLACE FUNCTION public.validate_ticket_manual(p_event_id uuid, p_manual_code text)\n RETURNS TABLE(result text, ticket_id uuid, buyer_name text, buyer_dni text, ticket_type text, validated_at timestamp with time zone)\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\r\ndeclare\r\n\r\n  v_event_status public.event_status;\r\n\r\n  v_actor_member_id uuid;\r\n\r\n  v_ticket_id uuid;\r\n  v_ticket_status public.ticket_status;\r\n  v_used_at timestamptz;\r\n\r\n  v_buyer_name text;\r\n  v_buyer_dni text;\r\n  v_ticket_type text;\r\n\r\n  v_code text;\r\n\r\nbegin\r\n\r\n  -- =======================================================\r\n  -- 1. Debe haber usuario autenticado\r\n  -- =======================================================\r\n\r\n  if auth.uid() is null then\r\n    raise exception 'Debes iniciar sesión para validar entradas';\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 2. Normalizamos el código\r\n  -- =======================================================\r\n\r\n  v_code := upper(btrim(p_manual_code));\r\n\r\n  if v_code = '' then\r\n    raise exception 'Debes ingresar un código de validación';\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 3. Comprobamos que el evento exista\r\n  -- =======================================================\r\n\r\n  select e.status\r\n  into v_event_status\r\n  from public.events e\r\n  where e.id = p_event_id;\r\n\r\n\r\n  if not found then\r\n    raise exception 'El evento no existe';\r\n  end if;\r\n\r\n\r\n  -- Para el ingreso real el evento debe estar ACTIVO\r\n  if v_event_status <> 'active' then\r\n    raise exception 'El evento no está habilitado para control de ingreso';\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 4. Identificamos al usuario dentro de la organización\r\n  -- =======================================================\r\n\r\n  select om.id\r\n  into v_actor_member_id\r\n  from public.organization_members om\r\n  join public.events e\r\n    on e.organization_id = om.organization_id\r\n  where e.id = p_event_id\r\n    and om.user_id = auth.uid()\r\n    and om.status = 'active'\r\n  limit 1;\r\n\r\n\r\n  -- =======================================================\r\n  -- 5. Permisos\r\n  --\r\n  -- Puede validar:\r\n  -- ADMIN CAPITAL PASS\r\n  -- ORGANIZADOR del evento\r\n  -- CONTROLADOR asignado al evento\r\n  -- =======================================================\r\n\r\n  if not (\r\n    public.is_platform_admin()\r\n\r\n    or public.is_event_organizer(p_event_id)\r\n\r\n    or exists (\r\n      select 1\r\n      from public.event_staff es\r\n      join public.organization_members om\r\n        on om.id = es.organization_member_id\r\n      where es.event_id = p_event_id\r\n        and es.staff_role = 'controller'\r\n        and es.active = true\r\n        and om.user_id = auth.uid()\r\n        and om.status = 'active'\r\n    )\r\n  ) then\r\n\r\n    raise exception\r\n      'No tienes permiso para controlar ingresos en este evento';\r\n\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 6. Buscamos la entrada y BLOQUEAMOS esa fila\r\n  --\r\n  -- Esto impide que dos celulares validen\r\n  -- la misma entrada simultáneamente.\r\n  -- =======================================================\r\n\r\n  select\r\n    t.id,\r\n    t.status,\r\n    t.used_at,\r\n\r\n    b.first_name || ' ' || b.last_name,\r\n    b.dni,\r\n    tt.name\r\n\r\n  into\r\n    v_ticket_id,\r\n    v_ticket_status,\r\n    v_used_at,\r\n\r\n    v_buyer_name,\r\n    v_buyer_dni,\r\n    v_ticket_type\r\n\r\n  from public.tickets t\r\n\r\n  join public.sales s\r\n    on s.id = t.sale_id\r\n\r\n  join public.buyers b\r\n    on b.id = s.buyer_id\r\n\r\n  join public.ticket_types tt\r\n    on tt.id = t.ticket_type_id\r\n\r\n  where t.event_id = p_event_id\r\n    and upper(t.manual_code) = v_code\r\n\r\n  for update of t;\r\n\r\n\r\n  -- =======================================================\r\n  -- 7. Código inexistente\r\n  -- =======================================================\r\n\r\n  if not found then\r\n\r\n    insert into public.entry_scans (\r\n      event_id,\r\n      ticket_id,\r\n      controller_member_id,\r\n      method,\r\n      result\r\n    )\r\n    values (\r\n      p_event_id,\r\n      null,\r\n      v_actor_member_id,\r\n      'manual',\r\n      'invalid'\r\n    );\r\n\r\n\r\n    return query\r\n    select\r\n      'invalid'::text,\r\n      null::uuid,\r\n      null::text,\r\n      null::text,\r\n      null::text,\r\n      null::timestamptz;\r\n\r\n    return;\r\n\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 8. Entrada anulada\r\n  -- =======================================================\r\n\r\n  if v_ticket_status = 'cancelled' then\r\n\r\n    insert into public.entry_scans (\r\n      event_id,\r\n      ticket_id,\r\n      controller_member_id,\r\n      method,\r\n      result\r\n    )\r\n    values (\r\n      p_event_id,\r\n      v_ticket_id,\r\n      v_actor_member_id,\r\n      'manual',\r\n      'cancelled'\r\n    );\r\n\r\n\r\n    return query\r\n    select\r\n      'cancelled'::text,\r\n      v_ticket_id,\r\n      v_buyer_name,\r\n      v_buyer_dni,\r\n      v_ticket_type,\r\n      null::timestamptz;\r\n\r\n    return;\r\n\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 9. Entrada ya utilizada\r\n  -- =======================================================\r\n\r\n  if v_ticket_status = 'used' then\r\n\r\n    insert into public.entry_scans (\r\n      event_id,\r\n      ticket_id,\r\n      controller_member_id,\r\n      method,\r\n      result\r\n    )\r\n    values (\r\n      p_event_id,\r\n      v_ticket_id,\r\n      v_actor_member_id,\r\n      'manual',\r\n      'already_used'\r\n    );\r\n\r\n\r\n    return query\r\n    select\r\n      'already_used'::text,\r\n      v_ticket_id,\r\n      v_buyer_name,\r\n      v_buyer_dni,\r\n      v_ticket_type,\r\n      v_used_at;\r\n\r\n    return;\r\n\r\n  end if;\r\n\r\n\r\n  -- =======================================================\r\n  -- 10. Entrada válida\r\n  -- La marcamos como USED\r\n  -- =======================================================\r\n\r\n  update public.tickets\r\n  set\r\n    status = 'used',\r\n    used_at = now(),\r\n    updated_at = now()\r\n  where id = v_ticket_id\r\n  returning used_at\r\n  into v_used_at;\r\n\r\n\r\n  -- =======================================================\r\n  -- 11. Registramos el ingreso\r\n  -- =======================================================\r\n\r\n  insert into public.entry_scans (\r\n    event_id,\r\n    ticket_id,\r\n    controller_member_id,\r\n    method,\r\n    result\r\n  )\r\n  values (\r\n    p_event_id,\r\n    v_ticket_id,\r\n    v_actor_member_id,\r\n    'manual',\r\n    'valid'\r\n  );\r\n\r\n\r\n  -- =======================================================\r\n  -- 12. Resultado\r\n  -- =======================================================\r\n\r\n  return query\r\n  select\r\n    'valid'::text,\r\n    v_ticket_id,\r\n    v_buyer_name,\r\n    v_buyer_dni,\r\n    v_ticket_type,\r\n    v_used_at;\r\n\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "seccion": "politicas",
+    "objeto": "organization_members",
+    "detalle": {
+      "politicas": [
+        {
+          "tipo": "PERMISSIVE",
+          "check": null,
+          "roles": [
+            "authenticated"
+          ],
+          "using": "((user_id = auth.uid()) OR is_platform_admin() OR is_org_organizer(organization_id))",
+          "nombre": "organization_members_select",
+          "comando": "SELECT"
+        }
+      ],
+      "rls_activo": true
+    }
+  },
+  {
+    "seccion": "politicas",
+    "objeto": "organization_subscriptions",
+    "detalle": {
+      "politicas": [
+        {
+          "tipo": "PERMISSIVE",
+          "check": null,
+          "roles": [
+            "authenticated"
+          ],
+          "using": "(EXISTS ( SELECT 1\n   FROM organization_members om\n  WHERE ((om.organization_id = organization_subscriptions.organization_id) AND (om.user_id = auth.uid()) AND (om.role = 'organizer'::organization_member_role) AND (om.status = 'active'::membership_status))))",
+          "nombre": "organizers can view own subscription",
+          "comando": "SELECT"
+        }
+      ],
+      "rls_activo": true
+    }
+  },
+  {
+    "seccion": "politicas",
+    "objeto": "organizations",
+    "detalle": {
+      "politicas": [
+        {
+          "tipo": "PERMISSIVE",
+          "check": null,
+          "roles": [
+            "authenticated"
+          ],
+          "using": "(is_platform_admin() OR is_active_org_member(id))",
+          "nombre": "organizations_select",
+          "comando": "SELECT"
+        }
+      ],
+      "rls_activo": true
+    }
+  },
+  {
+    "seccion": "politicas",
+    "objeto": "platform_admins",
+    "detalle": {
+      "politicas": [
+        {
+          "tipo": "PERMISSIVE",
+          "check": null,
+          "roles": [
+            "authenticated"
+          ],
+          "using": "is_platform_admin()",
+          "nombre": "platform_admins_select",
+          "comando": "SELECT"
+        }
+      ],
+      "rls_activo": true
+    }
+  },
+  {
+    "seccion": "politicas",
+    "objeto": "profiles",
+    "detalle": {
+      "politicas": [
+        {
+          "tipo": "PERMISSIVE",
+          "check": null,
+          "roles": [
+            "authenticated"
+          ],
+          "using": "((id = auth.uid()) OR is_platform_admin() OR can_view_member_profile(id))",
+          "nombre": "profiles_select",
+          "comando": "SELECT"
+        },
+        {
+          "tipo": "PERMISSIVE",
+          "check": "(id = auth.uid())",
+          "roles": [
+            "authenticated"
+          ],
+          "using": "(id = auth.uid())",
+          "nombre": "profiles_update_own",
+          "comando": "UPDATE"
+        }
+      ],
+      "rls_activo": true
+    }
+  },
+  {
+    "seccion": "politicas",
+    "objeto": "subscription_plans",
+    "detalle": {
+      "politicas": [
+        {
+          "tipo": "PERMISSIVE",
+          "check": null,
+          "roles": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "(active = true)",
+          "nombre": "public can view active subscription plans",
+          "comando": "SELECT"
+        }
+      ],
+      "rls_activo": true
+    }
+  },
+  {
+    "seccion": "politicas",
+    "objeto": "subscription_signups",
+    "detalle": {
+      "politicas": [],
+      "rls_activo": true
+    }
+  },
+  {
+    "seccion": "restricciones",
+    "objeto": "organization_members",
+    "detalle": [
+      {
+        "nombre": "organization_members_id_organization_unique",
+        "definicion": "UNIQUE (id, organization_id)"
+      },
+      {
+        "nombre": "organization_members_organization_id_fkey",
+        "definicion": "FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE"
+      },
+      {
+        "nombre": "organization_members_pkey",
+        "definicion": "PRIMARY KEY (id)"
+      },
+      {
+        "nombre": "organization_members_unique_user",
+        "definicion": "UNIQUE (organization_id, user_id)"
+      },
+      {
+        "nombre": "organization_members_user_id_fkey",
+        "definicion": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE"
+      }
+    ]
+  },
+  {
+    "seccion": "restricciones",
+    "objeto": "organization_subscriptions",
+    "detalle": [
+      {
+        "nombre": "organization_subscriptions_organization_id_fkey",
+        "definicion": "FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE"
+      },
+      {
+        "nombre": "organization_subscriptions_pkey",
+        "definicion": "PRIMARY KEY (id)"
+      },
+      {
+        "nombre": "organization_subscriptions_plan_id_fkey",
+        "definicion": "FOREIGN KEY (plan_id) REFERENCES subscription_plans(id) ON DELETE RESTRICT"
+      },
+      {
+        "nombre": "organization_subscriptions_signup_id_fkey",
+        "definicion": "FOREIGN KEY (signup_id) REFERENCES subscription_signups(id) ON DELETE SET NULL"
+      },
+      {
+        "nombre": "organization_subscriptions_status_check",
+        "definicion": "CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'paused'::text, 'payment_required'::text, 'cancelled'::text, 'expired'::text])))"
+      }
+    ]
+  },
+  {
+    "seccion": "restricciones",
+    "objeto": "organizations",
+    "detalle": [
+      {
+        "nombre": "organizations_pkey",
+        "definicion": "PRIMARY KEY (id)"
+      },
+      {
+        "nombre": "organizations_slug_key",
+        "definicion": "UNIQUE (slug)"
+      }
+    ]
+  },
+  {
+    "seccion": "restricciones",
+    "objeto": "platform_admins",
+    "detalle": [
+      {
+        "nombre": "platform_admins_pkey",
+        "definicion": "PRIMARY KEY (user_id)"
+      },
+      {
+        "nombre": "platform_admins_user_id_fkey",
+        "definicion": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE"
+      }
+    ]
+  },
+  {
+    "seccion": "restricciones",
+    "objeto": "profiles",
+    "detalle": [
+      {
+        "nombre": "profiles_id_fkey",
+        "definicion": "FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE"
+      },
+      {
+        "nombre": "profiles_pkey",
+        "definicion": "PRIMARY KEY (id)"
+      }
+    ]
+  },
+  {
+    "seccion": "restricciones",
+    "objeto": "subscription_plans",
+    "detalle": [
+      {
+        "nombre": "subscription_plans_billing_interval_check",
+        "definicion": "CHECK ((billing_interval = ANY (ARRAY['monthly'::text, 'yearly'::text])))"
+      },
+      {
+        "nombre": "subscription_plans_code_key",
+        "definicion": "UNIQUE (code)"
+      },
+      {
+        "nombre": "subscription_plans_pkey",
+        "definicion": "PRIMARY KEY (id)"
+      },
+      {
+        "nombre": "subscription_plans_price_minor_check",
+        "definicion": "CHECK ((price_minor >= 0))"
+      }
+    ]
+  },
+  {
+    "seccion": "restricciones",
+    "objeto": "subscription_signups",
+    "detalle": [
+      {
+        "nombre": "subscription_signups_pkey",
+        "definicion": "PRIMARY KEY (id)"
+      },
+      {
+        "nombre": "subscription_signups_plan_id_fkey",
+        "definicion": "FOREIGN KEY (plan_id) REFERENCES subscription_plans(id) ON DELETE RESTRICT"
+      },
+      {
+        "nombre": "subscription_signups_status_check",
+        "definicion": "CHECK ((status = ANY (ARRAY['pending'::text, 'payment_pending'::text, 'approved'::text, 'account_created'::text, 'rejected'::text, 'cancelled'::text, 'expired'::text])))"
+      }
+    ]
+  },
+  {
+    "seccion": "tipos_enum",
+    "objeto": "event_staff_role",
+    "detalle": [
+      "rrpp",
+      "controller",
+      "door_seller"
+    ]
+  },
+  {
+    "seccion": "tipos_enum",
+    "objeto": "event_status",
+    "detalle": [
+      "draft",
+      "upcoming",
+      "active",
+      "finished",
+      "cancelled"
+    ]
+  },
+  {
+    "seccion": "tipos_enum",
+    "objeto": "membership_status",
+    "detalle": [
+      "active",
+      "disabled"
+    ]
+  },
+  {
+    "seccion": "tipos_enum",
+    "objeto": "organization_member_role",
+    "detalle": [
+      "organizer",
+      "rrpp",
+      "controller",
+      "door_seller"
+    ]
+  },
+  {
+    "seccion": "tipos_enum",
+    "objeto": "sale_channel",
+    "detalle": [
+      "organizer",
+      "rrpp",
+      "door"
+    ]
+  },
+  {
+    "seccion": "tipos_enum",
+    "objeto": "sale_status",
+    "detalle": [
+      "confirmed",
+      "pending_approval",
+      "cancelled"
+    ]
+  },
+  {
+    "seccion": "tipos_enum",
+    "objeto": "scan_method",
+    "detalle": [
+      "qr",
+      "manual"
+    ]
+  },
+  {
+    "seccion": "tipos_enum",
+    "objeto": "scan_result",
+    "detalle": [
+      "valid",
+      "already_used",
+      "cancelled",
+      "invalid"
+    ]
+  },
+  {
+    "seccion": "tipos_enum",
+    "objeto": "ticket_status",
+    "detalle": [
+      "issued",
+      "used",
+      "cancelled"
+    ]
+  },
+  {
+    "seccion": "tipos_enum",
+    "objeto": "ticket_type_status",
+    "detalle": [
+      "upcoming",
+      "available",
+      "sold_out",
+      "paused"
+    ]
+  }
+]

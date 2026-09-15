@@ -1,0 +1,804 @@
+"use client";
+
+import Link from "next/link";
+
+import {
+  FormEvent,
+  useState,
+} from "react";
+
+type Seller = {
+  memberId: string;
+  firstName: string;
+  lastName: string;
+  active: boolean;
+};
+
+type Props = {
+  event: {
+    id: string;
+    name: string;
+    doorSalesEnabled: boolean;
+    doorSalesStartAt: string | null;
+    doorSalesEndAt: string | null;
+  };
+
+  organizationName: string;
+
+  sellers: Seller[];
+};
+
+export default function PuertaPanelClient({
+  event,
+  organizationName,
+  sellers,
+}: Props) {
+  const [modalOpen, setModalOpen] =
+    useState(false);
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [changingId, setChangingId] =
+    useState<string | null>(null);
+
+  const [error, setError] =
+    useState("");
+
+  const [firstName, setFirstName] =
+    useState("");
+
+  const [lastName, setLastName] =
+    useState("");
+
+  const [email, setEmail] =
+    useState("");
+
+  const [phone, setPhone] =
+    useState("");
+
+  const [password, setPassword] =
+    useState("");
+
+  // =====================================================
+  // CREAR VENDEDOR
+  // =====================================================
+
+  async function createSeller(
+    e: FormEvent<HTMLFormElement>
+  ) {
+    e.preventDefault();
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/vendedores-puerta",
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body: JSON.stringify({
+              eventId: event.id,
+              firstName,
+              lastName,
+              email,
+              phone,
+              password,
+            }),
+          }
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.error ??
+            "No se pudo crear el vendedor."
+        );
+      }
+
+      window.location.reload();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo crear el vendedor."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // =====================================================
+  // ACTIVAR / PAUSAR
+  // =====================================================
+
+  async function toggleSeller(
+    memberId: string,
+    active: boolean
+  ) {
+    setChangingId(memberId);
+    setError("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/vendedores-puerta",
+          {
+            method: "PATCH",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body: JSON.stringify({
+              eventId: event.id,
+              memberId,
+              active,
+            }),
+          }
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.error ??
+            "No se pudo actualizar el vendedor."
+        );
+      }
+
+      window.location.reload();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo actualizar el vendedor."
+      );
+    } finally {
+      setChangingId(null);
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-[#07050a] text-white">
+      <div className="flex min-h-screen">
+
+        {/* =====================================================
+            SIDEBAR
+        ===================================================== */}
+
+        <aside className="hidden w-[255px] shrink-0 border-r border-white/[0.07] bg-[#0b0710] lg:flex lg:flex-col">
+
+          <div className="border-b border-white/[0.07] px-6 py-6">
+
+            <Link
+              href="/panel"
+              className="flex items-center gap-3"
+            >
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-purple-400/30 bg-gradient-to-br from-violet-600/50 to-fuchsia-600/20 font-black">
+                CP
+              </div>
+
+              <div>
+                <p className="font-semibold">
+                  Capital Pass
+                </p>
+
+                <p className="text-xs text-white/30">
+                  Event Management
+                </p>
+              </div>
+            </Link>
+
+          </div>
+
+          <nav className="flex-1 space-y-1.5 px-3 py-5">
+
+            <Menu
+              href="/panel"
+              label="Inicio"
+            />
+
+            <Menu
+              href="/panel/evento"
+              label="Mis eventos"
+            />
+
+            <Menu
+              href="/panel/rrpps"
+              label="RRPPs"
+            />
+
+            <Menu
+              href="/panel?section=ventas"
+              label="Ventas"
+            />
+
+            <Menu
+              href="/panel/puerta"
+              label="Venta en puerta"
+              active
+            />
+
+            <Menu
+              href="/panel?section=ingresos"
+              label="Ingresos"
+            />
+
+            <Menu
+              href="/panel?section=notificaciones"
+              label="Notificaciones"
+            />
+
+            <Menu
+              href="/panel/informes"
+              label="Informes"
+            />
+
+          </nav>
+
+          <div className="border-t border-white/[0.07] p-4">
+
+            <div className="rounded-2xl border border-white/[0.07] bg-white/[0.035] p-4">
+
+              <p className="text-sm font-medium">
+                {organizationName}
+              </p>
+
+              <p className="mt-1 text-xs text-white/30">
+                Organizador
+              </p>
+
+            </div>
+
+          </div>
+
+        </aside>
+
+        {/* =====================================================
+            CONTENIDO
+        ===================================================== */}
+
+        <section className="min-w-0 flex-1">
+
+          {/* HEADER */}
+
+          <header className="flex min-h-[78px] items-center border-b border-white/[0.07] px-5 md:px-8">
+
+            <div>
+
+              <p className="text-xs uppercase tracking-[0.18em] text-purple-400">
+                Boletería
+              </p>
+
+              <h1 className="mt-1 text-lg font-medium">
+                Venta en puerta ·{" "}
+                {event.name}
+              </h1>
+
+            </div>
+
+          </header>
+
+          <div className="mx-auto max-w-[1400px] px-5 py-7 md:px-8">
+
+            {/* =====================================================
+                ENCABEZADO
+            ===================================================== */}
+
+            <div className="flex flex-col justify-between gap-5 md:flex-row md:items-end">
+
+              <div>
+
+                <p className="text-sm text-white/35">
+                  Gestión de boletería
+                </p>
+
+                <h2 className="mt-2 text-3xl font-semibold">
+                  Venta en puerta
+                </h2>
+
+                <p className="mt-2 text-sm text-white/35">
+                  Administrá quién puede
+                  vender entradas en la
+                  puerta del evento.
+                </p>
+
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setModalOpen(true)
+                }
+                className="rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-5 py-3 text-sm font-semibold"
+              >
+                + Agregar vendedor
+              </button>
+
+            </div>
+
+            {/* ERROR */}
+
+            {error && (
+              <div className="mt-5 rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                {error}
+              </div>
+            )}
+
+            {/* =====================================================
+                ESTADO DE BOLETERÍA
+            ===================================================== */}
+
+            <section className="mt-7 rounded-[26px] border border-white/[0.07] bg-[#0d0912] p-6">
+
+              <div className="flex flex-col justify-between gap-5 md:flex-row md:items-center">
+
+                <div>
+
+                  <p className="text-xs uppercase tracking-[0.15em] text-white/30">
+                    Estado de boletería
+                  </p>
+
+                  <div className="mt-3 flex items-center gap-3">
+
+                    <span
+                      className={`h-3 w-3 rounded-full ${
+                        event.doorSalesEnabled
+                          ? "bg-emerald-400"
+                          : "bg-red-400"
+                      }`}
+                    />
+
+                    <p className="text-xl font-semibold">
+                      {event.doorSalesEnabled
+                        ? "Venta en puerta habilitada"
+                        : "Venta en puerta deshabilitada"}
+                    </p>
+
+                  </div>
+
+                  <p className="mt-3 text-sm text-white/35">
+                    {formatWindow(
+                      event.doorSalesStartAt,
+                      event.doorSalesEndAt
+                    )}
+                  </p>
+
+                </div>
+
+                <Link
+                  href="/panel/evento"
+                  className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white/60"
+                >
+                  Configurar horarios
+                </Link>
+
+              </div>
+
+            </section>
+
+            {/* =====================================================
+                MÉTRICAS
+            ===================================================== */}
+
+            <section className="mt-5 grid gap-4 sm:grid-cols-2">
+
+              <Metric
+                title="Vendedores asignados"
+                value={String(
+                  sellers.length
+                )}
+              />
+
+              <Metric
+                title="Vendedores activos"
+                value={String(
+                  sellers.filter(
+                    (seller) =>
+                      seller.active
+                  ).length
+                )}
+                accent
+              />
+
+            </section>
+
+            {/* =====================================================
+                VENDEDORES
+            ===================================================== */}
+
+            <section className="mt-5 overflow-hidden rounded-[26px] border border-white/[0.07] bg-[#0d0912]">
+
+              <div className="border-b border-white/[0.07] px-6 py-5">
+
+                <h3 className="font-semibold">
+                  Vendedores de puerta
+                </h3>
+
+                <p className="mt-1 text-xs text-white/30">
+                  Personal habilitado para
+                  registrar ventas en boletería.
+                </p>
+
+              </div>
+
+              {sellers.length ===
+              0 ? (
+
+                <div className="p-7 text-sm text-white/35">
+                  Todavía no agregaste
+                  vendedores de puerta.
+                </div>
+
+              ) : (
+
+                <div className="divide-y divide-white/[0.07]">
+
+                  {sellers.map(
+                    (seller) => (
+
+                      <div
+                        key={
+                          seller.memberId
+                        }
+                        className="flex items-center justify-between gap-4 px-6 py-5"
+                      >
+
+                        <div>
+
+                          <p className="text-sm font-medium">
+                            {
+                              seller.firstName
+                            }{" "}
+                            {
+                              seller.lastName
+                            }
+                          </p>
+
+                          <div className="mt-2 flex items-center gap-2">
+
+                            <span
+                              className={`h-2 w-2 rounded-full ${
+                                seller.active
+                                  ? "bg-emerald-400"
+                                  : "bg-orange-400"
+                              }`}
+                            />
+
+                            <span className="text-xs text-white/35">
+                              {seller.active
+                                ? "Activo"
+                                : "Pausado"}
+                            </span>
+
+                          </div>
+
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={
+                            changingId ===
+                            seller.memberId
+                          }
+                          onClick={() =>
+                            toggleSeller(
+                              seller.memberId,
+                              !seller.active
+                            )
+                          }
+                          className={`rounded-xl border px-3 py-2 text-xs ${
+                            seller.active
+                              ? "border-orange-400/20 bg-orange-400/10 text-orange-400"
+                              : "border-emerald-400/20 bg-emerald-400/10 text-emerald-400"
+                          }`}
+                        >
+                          {changingId ===
+                          seller.memberId
+                            ? "..."
+                            : seller.active
+                              ? "Pausar"
+                              : "Activar"}
+                        </button>
+
+                      </div>
+
+                    )
+                  )}
+
+                </div>
+
+              )}
+
+            </section>
+
+          </div>
+
+        </section>
+
+      </div>
+
+      {/* =====================================================
+          MODAL NUEVO VENDEDOR
+      ===================================================== */}
+
+      {modalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 px-5 backdrop-blur-sm">
+
+          <div className="w-full max-w-lg rounded-[28px] border border-white/10 bg-[#0d0912] p-6">
+
+            <div className="flex items-start justify-between">
+
+              <div>
+
+                <p className="text-xs uppercase tracking-[0.18em] text-purple-400">
+                  Capital Pass
+                </p>
+
+                <h2 className="mt-2 text-2xl font-semibold">
+                  Nuevo vendedor
+                </h2>
+
+                <p className="mt-2 text-sm text-white/35">
+                  Tendrá acceso al panel de
+                  venta en puerta de{" "}
+                  {event.name}.
+                </p>
+
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setModalOpen(false)
+                }
+                className="h-9 w-9 rounded-full border border-white/10 bg-white/5"
+              >
+                ×
+              </button>
+
+            </div>
+
+            <form
+              onSubmit={createSeller}
+              className="mt-6 space-y-4"
+            >
+
+              <div className="grid gap-4 sm:grid-cols-2">
+
+                <Field
+                  label="Nombre"
+                  value={firstName}
+                  onChange={setFirstName}
+                  required
+                />
+
+                <Field
+                  label="Apellido"
+                  value={lastName}
+                  onChange={setLastName}
+                  required
+                />
+
+              </div>
+
+              <Field
+                label="Email"
+                type="email"
+                value={email}
+                onChange={setEmail}
+                required
+              />
+
+              <Field
+                label="Teléfono"
+                value={phone}
+                onChange={setPhone}
+                placeholder="Opcional"
+              />
+
+              <Field
+                label="Contraseña inicial"
+                type="password"
+                value={password}
+                onChange={setPassword}
+                required
+              />
+
+              {error && (
+                <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                  {error}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="h-14 w-full rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-500 font-semibold disabled:opacity-40"
+              >
+                {loading
+                  ? "Creando..."
+                  : "Crear vendedor"}
+              </button>
+
+            </form>
+
+          </div>
+
+        </div>
+      )}
+
+    </main>
+  );
+}
+
+// =====================================================
+// MENU
+// =====================================================
+
+function Menu({
+  href,
+  label,
+  active = false,
+}: {
+  href: string;
+  label: string;
+  active?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${
+        active
+          ? "border-purple-400/20 bg-purple-500/10"
+          : "border-transparent text-white/35 hover:bg-white/[0.035]"
+      }`}
+    >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          active
+            ? "bg-purple-400"
+            : "bg-white/20"
+        }`}
+      />
+
+      {label}
+    </Link>
+  );
+}
+
+// =====================================================
+// METRIC
+// =====================================================
+
+function Metric({
+  title,
+  value,
+  accent = false,
+}: {
+  title: string;
+  value: string;
+  accent?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-[22px] border p-5 ${
+        accent
+          ? "border-purple-400/20 bg-purple-500/[0.08]"
+          : "border-white/[0.07] bg-[#0d0912]"
+      }`}
+    >
+      <p className="text-xs uppercase tracking-[0.12em] text-white/30">
+        {title}
+      </p>
+
+      <p className="mt-5 text-3xl font-semibold">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+// =====================================================
+// FIELD
+// =====================================================
+
+function Field({
+  label,
+  type = "text",
+  value,
+  onChange,
+  placeholder,
+  required = false,
+}: {
+  label: string;
+  type?: string;
+  value: string;
+  onChange: (
+    value: string
+  ) => void;
+  placeholder?: string;
+  required?: boolean;
+}) {
+  return (
+    <label className="block">
+
+      <span className="text-xs text-white/35">
+        {label}
+      </span>
+
+      <input
+        type={type}
+        value={value}
+        required={required}
+        placeholder={placeholder}
+        onChange={(e) =>
+          onChange(
+            e.target.value
+          )
+        }
+        className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-white/[0.035] px-4 text-sm outline-none focus:border-purple-400/50"
+      />
+
+    </label>
+  );
+}
+
+// =====================================================
+// HORARIOS
+// =====================================================
+
+function formatWindow(
+  start: string | null,
+  end: string | null
+) {
+  if (!start && !end) {
+    return "Sin horario específico configurado.";
+  }
+
+  const format = (
+    value: string
+  ) =>
+    new Intl.DateTimeFormat(
+      "es-AR",
+      {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+
+        timeZone:
+          "America/Argentina/Buenos_Aires",
+      }
+    ).format(
+      new Date(value)
+    );
+
+  if (start && end) {
+    return `${format(
+      start
+    )} → ${format(end)}`;
+  }
+
+  if (start) {
+    return `Habilitada desde ${format(
+      start
+    )}`;
+  }
+
+  return `Disponible hasta ${format(
+    end!
+  )}`;
+}
