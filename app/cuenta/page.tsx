@@ -18,7 +18,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
       .select("id, name, price_minor, currency, billing_interval").eq("active", true).order("price_minor");
     if (error) throw new Error("No se pudieron consultar los planes.");
     return { account, plans: plans ?? [] };
-  })().catch(() => null);
+  })().catch((e) => { console.error("CUENTA DEBUG:", e instanceof Error ? e.message : e); return null; });
   if (!loaded) {
     return <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#050505] px-5 py-12 text-white">
       <div className="pointer-events-none absolute inset-0">
