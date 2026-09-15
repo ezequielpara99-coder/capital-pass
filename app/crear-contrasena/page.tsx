@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createRecoveryClient } from "../../lib/supabase/client";
 
+export const dynamic = "force-dynamic";
+
 export default function CreatePasswordPage() {
   const router = useRouter();
   const [supabase] = useState(() => createRecoveryClient());

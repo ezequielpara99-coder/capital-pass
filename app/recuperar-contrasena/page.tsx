@@ -14,6 +14,8 @@ import { createRecoveryClient } from "../../lib/supabase/client";
 // RECUPERAR CONTRASEÑA
 // ============================================================
 
+export const dynamic = "force-dynamic";
+
 export default function RecoverPasswordPage() {
   const supabase =
     useMemo(
