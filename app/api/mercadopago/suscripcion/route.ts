@@ -59,8 +59,8 @@ export async function POST(request: NextRequest) {
     }).eq("id", signup.id);
     if (saved.error) throw new Error("No se pudo guardar el intento de pago.");
     return NextResponse.json({ ok: true, checkoutUrl });
-  } catch (e) {
-    console.error("BILLING DEBUG:", e instanceof Error ? e.message : e);
+  } catch {
+    console.error("BILLING: no se pudo preparar o verificar el checkout.");
     return NextResponse.json({ ok: false, error: "No pudimos verificar la suscripcion. Si ya pagaste, no vuelvas a pagar: reintenta Verificar mi pago." }, { status: 503 });
   }
 }
