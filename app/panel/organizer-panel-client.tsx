@@ -64,6 +64,9 @@ export default function OrganizerPanelClient({
   const [mobileMenu, setMobileMenu] =
     useState(false);
 
+  const [linkCopied, setLinkCopied] =
+    useState(false);
+
   const eventId =
     event?.id ?? null;
 
@@ -208,13 +211,34 @@ export default function OrganizerPanelClient({
               <div className="flex items-center gap-2">
 
                 {publicHref && (
-                  <Link
-                    href={publicHref}
-                    target="_blank"
-                    className="hidden h-10 items-center border border-white/[0.09] bg-white/[0.02] px-4 text-[9px] font-bold uppercase tracking-[0.15em] text-white/45 transition hover:border-[#ff5a2a]/30 hover:text-white md:flex"
-                  >
-                    Ver evento
-                  </Link>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard
+                          .writeText(
+                            `${window.location.origin}${publicHref}`
+                          )
+                          .then(() => {
+                            setLinkCopied(true);
+                            setTimeout(
+                              () => setLinkCopied(false),
+                              2000
+                            );
+                          });
+                      }}
+                      className="hidden h-10 items-center border border-white/[0.09] bg-white/[0.02] px-4 text-[9px] font-bold uppercase tracking-[0.15em] text-white/45 transition hover:border-[#ff5a2a]/30 hover:text-white md:flex"
+                    >
+                      {linkCopied ? "¡Copiado!" : "Copiar link público"}
+                    </button>
+                    <Link
+                      href={publicHref}
+                      target="_blank"
+                      className="hidden h-10 items-center border border-white/[0.09] bg-white/[0.02] px-4 text-[9px] font-bold uppercase tracking-[0.15em] text-white/45 transition hover:border-[#ff5a2a]/30 hover:text-white md:flex"
+                    >
+                      Ver evento
+                    </Link>
+                  </>
                 )}
 
                 <Link
