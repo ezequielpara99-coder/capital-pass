@@ -105,13 +105,29 @@ export default function StockPanelClient({
   }
 
   return (
-    <main className="relative min-h-screen bg-black text-white">
-      <div className="mx-auto max-w-[1400px] px-5 py-8 md:px-8">
-        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-6">
+    <main className="relative min-h-screen overflow-hidden bg-[#07050a] text-white">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-[-200px] top-[-150px] h-[500px] w-[500px] rounded-full bg-[#ff2a1a]/[0.14] blur-[130px]" />
+        <div className="absolute bottom-[-200px] right-[-150px] h-[500px] w-[500px] rounded-full bg-[#ff5a2a]/[0.10] blur-[130px]" />
+      </div>
+
+      <div className="relative z-10 mx-auto max-w-[1400px] px-5 py-8 md:px-8">
+        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-6">
           <div>
             <Link href="/panel" className="text-xs text-white/40 hover:text-white">← Panel</Link>
-            <p className="mt-3 text-[10px] font-black uppercase tracking-[0.22em] text-emerald-400">Capital Pass</p>
-            <h1 className="mt-1 text-3xl font-black uppercase tracking-[-0.03em] md:text-4xl">Stock &amp; Barra</h1>
+
+            <div className="mt-4 flex items-center gap-3">
+              <div className="relative h-10 w-10 shrink-0 overflow-hidden">
+                <div className="absolute inset-[5px] rotate-[-18deg] rounded-[45%_55%_65%_35%] bg-gradient-to-br from-[#ff2a1a] via-[#ff3b24] to-[#ff6530] shadow-[0_0_24px_rgba(255,59,36,.25)]" />
+                <div className="absolute inset-[7px] rounded-full bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,.6),transparent_35%)]" />
+              </div>
+              <div>
+                <p className="text-[12px] font-black tracking-[0.1em]">
+                  CAPITAL<span className="text-[#ff3b24]">PASS</span>
+                </p>
+                <p className="mt-0.5 text-[8px] uppercase tracking-[0.22em] text-white/25">Stock &amp; Barra</p>
+              </div>
+            </div>
           </div>
 
           {events.length > 1 && (
@@ -134,7 +150,9 @@ export default function StockPanelClient({
               type="button"
               onClick={() => setTab(t)}
               className={`h-10 rounded-lg px-4 text-xs font-bold uppercase tracking-wide transition ${
-                tab === t ? "bg-emerald-500 text-black" : "border border-white/10 bg-white/[0.03] text-white/50 hover:text-white"
+                tab === t
+                  ? "bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] text-white shadow-[0_0_20px_rgba(255,59,36,.3)]"
+                  : "border border-white/10 bg-white/[0.03] text-white/50 hover:text-white"
               }`}
             >
               {t}
@@ -142,7 +160,7 @@ export default function StockPanelClient({
           ))}
         </nav>
 
-        {message && <div className="mt-5 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-300">{message}</div>}
+        {message && <div className="mt-5 rounded-xl border border-[#ff5a2a]/25 bg-[#ff3b24]/10 px-4 py-3 text-sm text-[#ffb199]">{message}</div>}
         {error && <div className="mt-5 rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>}
 
         {loading || !overview ? (
@@ -297,7 +315,7 @@ function StockGeneralTab({
           <h2 className="text-lg font-bold">Catálogo cargado en este evento</h2>
           <Link
             href={`/panel/stock/carta?eventId=${eventId}`}
-            className="rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-300"
+            className="rounded-lg border border-[#ff5a2a]/25 bg-[#ff3b24]/10 px-3 py-2 text-xs font-bold text-[#ffb199]"
           >
             📄 Carta de tragos (PDF)
           </Link>
@@ -333,7 +351,7 @@ function StockGeneralTab({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.03] p-6">
+      <section className="rounded-2xl border border-[#ff5a2a]/20 bg-[#ff3b24]/[0.05] p-6">
         <h2 className="text-lg font-bold">Agregar / actualizar producto</h2>
 
         <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-4">
@@ -390,7 +408,7 @@ function StockGeneralTab({
           <Field label="Alertar con stock ≤" value={threshold} onChange={setThreshold} />
         </div>
 
-        <button type="button" disabled={saving} onClick={save} className="mt-5 h-12 w-full rounded-xl bg-emerald-500 text-sm font-black text-black disabled:opacity-40">
+        <button type="button" disabled={saving} onClick={save} className="mt-5 h-12 w-full rounded-xl bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] text-sm font-black text-white disabled:opacity-40">
           {saving ? "Guardando..." : "Guardar producto"}
         </button>
       </section>
@@ -488,7 +506,7 @@ function BarrasTab({
           value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Barra 1"
           className="mt-4 h-12 w-full rounded-lg border border-white/15 bg-black px-3 text-sm"
         />
-        <button type="button" disabled={saving} onClick={createBar} className="mt-3 h-12 w-full rounded-xl bg-emerald-500 text-sm font-black text-black disabled:opacity-40">
+        <button type="button" disabled={saving} onClick={createBar} className="mt-3 h-12 w-full rounded-xl bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] text-sm font-black text-white disabled:opacity-40">
           + Crear barra
         </button>
 
@@ -500,7 +518,7 @@ function BarrasTab({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.03] p-6">
+      <section className="rounded-2xl border border-[#ff5a2a]/20 bg-[#ff3b24]/[0.05] p-6">
         <h2 className="text-lg font-bold">Asignar stock del pool general a una barra</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <label className="block text-xs text-white/40">
@@ -517,7 +535,7 @@ function BarrasTab({
           </label>
           <Field label="Cantidad" value={assignQty} onChange={setAssignQty} />
         </div>
-        <button type="button" disabled={saving} onClick={assignStock} className="mt-4 h-12 w-full rounded-xl bg-emerald-500 text-sm font-black text-black disabled:opacity-40 sm:w-auto sm:px-8">
+        <button type="button" disabled={saving} onClick={assignStock} className="mt-4 h-12 w-full rounded-xl bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] text-sm font-black text-white disabled:opacity-40 sm:w-auto sm:px-8">
           Asignar
         </button>
 
@@ -630,7 +648,7 @@ function BartendersTab({
 
   return (
     <div className="grid gap-6 lg:grid-cols-[.9fr_1.1fr]">
-      <section className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.03] p-6">
+      <section className="rounded-2xl border border-[#ff5a2a]/20 bg-[#ff3b24]/[0.05] p-6">
         <h2 className="text-lg font-bold">Nuevo bartender</h2>
         {bars.length === 0 && <p className="mt-3 text-sm text-amber-300">Creá una barra primero.</p>}
         <div className="mt-4 grid grid-cols-2 gap-3">
@@ -645,7 +663,7 @@ function BartendersTab({
             {bars.map((b) => <option key={b.id} value={b.id} className="bg-black">{b.name}</option>)}
           </select>
         </label>
-        <button type="button" disabled={saving || bars.length === 0} onClick={create} className="mt-5 h-12 w-full rounded-xl bg-emerald-500 text-sm font-black text-black disabled:opacity-40">
+        <button type="button" disabled={saving || bars.length === 0} onClick={create} className="mt-5 h-12 w-full rounded-xl bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] text-sm font-black text-white disabled:opacity-40">
           Crear bartender
         </button>
       </section>
@@ -661,7 +679,7 @@ function BartendersTab({
               </div>
               <button
                 type="button" onClick={() => toggle(bt.memberId, !bt.active)}
-                className={`rounded-lg border px-3 py-2 text-xs font-bold ${bt.active ? "border-emerald-400/30 text-emerald-300" : "border-white/15 text-white/40"}`}
+                className={`rounded-lg border px-3 py-2 text-xs font-bold ${bt.active ? "border-[#ff5a2a]/30 text-[#ffb199]" : "border-white/15 text-white/40"}`}
               >
                 {bt.active ? "Activo" : "Pausado"}
               </button>
@@ -742,12 +760,12 @@ function MesasTab({
           <Field label="Capacidad" value={capacity} onChange={setCapacity} />
           <Field label="Precio de reserva (0 = sin costo)" value={price} onChange={setPrice} />
         </div>
-        <button type="button" disabled={saving} onClick={createTable} className="mt-4 h-12 w-full rounded-xl bg-emerald-500 text-sm font-black text-black disabled:opacity-40">
+        <button type="button" disabled={saving} onClick={createTable} className="mt-4 h-12 w-full rounded-xl bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] text-sm font-black text-white disabled:opacity-40">
           + Crear mesa
         </button>
       </section>
 
-      <section className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.03] p-6">
+      <section className="rounded-2xl border border-[#ff5a2a]/20 bg-[#ff3b24]/[0.05] p-6">
         <h2 className="text-lg font-bold">Mesas</h2>
         <div className="mt-4 space-y-3">
           {tables.map((table) => (
@@ -758,7 +776,7 @@ function MesasTab({
                   <p className="text-xs text-white/40">Capacidad {table.capacity ?? "—"} · {table.price_minor ? money(table.price_minor) : "Sin costo"} · {table.status}</p>
                 </div>
                 {table.status === "available" && (
-                  <button type="button" onClick={() => setSellingTable(sellingTable === table.id ? null : table.id)} className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-black text-black">
+                  <button type="button" onClick={() => setSellingTable(sellingTable === table.id ? null : table.id)} className="rounded-lg bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] px-3 py-2 text-xs font-black text-white">
                     Vender
                   </button>
                 )}
@@ -775,10 +793,10 @@ function MesasTab({
                     <Field label="WhatsApp" value={phone} onChange={setPhone} />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <button type="button" onClick={() => setPaymentMethod("efectivo")} className={`h-11 rounded-lg border text-sm font-bold ${paymentMethod === "efectivo" ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-300" : "border-white/10"}`}>💵 Efectivo</button>
-                    <button type="button" onClick={() => setPaymentMethod("transferencia")} className={`h-11 rounded-lg border text-sm font-bold ${paymentMethod === "transferencia" ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-300" : "border-white/10"}`}>🏦 Transferencia</button>
+                    <button type="button" onClick={() => setPaymentMethod("efectivo")} className={`h-11 rounded-lg border text-sm font-bold ${paymentMethod === "efectivo" ? "border-[#ff5a2a]/60 bg-[#ff3b24]/10 text-[#ffb199]" : "border-white/10"}`}>💵 Efectivo</button>
+                    <button type="button" onClick={() => setPaymentMethod("transferencia")} className={`h-11 rounded-lg border text-sm font-bold ${paymentMethod === "transferencia" ? "border-[#ff5a2a]/60 bg-[#ff3b24]/10 text-[#ffb199]" : "border-white/10"}`}>🏦 Transferencia</button>
                   </div>
-                  <button type="button" disabled={saving} onClick={sellTable} className="h-11 w-full rounded-lg bg-emerald-500 text-sm font-black text-black disabled:opacity-40">
+                  <button type="button" disabled={saving} onClick={sellTable} className="h-11 w-full rounded-lg bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] text-sm font-black text-white disabled:opacity-40">
                     Confirmar venta
                   </button>
                 </div>
@@ -1019,7 +1037,7 @@ function CierreTab({
                   type="button"
                   disabled={savingBar === bar.id}
                   onClick={() => closeBar(bar.id)}
-                  className="mt-4 h-11 rounded-xl bg-emerald-500 px-6 text-sm font-black text-black disabled:opacity-40"
+                  className="mt-4 h-11 rounded-xl bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] px-6 text-sm font-black text-white disabled:opacity-40"
                 >
                   {savingBar === bar.id ? "Guardando..." : `Guardar cierre de ${bar.name}`}
                 </button>
@@ -1092,7 +1110,7 @@ function Field({
       <input
         type={type} value={value} placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm text-white outline-none focus:border-emerald-400/50"
+        className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm text-white outline-none focus:border-[#ff5a2a]/50"
       />
     </label>
   );

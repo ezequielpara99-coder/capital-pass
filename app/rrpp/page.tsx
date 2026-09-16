@@ -341,6 +341,28 @@ export default async function RRPPPage() {
               </p>
             </section>
 
+            {/* VENDER MESA */}
+            <section className="mb-7 rounded-[28px] border border-[#ff5a2a]/20 bg-white/[0.035] p-5 backdrop-blur-xl">
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-lg font-semibold">
+                    Vender mesa
+                  </p>
+
+                  <p className="mt-1 text-sm text-white/35">
+                    Reservá una mesa para un cliente.
+                  </p>
+                </div>
+
+                <a
+                  href="/rrpp/mesas"
+                  className="rounded-2xl bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] px-7 py-3.5 text-center text-sm font-bold text-white"
+                >
+                  🪑 Vender mesa
+                </a>
+              </div>
+            </section>
+
             {/* ÚLTIMAS VENTAS */}
             <section className="overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.035] backdrop-blur-xl">
               <div className="border-b border-white/10 px-6 py-5">
