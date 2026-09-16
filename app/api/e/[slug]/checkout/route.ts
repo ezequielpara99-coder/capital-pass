@@ -86,7 +86,10 @@ export async function POST(
 
     const totalCharged = sale.total_minor + feeAmount;
     const chargedSaved = await admin.from("sales").update({ total_charged_minor: totalCharged }).eq("id", sale.sale_id);
-    if (chargedSaved.error) throw new Error("No se pudo guardar el total de la compra.");
+    if (chargedSaved.error) {
+      console.error("VENTAS ONLINE: no se pudo guardar total_charged_minor.", chargedSaved.error);
+      throw new Error(`No se pudo guardar el total de la compra: ${chargedSaved.error.message}`);
+    }
 
     const mp = getOrganizerMercadoPago(accessToken);
     const preference = await mp.preference.create({
