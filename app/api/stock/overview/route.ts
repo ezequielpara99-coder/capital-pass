@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
       admin.from("bar_tables").select("id, name, capacity, price_minor, status").eq("event_id", eventId).order("name"),
       admin
         .from("bar_sales")
-        .select("id, bar_id, event_product_id, quantity, total_minor, payment_method, created_at, table_id")
+        .select("id, bar_id, event_product_id, quantity, unit_price_minor, total_minor, payment_method, created_at, table_id, bartender_member_id")
         .eq("event_id", eventId)
         .order("created_at", { ascending: false })
         .limit(50),
@@ -58,6 +58,8 @@ export async function GET(request: NextRequest) {
     : { data: [] as { id: string; first_name: string; last_name: string }[] };
   const profileById = new Map((profiles ?? []).map((p) => [p.id, p]));
   const staffByMemberId = new Map((staffResult.data ?? []).map((s) => [s.organization_member_id, s]));
+  const memberById = new Map((membersResult.data ?? []).map((m) => [m.id, m]));
+  const tableById = new Map((tablesResult.data ?? []).map((t) => [t.id, t]));
 
   return NextResponse.json({
     ok: true,
@@ -65,7 +67,15 @@ export async function GET(request: NextRequest) {
     eventProducts: (eventProductsResult.data ?? []).map((ep) => ({ ...ep, product: productById.get(ep.product_id) ?? null })),
     barStock: barStockRows ?? [],
     tables: tablesResult.data ?? [],
-    recentSales: barSalesResult.data ?? [],
+    recentSales: (barSalesResult.data ?? []).map((sale) => {
+      const member = memberById.get(sale.bartender_member_id);
+      const profile = member ? profileById.get(member.user_id) : null;
+      return {
+        ...sale,
+        bartenderName: profile ? `${profile.first_name} ${profile.last_name}`.trim() : "Bartender",
+        tableName: sale.table_id ? tableById.get(sale.table_id)?.name ?? "Mesa" : "Barra / mostrador",
+      };
+    }),
     movements: movementsResult.data ?? [],
     bartenders: (membersResult.data ?? []).map((m) => {
       const staff = staffByMemberId.get(m.id);

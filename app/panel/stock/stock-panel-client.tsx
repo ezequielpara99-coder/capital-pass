@@ -22,6 +22,10 @@ type BarStockRow = { bar_id: string; event_product_id: string; quantity: number 
 type TableRow = { id: string; name: string; capacity: number | null; price_minor: number | null; status: string };
 type Movement = { id: string; event_product_id: string; bar_id: string | null; type: string; quantity: number; reason: string | null; created_at: string };
 type Bartender = { memberId: string; firstName: string; lastName: string; active: boolean; barId: string | null };
+type Sale = {
+  id: string; bar_id: string; event_product_id: string; quantity: number; unit_price_minor: number; total_minor: number;
+  payment_method: string; created_at: string; table_id: string | null; bartenderName: string; tableName: string;
+};
 
 type Overview = {
   bars: Bar[];
@@ -29,10 +33,11 @@ type Overview = {
   barStock: BarStockRow[];
   tables: TableRow[];
   movements: Movement[];
+  recentSales: Sale[];
   bartenders: Bartender[];
 };
 
-const TABS = ["Stock general", "Barras", "Bartenders", "Mesas", "Movimientos", "Alertas"] as const;
+const TABS = ["Stock general", "Barras", "Bartenders", "Mesas", "Movimientos", "Alertas", "Cierre de noche"] as const;
 type Tab = (typeof TABS)[number];
 
 function money(value: number) {
@@ -182,10 +187,24 @@ export default function StockPanelClient({
               />
             )}
             {tab === "Movimientos" && (
-              <MovimientosTab movements={overview.movements} eventProductById={eventProductById} barById={barById} />
+              <MovimientosTab
+                movements={overview.movements}
+                sales={overview.recentSales}
+                eventProductById={eventProductById}
+                barById={barById}
+              />
             )}
             {tab === "Alertas" && (
               <AlertasTab bars={overview.bars} eventProducts={overview.eventProducts} barStock={overview.barStock} />
+            )}
+            {tab === "Cierre de noche" && (
+              <CierreTab
+                bars={overview.bars}
+                eventProducts={overview.eventProducts}
+                barStock={overview.barStock}
+                onSaved={() => { notify("Cierre guardado."); reload(); }}
+                onError={setError}
+              />
             )}
           </div>
         )}
@@ -240,11 +259,13 @@ function StockGeneralTab({
   }
 
   const costPerServing = servings && Number(servings) > 0 ? Number(costPrice) / Number(servings) : 0;
-  const suggestedPrice = margin ? Math.round(costPerServing / (1 - Number(margin) / 100)) : Math.round(costPerServing);
+  // Ganancia como markup sobre el costo (ej: "le saco el 300%" = precio = costo x 4),
+  // no como margen sobre el precio de venta (esa cuenta explota o da negativo a partir del 100%).
+  const suggestedPrice = Math.round(costPerServing * (1 + Number(margin) / 100));
   const salePrice = manualOverride ? manualSalePrice : String(suggestedPrice || 0);
 
   const profit = Number(salePrice) - costPerServing;
-  const profitPercent = Number(salePrice) > 0 ? (profit / Number(salePrice)) * 100 : 0;
+  const profitPercent = costPerServing > 0 ? (profit / costPerServing) * 100 : 0;
 
   async function save() {
     if (!productId) return;
@@ -776,9 +797,10 @@ function MesasTab({
 // =====================================================================
 
 function MovimientosTab({
-  movements, eventProductById, barById,
+  movements, sales, eventProductById, barById,
 }: {
   movements: Movement[];
+  sales: Sale[];
   eventProductById: Map<string, EventProduct>;
   barById: Map<string, Bar>;
 }) {
@@ -787,8 +809,38 @@ function MovimientosTab({
   };
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
-      <h2 className="text-lg font-bold">Movimientos de stock</h2>
+    <div className="space-y-6">
+      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+        <h2 className="text-lg font-bold">Ventas de barra</h2>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase text-white/30">
+                <th className="pb-2">Hora</th><th className="pb-2">Barra</th><th className="pb-2">Bebida</th><th className="pb-2">Cant.</th>
+                <th className="pb-2">Mesa</th><th className="pb-2">Bartender</th><th className="pb-2">Precio</th><th className="pb-2">Pago</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sales.map((s) => (
+                <tr key={s.id} className="border-t border-white/5">
+                  <td className="py-2 text-white/50">{new Date(s.created_at).toLocaleTimeString("es-AR")}</td>
+                  <td className="py-2">{barById.get(s.bar_id)?.name ?? "—"}</td>
+                  <td className="py-2">{eventProductById.get(s.event_product_id)?.product?.name ?? "—"}</td>
+                  <td className="py-2 font-bold">{s.quantity}</td>
+                  <td className="py-2 text-white/40">{s.tableName}</td>
+                  <td className="py-2">{s.bartenderName}</td>
+                  <td className="py-2 font-bold">{money(s.total_minor)}</td>
+                  <td className="py-2 text-white/40">{s.payment_method === "efectivo" ? "Efectivo" : "Transferencia"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {sales.length === 0 && <p className="py-4 text-sm text-white/35">Sin ventas de barra todavía.</p>}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+        <h2 className="text-lg font-bold">Movimientos de stock</h2>
       <div className="mt-4 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -810,8 +862,9 @@ function MovimientosTab({
           </tbody>
         </table>
         {movements.length === 0 && <p className="py-4 text-sm text-white/35">Sin movimientos todavía.</p>}
-      </div>
-    </section>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -845,6 +898,137 @@ function AlertasTab({
         {alerts.length === 0 && <p className="text-sm text-white/35">Sin alertas por ahora.</p>}
       </div>
     </section>
+  );
+}
+
+// =====================================================================
+// CIERRE DE NOCHE
+// =====================================================================
+
+function CierreTab({
+  bars, eventProducts, barStock, onSaved, onError,
+}: {
+  bars: Bar[]; eventProducts: EventProduct[]; barStock: BarStockRow[];
+  onSaved: () => void; onError: (msg: string) => void;
+}) {
+  const [counts, setCounts] = useState<Record<string, string>>({});
+  const [savingBar, setSavingBar] = useState<string | null>(null);
+
+  function key(barId: string, eventProductId: string) {
+    return `${barId}:${eventProductId}`;
+  }
+
+  async function closeBar(barId: string) {
+    const rows = barStock.filter((row) => row.bar_id === barId);
+    const changes = rows
+      .map((row) => {
+        const counted = counts[key(barId, row.event_product_id)];
+        if (counted === undefined || counted === "") return null;
+        const delta = Number(counted) - row.quantity;
+        if (delta === 0) return null;
+        return { eventProductId: row.event_product_id, delta };
+      })
+      .filter((c): c is { eventProductId: string; delta: number } => c !== null);
+
+    if (changes.length === 0) {
+      onError("No cargaste ninguna diferencia para esta barra.");
+      return;
+    }
+
+    setSavingBar(barId);
+    try {
+      const today = new Date().toLocaleDateString("es-AR");
+      for (const change of changes) {
+        const response = await fetch("/api/stock/adjust", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            barId, eventProductId: change.eventProductId, quantityDelta: change.delta,
+            type: "ajuste", reason: `Cierre de noche ${today}`,
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error);
+      }
+      setCounts((prev) => {
+        const next = { ...prev };
+        for (const row of rows) delete next[key(barId, row.event_product_id)];
+        return next;
+      });
+      onSaved();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "No se pudo guardar el cierre.");
+    } finally {
+      setSavingBar(null);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-white/40">
+        Al terminar el evento, contá físicamente lo que queda de cada bebida en cada barra y cargalo acá. Solo se
+        registra un ajuste para lo que tenga una diferencia contra el sistema — quedan guardados en Movimientos.
+      </p>
+
+      {bars.length === 0 && <p className="text-sm text-white/35">Todavía no creaste ninguna barra.</p>}
+
+      {bars.map((bar) => {
+        const rows = barStock.filter((row) => row.bar_id === bar.id);
+        return (
+          <section key={bar.id} className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+            <h2 className="text-lg font-bold">{bar.name}</h2>
+            {rows.length === 0 ? (
+              <p className="mt-3 text-sm text-white/35">Sin stock asignado a esta barra.</p>
+            ) : (
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase text-white/30">
+                      <th className="pb-2">Producto</th>
+                      <th className="pb-2">Esperado (sistema)</th>
+                      <th className="pb-2">Contado físicamente</th>
+                      <th className="pb-2">Diferencia</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => {
+                      const ep = eventProducts.find((e) => e.id === row.event_product_id);
+                      const counted = counts[key(bar.id, row.event_product_id)] ?? "";
+                      const diff = counted === "" ? null : Number(counted) - row.quantity;
+                      return (
+                        <tr key={row.event_product_id} className="border-t border-white/5">
+                          <td className="py-2">{ep?.product?.name ?? "—"}</td>
+                          <td className="py-2 font-bold">{row.quantity}</td>
+                          <td className="py-2">
+                            <input
+                              value={counted}
+                              onChange={(e) => setCounts((prev) => ({ ...prev, [key(bar.id, row.event_product_id)]: e.target.value }))}
+                              placeholder={String(row.quantity)}
+                              className="h-9 w-20 rounded-lg border border-white/15 bg-black px-2 text-sm"
+                            />
+                          </td>
+                          <td className={`py-2 font-bold ${diff === null ? "text-white/20" : diff === 0 ? "text-white/40" : diff > 0 ? "text-emerald-400" : "text-red-400"}`}>
+                            {diff === null ? "—" : diff > 0 ? `+${diff}` : diff}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <button
+                  type="button"
+                  disabled={savingBar === bar.id}
+                  onClick={() => closeBar(bar.id)}
+                  className="mt-4 h-11 rounded-xl bg-emerald-500 px-6 text-sm font-black text-black disabled:opacity-40"
+                >
+                  {savingBar === bar.id ? "Guardando..." : `Guardar cierre de ${bar.name}`}
+                </button>
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </div>
   );
 }
 
