@@ -41,11 +41,6 @@ export async function POST(
     const { data: account } = await admin.from("organization_mercadopago_accounts")
       .select("processing_fee_percent").eq("organization_id", event.organization_id).maybeSingle();
 
-    const { data: ticketTypes } = await admin.from("ticket_types")
-      .select("id, name, price_minor").in("id", items.map((item) => item.ticketTypeId));
-    const nameById = new Map((ticketTypes ?? []).map((tt) => [tt.id, tt.name]));
-    const priceById = new Map((ticketTypes ?? []).map((tt) => [tt.id, Number(tt.price_minor)]));
-
     const created = await admin.rpc("create_online_sale", {
       p_event_id: event.id,
       p_items: items.map((item) => ({ ticket_type_id: item.ticketTypeId, quantity: item.quantity })),
@@ -60,17 +55,22 @@ export async function POST(
       return NextResponse.json({ ok: false, error: created.error.message.replace(/^.*?:\s*/, "") || "No pudimos registrar la compra." }, { status: 400 });
     }
 
-    const sale = created.data?.[0] as { sale_id: string; total_minor: number } | undefined;
+    type SaleItem = { ticket_type_id: string; name: string; quantity: number; unit_price_minor: number };
+    const sale = created.data?.[0] as { sale_id: string; total_minor: number; items: SaleItem[] } | undefined;
     if (!sale) throw new Error("La compra no devolvió un identificador.");
 
     const feePercent = Number(account?.processing_fee_percent ?? 0);
     const feeAmount = Math.round(sale.total_minor * (feePercent / 100));
 
-    const preferenceItems = items.map((item) => ({
-      id: item.ticketTypeId,
-      title: `${event.name} - ${nameById.get(item.ticketTypeId) ?? "Entrada"}`,
+    // Los items de la preference salen siempre de lo que create_online_sale
+    // valido y reservo (mismo lock que valida el cupo) -- nunca de una
+    // lectura aparte, para que el monto que ve el comprador y el que
+    // despues verifica el webhook nunca puedan desincronizarse.
+    const preferenceItems = sale.items.map((item) => ({
+      id: item.ticket_type_id,
+      title: `${event.name} - ${item.name}`,
       quantity: item.quantity,
-      unit_price: priceById.get(item.ticketTypeId) ?? 0,
+      unit_price: Number(item.unit_price_minor),
       currency_id: "ARS",
     }));
 

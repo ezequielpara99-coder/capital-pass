@@ -9,6 +9,7 @@ const migration = readFileSync(new URL("../supabase/migrations/20260913_account_
 const checkoutProMigration = readFileSync(new URL("../supabase/migrations/20260916_checkout_pro.sql", import.meta.url), "utf8");
 const onlineSalesMigration = readFileSync(new URL("../supabase/migrations/20260917_ventas_online.sql", import.meta.url), "utf8");
 const totalChargedMigration = readFileSync(new URL("../supabase/migrations/20260918_total_charged.sql", import.meta.url), "utf8");
+const itemsReturnMigration = readFileSync(new URL("../supabase/migrations/20260919_online_sale_items_return.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -59,6 +60,7 @@ async function database() {
   await db.exec(checkoutProMigration);
   await db.exec(onlineSalesMigration);
   await db.exec(totalChargedMigration);
+  await db.exec(itemsReturnMigration);
   return db;
 }
 
@@ -147,7 +149,13 @@ test("ventas online: carrito, confirmacion, cupo y limpieza de pendientes", asyn
   await db.exec(`insert into organization_mercadopago_accounts(organization_id,mp_user_id,access_token,refresh_token,expires_at)
     values ('${org}', 999, 'tok', 'ref', now() + interval '1 day');`);
 
-  const sale = await scalar(`select sale_id::text from create_online_sale('${event}', ${cart(2)}, ${buyer("222222")})`);
+  const created = await db.query<{ sale_id: string; items: unknown }>(
+    `select sale_id, items from create_online_sale('${event}', ${cart(2)}, ${buyer("222222")})`
+  );
+  const sale = created.rows[0].sale_id;
+  const returnedItems = created.rows[0].items as { ticket_type_id: string; name: string; quantity: number; unit_price_minor: number }[];
+  assert.deepEqual(returnedItems, [{ ticket_type_id: ticketType, name: "General", quantity: 2, unit_price_minor: 5000 }],
+    "el detalle de items debe salir de la misma lectura que valida el cupo, no de una lectura aparte del caller");
   assert.equal(await scalar(`select status from sales where id='${sale}'`), "pending_approval");
   assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${sale}'`), 0, "no se emiten entradas hasta confirmar el pago");
 
