@@ -11,6 +11,7 @@ const onlineSalesMigration = readFileSync(new URL("../supabase/migrations/202609
 const totalChargedMigration = readFileSync(new URL("../supabase/migrations/20260918_total_charged.sql", import.meta.url), "utf8");
 const itemsReturnMigration = readFileSync(new URL("../supabase/migrations/20260919_online_sale_items_return.sql", import.meta.url), "utf8");
 const paymentMethodMigration = readFileSync(new URL("../supabase/migrations/20260920_metodo_pago_venta.sql", import.meta.url), "utf8");
+const stockMigration = readFileSync(new URL("../supabase/migrations/20260921_stock_barras_bartenders_mesas.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -63,6 +64,7 @@ async function database() {
   await db.exec(totalChargedMigration);
   await db.exec(itemsReturnMigration);
   await db.exec(paymentMethodMigration);
+  await db.exec(stockMigration);
   return db;
 }
 
@@ -193,5 +195,121 @@ test("ventas online: carrito, confirmacion, cupo y limpieza de pendientes", asyn
   assert.equal(await scalar("select cp_cancel_stale_online_sales()"), 1);
   assert.equal(await scalar(`select status from sales where id='${staleSale}'`), "cancelled");
 
+  await db.close();
+});
+
+test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "22222222-2222-4222-8222-222222222222";
+  const event = "33333333-3333-4333-8333-333333333333";
+  const organizerUser = "44444444-4444-4444-8444-444444444444";
+  const bartenderUser = "55555555-5555-4555-8555-555555555555";
+  const bar = "66666666-6666-4666-8666-666666666666";
+  const table = "77777777-7777-4777-8777-777777777777";
+  const eventProduct = "88888888-8888-4888-8888-888888888888";
+  const plan = "aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+  const signup = "aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
+
+  await db.exec(`insert into auth.users values ('${organizerUser}','org@example.test',now(),'{}');
+    insert into auth.users values ('${bartenderUser}','bartender@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club Stock','club-stock');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into subscription_plans(id,code,name,price_minor) values ('${plan}','monthly-stock','Mensual',10000);
+    insert into subscription_signups(id,plan_id,organization_id,first_name,last_name,organization_name,email,expected_amount,expected_currency,frequency_months)
+      values ('${signup}','${plan}','${org}','Org','Test','Club Stock','org@example.test',10000,'ARS',1);`);
+
+  // Le damos a la organizacion una suscripcion activa real (mismo RPC que
+  // usa el webhook de verdad), asi cp_org_has_service da true sin importar
+  // que usuario (organizador o bartender) este llamando despues.
+  await db.query(
+    "select cp_record_payment($1,'stock-test-payment','approved',10000,'ARS',now(),now())",
+    [signup]
+  );
+  assert.equal(await scalar(`select cp_org_has_service('${org}')`), true);
+
+  const organizerMember = await scalar(
+    `insert into organization_members(organization_id,user_id,role,status) values ('${org}','${organizerUser}','organizer','active') returning id::text`
+  );
+  const bartenderMember = await scalar(
+    `insert into organization_members(organization_id,user_id,role,status) values ('${org}','${bartenderUser}','bartender','active') returning id::text`
+  );
+
+  const productId = await scalar(`select id::text from products where name like 'Fernet Branca%' limit 1`);
+  assert.ok(productId, "el catalogo global debe traer Fernet Branca precargado");
+
+  await db.exec(`insert into event_products(id,event_id,product_id,cost_price_minor,sale_price_minor,profit_margin_percent,total_stock,low_stock_threshold)
+    values ('${eventProduct}','${event}','${productId}',10000,2000,50,10,3);
+    insert into bars(id,event_id,name) values ('${bar}','${event}','Barra 1');
+    insert into bar_tables(id,event_id,name,capacity,price_minor) values ('${table}','${event}','Mesa 1',6,5000);`);
+
+  // Asignar stock a la barra requiere estar logueado como organizador de esa org.
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);`);
+  await db.query(`select assign_stock_to_bar('${eventProduct}','${bar}',8)`);
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 8);
+  assert.equal(await scalar(`select count(*)::int from stock_movements where type='asignacion_barra'`), 1);
+
+  // No se puede asignar mas de lo que hay en el pool general (10 total, ya se asignaron 8).
+  await assert.rejects(
+    () => db.query(`select assign_stock_to_bar('${eventProduct}','${bar}',5)`),
+    /No hay suficiente stock general/, "no debe permitir asignar mas stock del que existe"
+  );
+
+  // Vender una mesa: la puede vender el organizador.
+  const tableSale = await scalar(
+    `select sale_id::text from sell_table('${event}','${table}','Cliente','Mesa','30111222','3462111222','efectivo')`
+  );
+  assert.equal(await scalar(`select channel from sales where id='${tableSale}'`), "mesa");
+  assert.equal(await scalar(`select status from bar_tables where id='${table}'`), "reserved");
+
+  // No se puede vender la misma mesa dos veces.
+  await assert.rejects(
+    () => db.query(`select sell_table('${event}','${table}','Otro','Cliente','30333444','3462333444','efectivo')`),
+    /ya no esta disponible/
+  );
+
+  // Asignar la cuenta bartender a la barra (event_staff) para que pueda vender ahi.
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);
+    insert into event_staff(event_id,organization_member_id,staff_role,active,bar_id)
+      values ('${event}','${bartenderMember}','bartender',true,'${bar}');`);
+
+  // El bartender vende un trago: debe descontar stock de SU barra.
+  await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
+  const barSale = await db.query<{ bar_sale_id: string; total_minor: string }>(
+    `select bar_sale_id, total_minor from create_bartender_sale('${bar}','${table}','${eventProduct}',3,'transferencia')`
+  );
+  assert.equal(Number(barSale.rows[0].total_minor), 6000, "3 tragos a 2000 cada uno");
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 5, "8 asignados - 3 vendidos");
+  assert.equal(await scalar(`select count(*)::int from stock_movements where type='venta'`), 1);
+
+  // No puede vender mas de lo que le queda en la barra.
+  await assert.rejects(
+    () => db.query(`select create_bartender_sale('${bar}','${table}','${eventProduct}',10,'efectivo')`),
+    /No hay suficiente stock en esta barra/
+  );
+
+  // Un bartender no puede vender desde una barra a la que no esta asignado.
+  const otherBar = "99999999-9999-4999-8999-999999999999";
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);
+    insert into bars(id,event_id,name) values ('${otherBar}','${event}','Barra 2');
+    select assign_stock_to_bar('${eventProduct}','${otherBar}',2);
+    select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
+  await assert.rejects(
+    () => db.query(`select create_bartender_sale('${otherBar}','${table}','${eventProduct}',1,'efectivo')`),
+    /No estas asignado a esta barra/
+  );
+
+  // Ajuste manual por perdida (ej: se rompio una botella).
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);`);
+  await db.query(`select adjust_bar_stock('${bar}','${eventProduct}',-1,'perdida','Se rompio una botella')`);
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 4);
+
+  // No puede dejar el stock en negativo.
+  await assert.rejects(
+    () => db.query(`select adjust_bar_stock('${bar}','${eventProduct}',-100,'perdida','Motivo')`),
+    /negativo/
+  );
+
+  void organizerMember;
   await db.close();
 });
