@@ -316,6 +316,13 @@ function BarrasTab({
   const [assignQty, setAssignQty] = useState("0");
   const [saving, setSaving] = useState(false);
 
+  const [adjustBar, setAdjustBar] = useState(bars[0]?.id ?? "");
+  const [adjustProduct, setAdjustProduct] = useState(eventProducts[0]?.id ?? "");
+  const [adjustType, setAdjustType] = useState<"ajuste" | "perdida">("perdida");
+  const [adjustQty, setAdjustQty] = useState("1");
+  const [adjustReason, setAdjustReason] = useState("");
+  const [adjusting, setAdjusting] = useState(false);
+
   async function createBar() {
     if (!name.trim()) return;
     setSaving(true);
@@ -351,6 +358,27 @@ function BarrasTab({
       onError(err instanceof Error ? err.message : "No se pudo asignar el stock.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function submitAdjustment() {
+    if (!adjustBar || !adjustProduct || Number(adjustQty) === 0 || !adjustReason.trim()) return;
+    setAdjusting(true);
+    try {
+      const delta = adjustType === "perdida" ? -Math.abs(Number(adjustQty)) : Number(adjustQty);
+      const response = await fetch("/api/stock/adjust", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ barId: adjustBar, eventProductId: adjustProduct, quantityDelta: delta, type: adjustType, reason: adjustReason.trim() }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setAdjustQty("1");
+      setAdjustReason("");
+      onSaved();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "No se pudo registrar el ajuste.");
+    } finally {
+      setAdjusting(false);
     }
   }
 
@@ -417,6 +445,37 @@ function BarrasTab({
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.03] p-6 lg:col-span-2">
+        <h2 className="text-lg font-bold">Ajuste manual / pérdida</h2>
+        <p className="mt-1 text-xs text-white/40">Para descontar o corregir stock de una barra sin que sea una venta (rotura, robo, recuento).</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-5">
+          <label className="block text-xs text-white/40">
+            Barra
+            <select value={adjustBar} onChange={(e) => setAdjustBar(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm">
+              {bars.map((b) => <option key={b.id} value={b.id} className="bg-black">{b.name}</option>)}
+            </select>
+          </label>
+          <label className="block text-xs text-white/40">
+            Producto
+            <select value={adjustProduct} onChange={(e) => setAdjustProduct(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm">
+              {eventProducts.map((ep) => <option key={ep.id} value={ep.id} className="bg-black">{ep.product?.name ?? "Producto"}</option>)}
+            </select>
+          </label>
+          <label className="block text-xs text-white/40">
+            Tipo
+            <select value={adjustType} onChange={(e) => setAdjustType(e.target.value as "ajuste" | "perdida")} className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm">
+              <option value="perdida" className="bg-black">Pérdida (resta)</option>
+              <option value="ajuste" className="bg-black">Ajuste (suma o resta)</option>
+            </select>
+          </label>
+          <Field label="Cantidad" value={adjustQty} onChange={setAdjustQty} />
+          <Field label="Motivo" value={adjustReason} onChange={setAdjustReason} placeholder="Ej: rotura, recuento" />
+        </div>
+        <button type="button" disabled={adjusting} onClick={submitAdjustment} className="mt-4 h-12 rounded-xl border border-amber-400/30 bg-amber-400/10 px-8 text-sm font-black text-amber-300 disabled:opacity-40">
+          Registrar
+        </button>
       </section>
     </div>
   );
