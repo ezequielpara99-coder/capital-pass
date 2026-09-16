@@ -133,6 +133,9 @@ export default function DoorSellerPage() {
   const [phone, setPhone] =
     useState("");
 
+  const [paymentMethod, setPaymentMethod] =
+    useState<"efectivo" | "transferencia" | "">("");
+
   const [ticketTypeId, setTicketTypeId] =
     useState("");
 
@@ -416,6 +419,22 @@ export default function DoorSellerPage() {
       return;
     }
 
+    if (
+      normalizeWhatsApp(phone).length < 12
+    ) {
+      setError(
+        "Ese número de WhatsApp no parece válido. Revisalo antes de cobrar — es donde le vamos a mandar la entrada."
+      );
+      return;
+    }
+
+    if (!paymentMethod) {
+      setError(
+        "Indicá si la venta fue en efectivo o transferencia."
+      );
+      return;
+    }
+
     setSelling(true);
     setError("");
 
@@ -445,6 +464,9 @@ export default function DoorSellerPage() {
 
           p_buyer_phone:
             phone.trim() || null,
+
+          p_payment_method:
+            paymentMethod,
         }
       );
 
@@ -482,6 +504,13 @@ export default function DoorSellerPage() {
       setSaleResult(
         ticketData as SaleResult
       );
+
+      // Ya validamos el número antes de cobrar, así que apenas están
+      // listas las entradas abrimos WhatsApp con todo cargado — el
+      // vendedor solo tiene que apretar enviar, no buscar el botón.
+      sendAllWhatsApp(
+        ticketData as SaleResult
+      );
     } catch (err) {
       console.error(
         "ERROR CREANDO VENTA PUERTA:",
@@ -509,6 +538,7 @@ export default function DoorSellerPage() {
     setLastName("");
     setDni("");
     setPhone("");
+    setPaymentMethod("");
     setQuantity(1);
     setError("");
 
@@ -522,6 +552,46 @@ export default function DoorSellerPage() {
   // =====================================================
   // WHATSAPP
   // =====================================================
+
+  function sendAllWhatsApp(
+    result: SaleResult
+  ) {
+    const number =
+      normalizeWhatsApp(result.buyer.phone ?? "");
+
+    if (!number) return;
+
+    const lines = [
+      `🎟️ *Tus entradas para ${result.event.name}*`,
+      "",
+      `Hola ${result.buyer.firstName} 👋`,
+      "",
+    ];
+
+    for (const entry of result.entries) {
+      lines.push(
+        `Entrada: ${entry.ticketType} · N.º #${String(
+          entry.displayNumber
+        ).padStart(7, "0")}`,
+        `Código: ${entry.manualCode}`,
+        `${window.location.origin}${entry.url}`,
+        ""
+      );
+    }
+
+    lines.push(
+      "Presentá cada entrada al ingresar.",
+      "",
+      "Capital Pass"
+    );
+
+    window.open(
+      `https://wa.me/${number}?text=${encodeURIComponent(
+        lines.join("\n")
+      )}`,
+      "_blank"
+    );
+  }
 
   function sendWhatsApp(
     entry: GeneratedEntry
@@ -610,6 +680,11 @@ export default function DoorSellerPage() {
             <p className="mt-2 text-sm text-white/35">
               {saleResult.event.name}
             </p>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-center text-sm text-emerald-200">
+            📲 Ya te abrimos WhatsApp con la entrada cargada — solo
+            apretá enviar.
           </div>
 
           <div className="mt-7 grid grid-cols-2 gap-3">
@@ -878,6 +953,42 @@ export default function DoorSellerPage() {
                 placeholder="Ej: 3462..."
               />
 
+              <div>
+                <p className="text-xs text-white/35">
+                  Método de pago
+                </p>
+
+                <div className="mt-2 grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPaymentMethod("efectivo")
+                    }
+                    className={`h-12 rounded-xl border text-sm font-semibold transition ${
+                      paymentMethod === "efectivo"
+                        ? "border-[#ff5a2a]/50 bg-[#ff3b24]/15 text-white"
+                        : "border-white/10 bg-black/20 text-white/50"
+                    }`}
+                  >
+                    💵 Efectivo
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPaymentMethod("transferencia")
+                    }
+                    className={`h-12 rounded-xl border text-sm font-semibold transition ${
+                      paymentMethod === "transferencia"
+                        ? "border-[#ff5a2a]/50 bg-[#ff3b24]/15 text-white"
+                        : "border-white/10 bg-black/20 text-white/50"
+                    }`}
+                  >
+                    🏦 Transferencia
+                  </button>
+                </div>
+              </div>
+
               <label className="block">
                 <span className="text-xs text-white/35">
                   Tipo de entrada
@@ -1001,7 +1112,8 @@ export default function DoorSellerPage() {
                   !doorAvailable ||
                   !firstName.trim() ||
                   !lastName.trim() ||
-                  !ticketTypeId
+                  !ticketTypeId ||
+                  !paymentMethod
                 }
                 className="h-16 w-full rounded-2xl bg-gradient-to-r from-[#ff2a1a] via-[#ff3b24] to-[#ff5a2a] text-base font-black disabled:cursor-not-allowed disabled:opacity-35"
               >

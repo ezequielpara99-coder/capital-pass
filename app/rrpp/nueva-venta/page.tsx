@@ -172,6 +172,9 @@ export default function NuevaVentaRRPPPage() {
   const [phone, setPhone] =
     useState("");
 
+  const [paymentMethod, setPaymentMethod] =
+    useState<"efectivo" | "transferencia" | "">("");
+
   const [error, setError] =
     useState("");
 
@@ -455,6 +458,13 @@ export default function NuevaVentaRRPPPage() {
       setEntriesResult(
         result as EntriesResponse
       );
+
+      // Ya validamos el número antes de cobrar, así que apenas están
+      // listas las entradas abrimos WhatsApp con todo cargado — el
+      // vendedor solo tiene que apretar enviar, no buscar el botón.
+      sendAllWhatsApp(
+        result as EntriesResponse
+      );
     } catch (err) {
       console.error(
         "ERROR CARGANDO ENTRADAS:",
@@ -517,6 +527,24 @@ export default function NuevaVentaRRPPPage() {
       return;
     }
 
+    if (
+      normalizeWhatsAppNumber(phone).length < 12
+    ) {
+      setError(
+        "Ese número de WhatsApp no parece válido. Revisalo antes de cobrar — es donde le vamos a mandar la entrada."
+      );
+
+      return;
+    }
+
+    if (!paymentMethod) {
+      setError(
+        "Indicá si la venta fue en efectivo o transferencia."
+      );
+
+      return;
+    }
+
     if (!ticketTypeId) {
       setError(
         "Seleccioná un tipo de entrada."
@@ -566,6 +594,9 @@ export default function NuevaVentaRRPPPage() {
 
           p_buyer_phone:
             phone.trim(),
+
+          p_payment_method:
+            paymentMethod,
         }
       );
 
@@ -621,6 +652,55 @@ export default function NuevaVentaRRPPPage() {
   // WHATSAPP
   // =====================================================
 
+  function sendAllWhatsApp(
+    result: EntriesResponse
+  ) {
+    const number =
+      normalizeWhatsAppNumber(
+        result.buyer.phone
+      );
+
+    if (!number) return;
+
+    const buyerName =
+      result.buyer.firstName;
+
+    const lines = [
+      `🎟️ *Tus entradas para ${result.event.name}*`,
+      "",
+      `Hola ${buyerName} 👋`,
+      "",
+    ];
+
+    for (const entry of result.entries) {
+      lines.push(
+        `Entrada: ${entry.ticketType} · N.º #${formatTicketNumber(
+          entry.displayNumber
+        )}`,
+        `Código: ${entry.manualCode}`,
+        `${window.location.origin}${entry.url}`,
+        ""
+      );
+    }
+
+    lines.push(
+      "Presentá cada entrada al ingresar.",
+      "",
+      "Capital Pass"
+    );
+
+    const whatsappUrl =
+      `https://wa.me/${number}?text=${encodeURIComponent(
+        lines.join("\n")
+      )}`;
+
+    window.open(
+      whatsappUrl,
+      "_blank",
+      "noopener,noreferrer"
+    );
+  }
+
   function sendWhatsApp(
     entry: GeneratedEntry
   ) {
@@ -657,7 +737,7 @@ export default function NuevaVentaRRPPPage() {
       `Código de validación: ${entry.manualCode}`,
       "",
       "Podés ver tu entrada digital y QR acá:",
-      entry.url,
+      `${window.location.origin}${entry.url}`,
       "",
       "Presentá esta entrada al ingresar.",
       "",
@@ -685,6 +765,7 @@ export default function NuevaVentaRRPPPage() {
     setLastName("");
     setDni("");
     setPhone("");
+    setPaymentMethod("");
 
     setQuantity(1);
 
@@ -785,6 +866,13 @@ export default function NuevaVentaRRPPPage() {
             <div className="rounded-[24px] border border-white/10 bg-white/[0.035] px-6 py-10 text-center text-sm text-white/40">
               Preparando las entradas
               digitales...
+            </div>
+          )}
+
+          {entriesResult && !loadingEntries && (
+            <div className="mb-5 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-5 py-3.5 text-sm text-emerald-200">
+              📲 Ya te abrimos WhatsApp con la entrada cargada — solo
+              apretá enviar.
             </div>
           )}
 
@@ -1077,6 +1165,42 @@ export default function NuevaVentaRRPPPage() {
                     Usaremos este número para enviar la entrada.
                   </p>
                 </Field>
+              </div>
+
+              <div className="mt-5">
+                <p className="mb-2 text-sm text-white/70">
+                  Método de pago
+                </p>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPaymentMethod("efectivo")
+                    }
+                    className={`h-12 rounded-xl border text-sm font-semibold transition ${
+                      paymentMethod === "efectivo"
+                        ? "border-[#ff5a2a]/50 bg-[#ff3b24]/15 text-white"
+                        : "border-white/10 bg-black/20 text-white/50 hover:text-white"
+                    }`}
+                  >
+                    💵 Efectivo
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPaymentMethod("transferencia")
+                    }
+                    className={`h-12 rounded-xl border text-sm font-semibold transition ${
+                      paymentMethod === "transferencia"
+                        ? "border-[#ff5a2a]/50 bg-[#ff3b24]/15 text-white"
+                        : "border-white/10 bg-black/20 text-white/50 hover:text-white"
+                    }`}
+                  >
+                    🏦 Transferencia
+                  </button>
+                </div>
               </div>
             </section>
 

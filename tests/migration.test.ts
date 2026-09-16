@@ -10,6 +10,7 @@ const checkoutProMigration = readFileSync(new URL("../supabase/migrations/202609
 const onlineSalesMigration = readFileSync(new URL("../supabase/migrations/20260917_ventas_online.sql", import.meta.url), "utf8");
 const totalChargedMigration = readFileSync(new URL("../supabase/migrations/20260918_total_charged.sql", import.meta.url), "utf8");
 const itemsReturnMigration = readFileSync(new URL("../supabase/migrations/20260919_online_sale_items_return.sql", import.meta.url), "utf8");
+const paymentMethodMigration = readFileSync(new URL("../supabase/migrations/20260920_metodo_pago_venta.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -61,6 +62,7 @@ async function database() {
   await db.exec(onlineSalesMigration);
   await db.exec(totalChargedMigration);
   await db.exec(itemsReturnMigration);
+  await db.exec(paymentMethodMigration);
   return db;
 }
 
