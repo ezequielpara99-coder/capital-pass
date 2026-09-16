@@ -240,7 +240,15 @@ function StockGeneralTab({
   return (
     <div className="grid gap-6 lg:grid-cols-[1.1fr_.9fr]">
       <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
-        <h2 className="text-lg font-bold">Catálogo cargado en este evento</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-bold">Catálogo cargado en este evento</h2>
+          <Link
+            href={`/panel/stock/carta?eventId=${eventId}`}
+            className="rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-300"
+          >
+            📄 Carta de tragos (PDF)
+          </Link>
+        </div>
         <div className="mt-4 divide-y divide-white/5">
           {eventProducts.length === 0 && <p className="py-4 text-sm text-white/35">Todavía no cargaste productos.</p>}
           {eventProducts.map((ep) => (
