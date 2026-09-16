@@ -85,7 +85,10 @@ export async function POST(
     }
 
     const totalCharged = sale.total_minor + feeAmount;
-    const chargedSaved = await admin.from("sales").update({ total_charged_minor: totalCharged }).eq("id", sale.sale_id);
+    const chargedSaved = await admin.rpc("set_online_sale_charged_total", {
+      p_sale_id: sale.sale_id,
+      p_total_charged_minor: totalCharged,
+    });
     if (chargedSaved.error) {
       console.error("VENTAS ONLINE: no se pudo guardar total_charged_minor.", chargedSaved.error);
       throw new Error(`No se pudo guardar el total de la compra: ${chargedSaved.error.message}`);

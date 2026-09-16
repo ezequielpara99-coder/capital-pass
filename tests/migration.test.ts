@@ -8,6 +8,7 @@ const fixture = JSON.parse(readFileSync(new URL("./schema.fixture.json", import.
 const migration = readFileSync(new URL("../supabase/migrations/20260913_account_before_payment.sql", import.meta.url), "utf8");
 const checkoutProMigration = readFileSync(new URL("../supabase/migrations/20260916_checkout_pro.sql", import.meta.url), "utf8");
 const onlineSalesMigration = readFileSync(new URL("../supabase/migrations/20260917_ventas_online.sql", import.meta.url), "utf8");
+const totalChargedMigration = readFileSync(new URL("../supabase/migrations/20260918_total_charged.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -57,6 +58,7 @@ async function database() {
   await db.exec(migration);
   await db.exec(checkoutProMigration);
   await db.exec(onlineSalesMigration);
+  await db.exec(totalChargedMigration);
   return db;
 }
 
@@ -148,6 +150,9 @@ test("ventas online: carrito, confirmacion, cupo y limpieza de pendientes", asyn
   const sale = await scalar(`select sale_id::text from create_online_sale('${event}', ${cart(2)}, ${buyer("222222")})`);
   assert.equal(await scalar(`select status from sales where id='${sale}'`), "pending_approval");
   assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${sale}'`), 0, "no se emiten entradas hasta confirmar el pago");
+
+  await db.query("select set_online_sale_charged_total($1, 5250)", [sale]);
+  assert.equal(await scalar(`select total_charged_minor::int from sales where id='${sale}'`), 5250, "guarda subtotal + cargo por servicio para verificar el pago despues");
 
   // Un segundo carrito no puede reservar mas del cupo restante mientras el primero sigue pendiente.
   await assert.rejects(
