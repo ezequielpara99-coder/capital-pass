@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createClient } from "../../../lib/supabase/client";
 
 type EventOption = { id: string; name: string };
 type Product = { id: string; name: string; category: string; brand: string | null; image_path: string | null; servings_per_bottle: number | null; organization_id: string | null };
@@ -14,7 +15,7 @@ type EventProduct = {
   profit_margin_percent: number;
   total_stock: number;
   low_stock_threshold: number;
-  product: { name: string; category: string; brand: string | null } | null;
+  product: { name: string; category: string; brand: string | null; image_path: string | null; organization_id: string | null } | null;
 };
 type Bar = { id: string; name: string; created_at: string };
 type BarStockRow = { bar_id: string; event_product_id: string; quantity: number };
@@ -36,6 +37,11 @@ type Tab = (typeof TABS)[number];
 
 function money(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
+}
+
+function productImageUrl(path: string | null | undefined) {
+  if (!path) return null;
+  return createClient().storage.from("product-assets").getPublicUrl(path).data.publicUrl;
 }
 
 export default function StockPanelClient({
@@ -141,6 +147,7 @@ export default function StockPanelClient({
             {tab === "Stock general" && (
               <StockGeneralTab
                 eventId={currentEventId}
+                organizationId={organizationId}
                 catalog={catalog}
                 eventProducts={overview.eventProducts}
                 onSaved={() => { notify("Guardado."); reload(); }}
@@ -192,9 +199,9 @@ export default function StockPanelClient({
 // =====================================================================
 
 function StockGeneralTab({
-  eventId, catalog, eventProducts, onSaved, onError,
+  eventId, organizationId, catalog, eventProducts, onSaved, onError,
 }: {
-  eventId: string; catalog: Product[]; eventProducts: EventProduct[];
+  eventId: string; organizationId: string; catalog: Product[]; eventProducts: EventProduct[];
   onSaved: () => void; onError: (msg: string) => void;
 }) {
   const [productId, setProductId] = useState(catalog[0]?.id ?? "");
@@ -206,6 +213,31 @@ function StockGeneralTab({
   const [threshold, setThreshold] = useState("5");
   const [saving, setSaving] = useState(false);
   const [manualOverride, setManualOverride] = useState(false);
+
+  const [newProductName, setNewProductName] = useState("");
+  const [newProductBrand, setNewProductBrand] = useState("");
+  const [creatingProduct, setCreatingProduct] = useState(false);
+
+  async function createCustomProduct() {
+    if (!newProductName.trim()) return;
+    setCreatingProduct(true);
+    try {
+      const response = await fetch("/api/stock/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organizationId, name: newProductName.trim(), category: "bebida", brand: newProductBrand.trim() || null }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setNewProductName("");
+      setNewProductBrand("");
+      onSaved();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "No se pudo crear el producto.");
+    } finally {
+      setCreatingProduct(false);
+    }
+  }
 
   const costPerServing = servings && Number(servings) > 0 ? Number(costPrice) / Number(servings) : 0;
   const suggestedPrice = margin ? Math.round(costPerServing / (1 - Number(margin) / 100)) : Math.round(costPerServing);
@@ -251,20 +283,57 @@ function StockGeneralTab({
         </div>
         <div className="mt-4 divide-y divide-white/5">
           {eventProducts.length === 0 && <p className="py-4 text-sm text-white/35">Todavía no cargaste productos.</p>}
-          {eventProducts.map((ep) => (
-            <div key={ep.id} className="flex items-center justify-between py-3">
-              <div>
-                <p className="font-bold">{ep.product?.name ?? "Producto"}</p>
-                <p className="text-xs text-white/40">Costo {money(ep.cost_price_minor)} · Venta {money(ep.sale_price_minor)} · Stock total {ep.total_stock}</p>
+          {eventProducts.map((ep) => {
+            const imageUrl = productImageUrl(ep.product?.image_path);
+            const isOwn = ep.product?.organization_id === organizationId;
+            return (
+              <div key={ep.id} className="flex items-center justify-between gap-3 py-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-black/40">
+                    {imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={imageUrl} alt="" className="h-full w-full object-contain" />
+                    ) : (
+                      <span className="text-[9px] text-white/20">S/F</span>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate font-bold">{ep.product?.name ?? "Producto"}</p>
+                    <p className="text-xs text-white/40">Costo {money(ep.cost_price_minor)} · Venta {money(ep.sale_price_minor)} · Stock total {ep.total_stock}</p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {isOwn && <ImageUploadButton productId={ep.product_id} onUploaded={onSaved} onError={onError} />}
+                  <span className="text-xs text-white/30">Alerta en {ep.low_stock_threshold}</span>
+                </div>
               </div>
-              <span className="text-xs text-white/30">Alerta en {ep.low_stock_threshold}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 
       <section className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.03] p-6">
         <h2 className="text-lg font-bold">Agregar / actualizar producto</h2>
+
+        <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-4">
+          <p className="text-xs font-bold uppercase tracking-wide text-white/40">¿No está en la lista?</p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <input
+              value={newProductName} onChange={(e) => setNewProductName(e.target.value)} placeholder="Nombre del trago"
+              className="h-10 rounded-lg border border-white/15 bg-black px-3 text-sm"
+            />
+            <input
+              value={newProductBrand} onChange={(e) => setNewProductBrand(e.target.value)} placeholder="Marca (opcional)"
+              className="h-10 rounded-lg border border-white/15 bg-black px-3 text-sm"
+            />
+          </div>
+          <button
+            type="button" disabled={creatingProduct || !newProductName.trim()} onClick={createCustomProduct}
+            className="mt-2 h-9 rounded-lg border border-white/20 px-4 text-xs font-bold uppercase tracking-wide disabled:opacity-40"
+          >
+            {creatingProduct ? "Creando..." : "+ Agregar a mi catálogo"}
+          </button>
+        </div>
 
         <label className="mt-4 block text-xs text-white/40">
           Producto del catálogo
@@ -776,6 +845,51 @@ function AlertasTab({
         {alerts.length === 0 && <p className="text-sm text-white/35">Sin alertas por ahora.</p>}
       </div>
     </section>
+  );
+}
+
+function ImageUploadButton({
+  productId, onUploaded, onError,
+}: {
+  productId: string; onUploaded: () => void; onError: (msg: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function handleFile(file: File) {
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("productId", productId);
+      form.append("file", file);
+      const response = await fetch("/api/stock/products/image", { method: "POST", body: form });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      onUploaded();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "No se pudo subir la imagen.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <>
+      <input
+        ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleFile(file);
+          e.target.value = "";
+        }}
+      />
+      <button
+        type="button" disabled={uploading} onClick={() => inputRef.current?.click()}
+        className="rounded-lg border border-white/15 px-2 py-1 text-[10px] font-bold uppercase text-white/50 disabled:opacity-40"
+      >
+        {uploading ? "..." : "📷 Foto"}
+      </button>
+    </>
   );
 }
 

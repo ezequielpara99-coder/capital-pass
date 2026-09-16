@@ -44,8 +44,8 @@ export async function GET(request: NextRequest) {
 
   const [{ data: products }, { data: barStockRows }] = await Promise.all([
     productIds.length
-      ? admin.from("products").select("id, name, category, brand, image_path").in("id", productIds)
-      : Promise.resolve({ data: [] as { id: string; name: string; category: string; brand: string | null; image_path: string | null }[] }),
+      ? admin.from("products").select("id, name, category, brand, image_path, organization_id").in("id", productIds)
+      : Promise.resolve({ data: [] as { id: string; name: string; category: string; brand: string | null; image_path: string | null; organization_id: string | null }[] }),
     eventProductIds.length
       ? admin.from("bar_stock").select("bar_id, event_product_id, quantity").in("event_product_id", eventProductIds)
       : Promise.resolve({ data: [] as { bar_id: string; event_product_id: string; quantity: number }[] }),

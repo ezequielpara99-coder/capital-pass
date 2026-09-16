@@ -13,6 +13,7 @@ const itemsReturnMigration = readFileSync(new URL("../supabase/migrations/202609
 const paymentMethodMigration = readFileSync(new URL("../supabase/migrations/20260920_metodo_pago_venta.sql", import.meta.url), "utf8");
 const stockMigration = readFileSync(new URL("../supabase/migrations/20260921_stock_barras_bartenders_mesas.sql", import.meta.url), "utf8");
 const barraSinMesaMigration = readFileSync(new URL("../supabase/migrations/20260922_venta_barra_sin_mesa.sql", import.meta.url), "utf8");
+const productAssetsMigration = readFileSync(new URL("../supabase/migrations/20260923_product_assets_bucket.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -67,6 +68,7 @@ async function database() {
   await db.exec(paymentMethodMigration);
   await db.exec(stockMigration);
   await db.exec(barraSinMesaMigration);
+  await db.exec(productAssetsMigration);
   return db;
 }
 

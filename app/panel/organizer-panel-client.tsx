@@ -537,7 +537,7 @@ export default function OrganizerPanelClient({
                 </h3>
               </div>
 
-              <div className="grid gap-[1px] bg-white/[0.08] sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-[1px] bg-white/[0.08] sm:grid-cols-2 xl:grid-cols-5">
 
                 <QuickLink
                   number="01"
@@ -571,6 +571,15 @@ export default function OrganizerPanelClient({
                   label="Informes"
                   href={withEvent(
                     "/panel/informes",
+                    eventId
+                  )}
+                />
+
+                <QuickLink
+                  number="05"
+                  label="Imprimir carta de tragos"
+                  href={withEvent(
+                    "/panel/stock/carta",
                     eventId
                   )}
                 />

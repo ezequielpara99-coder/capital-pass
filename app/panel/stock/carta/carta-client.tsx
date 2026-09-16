@@ -2,17 +2,23 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { createClient } from "../../../../lib/supabase/client";
 
 type EventProduct = {
   id: string;
   sale_price_minor: number;
-  product: { name: string; category: string; brand: string | null } | null;
+  product: { name: string; category: string; brand: string | null; image_path: string | null } | null;
 };
 
 type Theme = "diseno" | "blanco";
 
 function money(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
+}
+
+function productImageUrl(path: string | null | undefined) {
+  if (!path) return null;
+  return createClient().storage.from("product-assets").getPublicUrl(path).data.publicUrl;
 }
 
 const CATEGORY_KEYWORDS: { match: string; label: string }[] = [
@@ -171,13 +177,20 @@ export default function CartaClient({
                 )}
 
                 <div className={`grid grid-cols-1 gap-x-10 gap-y-2 sm:grid-cols-2 ${isDesign ? "bg-white/[0.03] px-5 py-4" : "py-3"}`}>
-                  {items.map((ep) => (
-                    <div key={ep.id} className="flex items-baseline gap-2">
-                      <span className="shrink-0 text-sm font-bold">{ep.product?.name}</span>
-                      <span className={`translate-y-[-3px] flex-1 border-b border-dotted ${isDesign ? "border-white/30" : "border-black/40"}`} />
-                      <span className="shrink-0 font-mono text-sm font-bold">{money(ep.sale_price_minor)}</span>
-                    </div>
-                  ))}
+                  {items.map((ep) => {
+                    const imageUrl = productImageUrl(ep.product?.image_path);
+                    return (
+                      <div key={ep.id} className="flex items-baseline gap-2">
+                        {imageUrl && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={imageUrl} alt="" className="h-6 w-6 shrink-0 translate-y-1 rounded object-contain" />
+                        )}
+                        <span className="shrink-0 text-sm font-bold">{ep.product?.name}</span>
+                        <span className={`translate-y-[-3px] flex-1 border-b border-dotted ${isDesign ? "border-white/30" : "border-black/40"}`} />
+                        <span className="shrink-0 font-mono text-sm font-bold">{money(ep.sale_price_minor)}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </section>
             ))}

@@ -287,11 +287,12 @@ export default async function AdminPage() {
             Accesos rápidos
           </h2>
 
-          <div className="mt-6 grid gap-[1px] bg-white/[0.08] sm:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-6 grid gap-[1px] bg-white/[0.08] sm:grid-cols-2 xl:grid-cols-5">
             <QuickLink number="01" label="Organizaciones" href="/admin/organizaciones" />
             <QuickLink number="02" label="Suscripciones" href="/admin/suscripciones" />
             <QuickLink number="03" label="Panel organizador" href="/panel" />
             <QuickLink number="04" label="Informes" href="/panel/informes" />
+            <QuickLink number="05" label="Productos (catálogo)" href="/admin/productos" />
           </div>
         </section>
       </section>
