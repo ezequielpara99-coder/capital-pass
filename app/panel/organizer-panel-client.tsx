@@ -651,6 +651,11 @@ function Sidebar({
       ),
       active: false,
     },
+    {
+      label: "Cobros",
+      href: "/panel/cobros",
+      active: false,
+    },
   ];
 
   return (

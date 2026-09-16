@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { createAdminClient } from "../../../lib/supabase/admin";
+import EventCheckout from "./event-checkout";
 
 export default async function PublicEventPage({
   params,
@@ -21,6 +22,7 @@ export default async function PublicEventPage({
     .from("events")
     .select(`
       id,
+      organization_id,
       name,
       description,
       starts_at,
@@ -54,6 +56,14 @@ export default async function PublicEventPage({
       .order("created_at", {
         ascending: true,
       });
+
+  const { data: mpAccount } = await admin
+    .from("organization_mercadopago_accounts")
+    .select("organization_id")
+    .eq("organization_id", event.organization_id)
+    .maybeSingle();
+
+  const canBuyOnline = Boolean(mpAccount);
 
   const date =
     new Intl.DateTimeFormat(
@@ -364,96 +374,18 @@ export default async function PublicEventPage({
 
             </div>
 
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-
-              {(ticketTypes ??
-                []).map(
-                (ticket) => {
-
-                  const available =
-                    ticket.status ===
-                      "available" &&
-                    ticket.active;
-
-                  return (
-
-                    <article
-                      key={
-                        ticket.id
-                      }
-                      className="group relative overflow-hidden rounded-[26px] border border-[#ff5a2a]/[0.13] bg-gradient-to-br from-[#ff3b24]/[0.055] via-white/[0.025] to-[#ff5a2a]/[0.02] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[#ff5a2a]/[0.28] hover:shadow-[0_22px_70px_rgba(255,42,26,.09)]"
-                    >
-
-                      <div className="pointer-events-none absolute right-[-70px] top-[-90px] h-48 w-48 rounded-full bg-[#ff3b24]/[0.09] blur-[70px]" />
-
-                      <div className="relative">
-
-                        <div className="flex items-start justify-between gap-4">
-
-                          <div>
-
-                            <h3 className="text-xl font-bold">
-                              {
-                                ticket.name
-                              }
-                            </h3>
-
-                            {ticket.description && (
-
-                              <p className="mt-2 text-sm leading-6 text-white/35">
-                                {
-                                  ticket.description
-                                }
-                              </p>
-
-                            )}
-
-                          </div>
-
-                          <span
-                            className={`shrink-0 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${
-                              available
-                                ? "border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-200"
-                                : ticket.status ===
-                                    "sold_out"
-                                  ? "border-red-400/20 bg-red-400/[0.07] text-red-200"
-                                  : "border-[#ff5a2a]/20 bg-[#ff5a2a]/[0.07] text-[#ff9b82]"
-                            }`}
-                          >
-                            {formatTicketStatus(
-                              ticket.status
-                            )}
-                          </span>
-
-                        </div>
-
-                        <p className="mt-7 text-3xl font-black tracking-tight">
-                          {formatMoney(
-                            Number(
-                              ticket.price_minor
-                            )
-                          )}
-                        </p>
-
-                      </div>
-
-                    </article>
-
-                  );
-                }
-              )}
-
-            </div>
-
-            {(ticketTypes ??
-              []).length ===
-              0 && (
-
-              <div className="mt-5 rounded-[24px] border border-white/[0.08] bg-white/[0.025] p-7 text-sm text-white/35">
-                No hay entradas disponibles para mostrar actualmente.
-              </div>
-
-            )}
+            <EventCheckout
+              slug={slug}
+              canBuyOnline={canBuyOnline}
+              ticketTypes={(ticketTypes ?? []).map((ticket) => ({
+                id: ticket.id,
+                name: ticket.name,
+                description: ticket.description,
+                priceMinor: Number(ticket.price_minor),
+                status: ticket.status,
+                active: ticket.active,
+              }))}
+            />
 
           </section>
 
@@ -497,19 +429,6 @@ function getAssetPublicUrl(
 // FORMATTERS
 // ============================================================
 
-function formatMoney(
-  value: number
-) {
-  return new Intl.NumberFormat(
-    "es-AR",
-    {
-      style: "currency",
-      currency: "ARS",
-      maximumFractionDigits: 0,
-    }
-  ).format(value);
-}
-
 function formatStatus(
   status: string
 ) {
@@ -526,22 +445,4 @@ function formatStatus(
     return "Cancelado";
 
   return "Evento";
-}
-
-function formatTicketStatus(
-  status: string
-) {
-  if (status === "available")
-    return "Disponible";
-
-  if (status === "sold_out")
-    return "Agotada";
-
-  if (status === "upcoming")
-    return "Próximamente";
-
-  if (status === "paused")
-    return "Pausada";
-
-  return status;
 }

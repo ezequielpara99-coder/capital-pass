@@ -7,6 +7,7 @@ type Row = { seccion: string; objeto: string; detalle: unknown };
 const fixture = JSON.parse(readFileSync(new URL("./schema.fixture.json", import.meta.url), "utf8")) as Row[];
 const migration = readFileSync(new URL("../supabase/migrations/20260913_account_before_payment.sql", import.meta.url), "utf8");
 const checkoutProMigration = readFileSync(new URL("../supabase/migrations/20260916_checkout_pro.sql", import.meta.url), "utf8");
+const onlineSalesMigration = readFileSync(new URL("../supabase/migrations/20260917_ventas_online.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -33,7 +34,17 @@ async function database() {
   }
   await db.exec(`create table events(id uuid primary key, organization_id uuid, status public.event_status);
     create table event_staff(event_id uuid, organization_member_id uuid, staff_role public.event_staff_role, active boolean);
-    create table sales(id uuid primary key, seller_member_id uuid);
+    create table sales(id uuid primary key default gen_random_uuid(), organization_id uuid, event_id uuid, buyer_id uuid,
+      seller_member_id uuid, status public.sale_status default 'confirmed', total_minor bigint default 0, currency text default 'ARS',
+      channel public.sale_channel default 'organizer', confirmed_at timestamptz, created_at timestamptz default now(), updated_at timestamptz default now());
+    create table buyers(id uuid primary key default gen_random_uuid(), organization_id uuid, first_name text, last_name text, dni text, phone text, email text);
+    create table ticket_types(id uuid primary key default gen_random_uuid(), event_id uuid, name text, price_minor bigint default 0,
+      currency text default 'ARS', capacity integer, active boolean default true, status public.ticket_type_status default 'available',
+      sales_start_at timestamptz, sales_end_at timestamptz, updated_at timestamptz default now());
+    create table sale_items(id uuid primary key default gen_random_uuid(), sale_id uuid, event_id uuid, ticket_type_id uuid,
+      quantity integer, unit_price_minor bigint);
+    create table tickets(id uuid primary key default gen_random_uuid(), sale_item_id uuid, sale_id uuid, event_id uuid,
+      ticket_type_id uuid, status public.ticket_status default 'issued', display_number integer, manual_code text);
     create function public.is_platform_admin() returns boolean language sql stable security definer set search_path='' as $$
       select exists(select 1 from public.platform_admins where user_id=auth.uid()) $$;`);
   for (const row of fixture.filter((r) => r.seccion === "funciones_de_acceso")) await db.exec((row.detalle as { definicion: string }).definicion);
@@ -45,6 +56,7 @@ async function database() {
   await db.exec("grant select on all tables in schema public to authenticated; grant all on all tables in schema public to service_role;");
   await db.exec(migration);
   await db.exec(checkoutProMigration);
+  await db.exec(onlineSalesMigration);
   return db;
 }
 
@@ -103,5 +115,68 @@ test("migracion real: alta, cobro, RLS, repetidos, reembolsos y recuperacion", a
   assert.equal(await scalar(`select cp_org_has_service('${org}')`), true);
   await db.exec(migration);
   assert.equal(await scalar("select count(*)::int from subscription_payments"), 1, "reaplicar conserva el historial");
+  await db.close();
+});
+
+test("ventas online: carrito, confirmacion, cupo y limpieza de pendientes", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const admin = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const org = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const event = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const ticketType = "11111111-1111-4111-8111-111111111111";
+  const cart = (qty: number) => `'[{"ticket_type_id":"${ticketType}","quantity":${qty}}]'::jsonb`;
+  const buyer = (n: string) => `'Comprador','${n}','30${n}','3462${n}',null`;
+
+  await db.exec(`insert into auth.users values ('${admin}','admin@example.test',now(),'{}');
+    insert into platform_admins(user_id) values ('${admin}');
+    insert into organizations(id,name,slug) values ('${org}','Club','club');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into ticket_types(id,event_id,name,price_minor,capacity,active,status)
+      values ('${ticketType}','${event}','General',5000,2,true,'available');
+    select set_config('request.jwt.claim.sub','${admin}',false);`);
+
+  // Sin conectar Mercado Pago todavia, el carrito debe rechazarse.
+  await assert.rejects(
+    () => db.query(`select * from create_online_sale('${event}', ${cart(1)}, ${buyer("111111")})`),
+    /Mercado Pago/, "no debe permitir vender sin cuenta de MP conectada"
+  );
+
+  await db.exec(`insert into organization_mercadopago_accounts(organization_id,mp_user_id,access_token,refresh_token,expires_at)
+    values ('${org}', 999, 'tok', 'ref', now() + interval '1 day');`);
+
+  const sale = await scalar(`select sale_id::text from create_online_sale('${event}', ${cart(2)}, ${buyer("222222")})`);
+  assert.equal(await scalar(`select status from sales where id='${sale}'`), "pending_approval");
+  assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${sale}'`), 0, "no se emiten entradas hasta confirmar el pago");
+
+  // Un segundo carrito no puede reservar mas del cupo restante mientras el primero sigue pendiente.
+  await assert.rejects(
+    () => db.query(`select * from create_online_sale('${event}', ${cart(1)}, ${buyer("333333")})`),
+    /No hay suficientes entradas/, "el cupo reservado por un carrito pendiente cuenta para otros compradores"
+  );
+
+  await db.query("select confirm_online_sale($1,'approved')", [sale]);
+  assert.equal(await scalar(`select status from sales where id='${sale}'`), "confirmed");
+  assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${sale}'`), 2);
+  assert.equal(await scalar(`select status from ticket_types where id='${ticketType}'`), "sold_out", "se agoto con las 2 entradas confirmadas");
+
+  // Idempotencia: un reintento del webhook no debe duplicar entradas.
+  await db.query("select confirm_online_sale($1,'approved')", [sale]);
+  assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${sale}'`), 2);
+
+  await db.exec(`update ticket_types set status='available', capacity=10 where id='${ticketType}'`);
+
+  // Un pago rechazado cancela la venta y no emite entradas.
+  const rejectedSale = await scalar(`select sale_id::text from create_online_sale('${event}', ${cart(1)}, ${buyer("444444")})`);
+  await db.query("select confirm_online_sale($1,'rejected')", [rejectedSale]);
+  assert.equal(await scalar(`select status from sales where id='${rejectedSale}'`), "cancelled");
+  assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${rejectedSale}'`), 0);
+
+  // Limpieza de carritos abandonados.
+  const staleSale = await scalar(`select sale_id::text from create_online_sale('${event}', ${cart(1)}, ${buyer("555555")})`);
+  await db.exec(`update sales set created_at = now() - interval '40 minutes' where id='${staleSale}'`);
+  assert.equal(await scalar("select cp_cancel_stale_online_sales()"), 1);
+  assert.equal(await scalar(`select status from sales where id='${staleSale}'`), "cancelled");
+
   await db.close();
 });

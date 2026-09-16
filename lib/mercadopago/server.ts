@@ -43,6 +43,29 @@ export function getPlatformMercadoPago() {
   };
 }
 
+// Cliente de Mercado Pago operando con la cuenta propia de un organizador
+// (Marketplace/OAuth), para que el dinero de sus ventas online le caiga
+// directo a su cuenta en vez de a la de Capital Pass.
+export function getOrganizerMercadoPago(accessToken: string) {
+  const client =
+    new MercadoPagoConfig({
+      accessToken,
+
+      options: {
+        timeout: 10000,
+      },
+    });
+
+  return {
+    client,
+
+    preference:
+      new Preference(
+        client
+      ),
+  };
+}
+
 export function getAppBaseUrl() {
   const url =
     process.env
