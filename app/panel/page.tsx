@@ -1454,8 +1454,23 @@ export default async function OrganizerPanel({
           aria-label="Atención al cliente por WhatsApp"
           className="group fixed bottom-5 right-5 z-[250] inline-flex items-center gap-3 rounded-2xl border border-emerald-300/20 bg-[#07110d]/92 px-4 py-3 text-white shadow-[0_18px_55px_rgba(16,185,129,.16),inset_0_1px_0_rgba(255,255,255,.05)] backdrop-blur-xl transition duration-200 hover:scale-[1.03] hover:border-emerald-300/35 hover:bg-[#0a1711] md:bottom-7 md:right-7"
         >
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-300/20 bg-emerald-400/[0.09] text-lg shadow-[0_0_25px_rgba(16,185,129,.10)]">
-            ☎
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-300/20 bg-emerald-400/[0.09] text-emerald-300 shadow-[0_0_25px_rgba(16,185,129,.10)]">
+            <svg
+              viewBox="0 0 24 24"
+              className="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 13v-1a8 8 0 0 1 16 0v1" />
+              <path d="M3 13a2 2 0 0 1 2-2h1v5H5a2 2 0 0 1-2-2v-1Z" />
+              <path d="M21 13a2 2 0 0 0-2-2h-1v5h1a2 2 0 0 0 2-2v-1Z" />
+              <path d="M18 16v1a3 3 0 0 1-3 3h-2" />
+              <circle cx="12" cy="19" r="1.2" />
+            </svg>
           </span>
 
           <span className="hidden sm:block">

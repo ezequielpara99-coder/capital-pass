@@ -1406,8 +1406,23 @@ export default function Home() {
         aria-label="Contactar soporte de Capital Pass"
         className="group fixed bottom-5 right-5 z-[100] flex h-14 items-center gap-3 rounded-full border border-[#ff6a47]/30 bg-[#0b0908]/90 px-4 text-white shadow-[0_14px_50px_rgba(0,0,0,.35),0_0_30px_rgba(255,59,36,.12)] backdrop-blur-xl transition hover:scale-[1.04] hover:border-[#ff6a47]/60"
       >
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#ff3b24] text-[9px] font-black">
-          WA
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#ff3b24] text-white">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-[18px] w-[18px]"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 13v-1a8 8 0 0 1 16 0v1" />
+            <path d="M3 13a2 2 0 0 1 2-2h1v5H5a2 2 0 0 1-2-2v-1Z" />
+            <path d="M21 13a2 2 0 0 0-2-2h-1v5h1a2 2 0 0 0 2-2v-1Z" />
+            <path d="M18 16v1a3 3 0 0 1-3 3h-2" />
+            <circle cx="12" cy="19" r="1.2" />
+          </svg>
         </span>
 
         <span className="hidden text-[9px] font-black uppercase tracking-[0.16em] sm:block">
