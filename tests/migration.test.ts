@@ -12,6 +12,7 @@ const totalChargedMigration = readFileSync(new URL("../supabase/migrations/20260
 const itemsReturnMigration = readFileSync(new URL("../supabase/migrations/20260919_online_sale_items_return.sql", import.meta.url), "utf8");
 const paymentMethodMigration = readFileSync(new URL("../supabase/migrations/20260920_metodo_pago_venta.sql", import.meta.url), "utf8");
 const stockMigration = readFileSync(new URL("../supabase/migrations/20260921_stock_barras_bartenders_mesas.sql", import.meta.url), "utf8");
+const barraSinMesaMigration = readFileSync(new URL("../supabase/migrations/20260922_venta_barra_sin_mesa.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -65,6 +66,7 @@ async function database() {
   await db.exec(itemsReturnMigration);
   await db.exec(paymentMethodMigration);
   await db.exec(stockMigration);
+  await db.exec(barraSinMesaMigration);
   return db;
 }
 
@@ -309,6 +311,19 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
     () => db.query(`select adjust_bar_stock('${bar}','${eventProduct}',-100,'perdida','Motivo')`),
     /negativo/
   );
+
+  // El bartender tambien puede vender sin atarse a una mesa (cliente en el mostrador).
+  await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
+  const barSaleNoTable = await db.query<{ bar_sale_id: string; total_minor: string }>(
+    `select bar_sale_id, total_minor from create_bartender_sale('${bar}',null,'${eventProduct}',1,'efectivo')`
+  );
+  assert.equal(Number(barSaleNoTable.rows[0].total_minor), 2000, "1 trago a 2000");
+  assert.equal(
+    await scalar(`select table_id from bar_sales where id='${barSaleNoTable.rows[0].bar_sale_id}'`),
+    null,
+    "la venta sin mesa debe guardar table_id null"
+  );
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 3, "4 - 1 vendido sin mesa");
 
   void organizerMember;
   await db.close();

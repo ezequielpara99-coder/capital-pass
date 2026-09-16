@@ -84,7 +84,7 @@ export default function BartenderPage() {
       const response = await fetch("/api/stock/bartender-sale", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ barId, tableId, eventProductId, quantity, paymentMethod }),
+        body: JSON.stringify({ barId, tableId: tableId === "NONE" ? null : tableId, eventProductId, quantity, paymentMethod }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo registrar la venta.");
@@ -193,8 +193,17 @@ export default function BartenderPage() {
         ) : (
           <div className="mt-6 space-y-5">
             <section>
-              <p className="mb-2 text-xs uppercase tracking-[0.15em] text-white/40">Mesa</p>
+              <p className="mb-2 text-xs uppercase tracking-[0.15em] text-white/40">Mesa (opcional)</p>
               <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTableId("NONE")}
+                  className={`h-14 rounded-xl border text-sm font-bold ${
+                    tableId === "NONE" ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-300" : "border-white/10 bg-white/[0.03] text-white/60"
+                  }`}
+                >
+                  Sin mesa
+                </button>
                 {tables.map((table) => (
                   <button
                     key={table.id}
@@ -208,7 +217,7 @@ export default function BartenderPage() {
                   </button>
                 ))}
               </div>
-              {tables.length === 0 && <p className="text-sm text-white/30">Todavía no hay mesas cargadas.</p>}
+              {tables.length === 0 && <p className="text-sm text-white/30">Todavía no hay mesas cargadas. Podés vender igual eligiendo &quot;Sin mesa&quot;.</p>}
             </section>
 
             <section>

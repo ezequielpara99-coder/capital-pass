@@ -6,13 +6,13 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const barId = String(body.barId ?? "").trim();
-    const tableId = String(body.tableId ?? "").trim();
+    const tableId = String(body.tableId ?? "").trim() || null;
     const eventProductId = String(body.eventProductId ?? "").trim();
     const quantity = Number(body.quantity);
     const paymentMethod = String(body.paymentMethod ?? "").trim();
 
-    if (!barId || !tableId || !eventProductId || !Number.isInteger(quantity) || quantity <= 0 || !paymentMethod) {
-      return NextResponse.json({ error: "Completá mesa, bebida, cantidad y método de pago." }, { status: 400 });
+    if (!barId || !eventProductId || !Number.isInteger(quantity) || quantity <= 0 || !paymentMethod) {
+      return NextResponse.json({ error: "Completá bebida, cantidad y método de pago." }, { status: 400 });
     }
 
     const supabase = await createClient();
@@ -38,7 +38,9 @@ export async function POST(request: NextRequest) {
     const admin = createAdminClient();
     const [{ data: eventProduct }, { data: table }, { data: profile }] = await Promise.all([
       admin.from("event_products").select("product_id").eq("id", eventProductId).maybeSingle(),
-      admin.from("bar_tables").select("name").eq("id", tableId).maybeSingle(),
+      tableId
+        ? admin.from("bar_tables").select("name").eq("id", tableId).maybeSingle()
+        : Promise.resolve({ data: null as { name: string } | null }),
       admin.from("profiles").select("first_name, last_name").eq("id", user.id).maybeSingle(),
     ]);
 
@@ -55,7 +57,7 @@ export async function POST(request: NextRequest) {
         totalMinor: Number(result?.total_minor ?? 0),
         productName,
         quantity,
-        tableName: table?.name ?? "Mesa",
+        tableName: table?.name ?? "Barra / mostrador",
         bartenderName: profile ? `${profile.first_name} ${profile.last_name}`.trim() : "Bartender",
         paymentMethod,
         createdAt: new Date().toISOString(),
