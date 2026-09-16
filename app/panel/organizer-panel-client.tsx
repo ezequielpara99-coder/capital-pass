@@ -767,6 +767,17 @@ function Sidebar({
             )
           )}
         </div>
+
+        <Link
+          href="/panel/stock"
+          onClick={onNavigate}
+          className="group mt-4 flex min-h-[48px] items-center gap-3 border border-emerald-400/25 bg-emerald-500/[0.06] px-3 text-emerald-300 transition hover:bg-emerald-500/[0.12]"
+        >
+          <span className="w-5 text-[13px]">🍸</span>
+          <span className="flex-1 text-[10px] font-black uppercase tracking-[0.10em]">
+            Stock
+          </span>
+        </Link>
       </nav>
 
       {/* ORGANIZACIÓN */}

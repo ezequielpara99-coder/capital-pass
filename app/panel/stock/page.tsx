@@ -1,0 +1,64 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+
+import { createClient } from "../../../lib/supabase/server";
+import { createAdminClient } from "../../../lib/supabase/admin";
+import StockPanelClient from "./stock-panel-client";
+
+export const dynamic = "force-dynamic";
+
+export default async function StockPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ eventId?: string }>;
+}) {
+  const params = await searchParams;
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: membership } = await supabase
+    .from("organization_members")
+    .select("id, organization_id")
+    .eq("user_id", user.id)
+    .eq("role", "organizer")
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+
+  if (!membership) redirect("/panel");
+
+  const admin = createAdminClient();
+
+  const { data: events } = await admin
+    .from("events")
+    .select("id, name")
+    .eq("organization_id", membership.organization_id)
+    .order("starts_at", { ascending: false });
+
+  const eventList = events ?? [];
+  const currentEventId = params.eventId ?? eventList[0]?.id ?? null;
+
+  if (!currentEventId) {
+    return (
+      <main className="relative min-h-screen bg-black text-white">
+        <div className="mx-auto max-w-xl px-5 py-16 text-center">
+          <p className="text-xs uppercase tracking-[0.2em] text-white/40">Capital Pass · Stock</p>
+          <h1 className="mt-4 text-3xl font-black">Todavía no hay eventos</h1>
+          <p className="mt-3 text-sm text-white/50">Creá un evento primero para poder cargar su stock.</p>
+          <Link href="/panel/eventos" className="mt-7 inline-flex h-12 items-center rounded-xl border border-white/15 px-6 text-sm font-bold">
+            Ir a mis eventos
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <StockPanelClient
+      organizationId={membership.organization_id}
+      events={eventList}
+      currentEventId={currentEventId}
+    />
+  );
+}
