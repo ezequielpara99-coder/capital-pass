@@ -6,6 +6,7 @@ import { PGlite } from "@electric-sql/pglite";
 type Row = { seccion: string; objeto: string; detalle: unknown };
 const fixture = JSON.parse(readFileSync(new URL("./schema.fixture.json", import.meta.url), "utf8")) as Row[];
 const migration = readFileSync(new URL("../supabase/migrations/20260913_account_before_payment.sql", import.meta.url), "utf8");
+const checkoutProMigration = readFileSync(new URL("../supabase/migrations/20260916_checkout_pro.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -43,6 +44,7 @@ async function database() {
   }
   await db.exec("grant select on all tables in schema public to authenticated; grant all on all tables in schema public to service_role;");
   await db.exec(migration);
+  await db.exec(checkoutProMigration);
   return db;
 }
 
@@ -87,6 +89,11 @@ test("migracion real: alta, cobro, RLS, repetidos, reembolsos y recuperacion", a
   await db.query("select cp_record_payment($1,'real','refunded',10000,'ARS',$2,$3)", [signup, paidAt, new Date(Date.now() + 1000).toISOString()]);
   await db.query("select cp_record_payment($1,'real','approved',10000,'ARS',$2,$3)", [signup, paidAt, updated]);
   assert.equal(await scalar(`select cp_org_has_service('${org}')`), false, "un webhook atrasado no revierte el reembolso");
+  // Checkout Pro: una renovacion debe poder re-lockear el mismo signup aunque
+  // ya tenga un mercadopago_preapproval_id (preference) de un pago anterior.
+  await db.exec(`update subscription_signups set checkout_started_at = now() - interval '3 minutes' where id = '${signup}'`);
+  assert.equal(await scalar(`select cp_lock_checkout('${signup}')`), true, "debe permitir re-lockear para renovar tras vencer");
+  assert.equal(await scalar(`select cp_lock_checkout('${signup}')`), false, "el enfriamiento de 2 minutos sigue vigente");
   await db.exec(`insert into subscription_signups(plan_id,first_name,last_name,organization_name,email,mercadopago_preapproval_id)
     values ('${plan}','Owner','Test','Club','OWNER@example.test','legacy-owner'), ('${plan}','Other','Test','Other','other@example.test','legacy-other');
     select cp_ensure_account('${user}');`);

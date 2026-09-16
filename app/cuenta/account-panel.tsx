@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Plan = { id: string; name: string; price_minor: number; currency: string; billing_interval: string };
-type Account = { active: boolean; destination: string; organizationName: string; canManage: boolean; isAdmin: boolean; email: string; hasSignup: boolean; mpStatus: string | null };
+type Account = { active: boolean; destination: string; organizationName: string; canManage: boolean; isAdmin: boolean; email: string; hasSignup: boolean; mpStatus: string | null; periodEnd: string | null };
 
 export default function AccountPanel({ initial, plans, returning }: { initial: Account; plans: Plan[]; returning: boolean }) {
   const [account, setAccount] = useState(initial);
@@ -78,6 +78,7 @@ export default function AccountPanel({ initial, plans, returning }: { initial: A
         <section className="mt-10 border border-white/[0.09] bg-[#080706]/90 p-7 shadow-[0_30px_120px_rgba(0,0,0,.35),inset_0_1px_0_rgba(255,255,255,.035)] backdrop-blur-2xl sm:p-9">
           <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#ff7958]">{account.active ? "Servicio activo" : "Servicio bloqueado"}</p>
           <h2 className="mt-3 text-2xl font-black uppercase tracking-[-0.03em]">{account.active ? "Todo listo para trabajar" : "Activá tu suscripción"}</h2>
+          {account.active && account.periodEnd && !account.isAdmin && <p className="mt-3 text-sm leading-6 text-white/50">Tu suscripción vence el {new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "long", year: "numeric" }).format(new Date(account.periodEnd))}. Te avisamos por email antes de esa fecha.</p>}
           {account.active ? <Link href={account.destination} className="cp-punch mt-7 inline-flex h-14 items-center bg-[#ff3b24] px-6 text-[11px] font-black uppercase tracking-[0.24em] text-white shadow-[0_18px_50px_rgba(255,59,36,.3)] transition hover:scale-[1.02] hover:bg-[#ff4a32] active:scale-[0.99]">{account.isAdmin ? "Entrar al administrador" : "Entrar a mi panel"}</Link>
             : !account.canManage ? <p className="mt-4 text-sm leading-6 text-white/60">El organizador debe activar el servicio para habilitar tu acceso. Si tu cuenta fue deshabilitada, contactalo.</p>
             : <>

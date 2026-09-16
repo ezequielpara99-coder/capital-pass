@@ -1,6 +1,6 @@
 ﻿import {
   MercadoPagoConfig,
-  PreApproval,
+  Preference,
 } from "mercadopago";
 
 function requiredEnv(
@@ -36,8 +36,8 @@ export function getPlatformMercadoPago() {
   return {
     client,
 
-    preApproval:
-      new PreApproval(
+    preference:
+      new Preference(
         client
       ),
   };

@@ -28,34 +28,35 @@ export async function POST(request: NextRequest) {
     const prepared = await admin.rpc("cp_prepare_checkout", { p_user_id: user.id, p_plan_id: body.planId });
     if (prepared.error) throw new Error("No se pudo preparar la suscripcion.");
     const signup = prepared.data as Signup;
-    if (signup.mercadopago_preapproval_id) {
-      const existing = safeCheckoutUrl(signup.checkout_url);
-      if (signup.mp_status !== "pending" || !existing) {
-        return NextResponse.json({ ok: false, error: "Ya hay una suscripcion en proceso. Usa Verificar mi pago; no inicies otra compra." }, { status: 409 });
-      }
-      return NextResponse.json({ ok: true, checkoutUrl: existing });
-    }
     const lock = await admin.rpc("cp_lock_checkout", { p_signup_id: signup.id });
     if (lock.error || !lock.data) return NextResponse.json({ ok: false, error: "Estamos preparando tu suscripcion. Espera unos segundos y reintenta." }, { status: 409 });
     const { data: plan, error: planError } = await admin.from("subscription_plans").select("name").eq("id", signup.plan_id).single();
     if (planError) throw new Error("No se pudo consultar el plan.");
-    const result = await getPlatformMercadoPago().preApproval.create({
+    // Checkout Pro: cada alta o renovacion genera un link de pago nuevo.
+    // No hay autorizacion recurrente; el organizador paga una vez por periodo.
+    const result = await getPlatformMercadoPago().preference.create({
       body: {
-        reason: plan.name, external_reference: `capitalpass_signup:${signup.id}`,
-        payer_email: signup.email, status: "pending",
-        back_url: `${getAppBaseUrl()}/cuenta?retorno=mercadopago`,
-        auto_recurring: {
-          frequency: signup.frequency_months, frequency_type: "months",
-          transaction_amount: Number(signup.expected_amount), currency_id: signup.expected_currency,
+        items: [{
+          id: signup.plan_id, title: `Capital Pass - ${plan.name}`, quantity: 1,
+          unit_price: Number(signup.expected_amount), currency_id: signup.expected_currency,
+        }],
+        payer: { email: signup.email },
+        external_reference: `capitalpass_signup:${signup.id}`,
+        back_urls: {
+          success: `${getAppBaseUrl()}/cuenta?retorno=mercadopago`,
+          pending: `${getAppBaseUrl()}/cuenta?retorno=mercadopago`,
+          failure: `${getAppBaseUrl()}/cuenta?retorno=mercadopago`,
         },
+        auto_return: "approved",
+        binary_mode: true,
       },
-      requestOptions: { idempotencyKey: signup.id },
+      requestOptions: { idempotencyKey: `${signup.id}:${signup.checkout_started_at}` },
     });
     const checkoutUrl = safeCheckoutUrl(result.init_point);
     if (!result.id || !checkoutUrl) throw new Error("Mercado Pago no devolvio un enlace valido.");
     const saved = await admin.from("subscription_signups").update({
       mercadopago_preapproval_id: result.id, checkout_url: checkoutUrl,
-      mp_status: result.status, mercadopago_external_reference: `capitalpass_signup:${signup.id}`,
+      mp_status: "pending", mercadopago_external_reference: `capitalpass_signup:${signup.id}`,
     }).eq("id", signup.id);
     if (saved.error) throw new Error("No se pudo guardar el intento de pago.");
     return NextResponse.json({ ok: true, checkoutUrl });

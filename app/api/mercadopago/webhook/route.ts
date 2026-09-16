@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { WebhookSignatureValidator } from "mercadopago";
-import { reconcilePreapproval } from "../../../../lib/billing/server";
-import { getInvoice, invoicesFor } from "../../../../lib/billing/provider";
+import { reconcilePayment } from "../../../../lib/billing/server";
 import { validResourceId } from "../../../../lib/billing/rules";
 
 export const runtime = "nodejs";
@@ -30,16 +29,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Referencia inconsistente." }, { status: 400 });
     }
     const type = body.type ?? request.nextUrl.searchParams.get("type");
-    if (type === "subscription_preapproval") {
-      await reconcilePreapproval(id);
-    } else if (type === "subscription_authorized_payment") {
-      const invoice = await getInvoice(id);
-      await reconcilePreapproval(invoice.preapproval_id, [invoice]);
-    } else if (type === "payment") {
-      const invoices = await invoicesFor({ payment_id: id });
-      for (const invoice of invoices.filter((item) => String(item.payment?.id) === id)) {
-        await reconcilePreapproval(invoice.preapproval_id, [invoice]);
-      }
+    if (type === "payment") {
+      await reconcilePayment(id);
     } else {
       return NextResponse.json({ ok: true, ignored: true });
     }

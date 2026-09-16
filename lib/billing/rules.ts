@@ -30,7 +30,7 @@ export type ProviderPayment = {
   id: number | string; status: string; transaction_amount: number;
   transaction_amount_refunded?: number; currency_id: string;
   date_approved: string | null; date_last_updated: string;
-  collector_id: number; live_mode: boolean;
+  collector_id: number; live_mode: boolean; external_reference?: string | null;
 };
 
 export function verifiedPayment(payment: ProviderPayment, expected: {

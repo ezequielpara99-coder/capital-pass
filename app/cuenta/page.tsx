@@ -40,5 +40,6 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
     active: account.active, destination: account.destination, organizationName: account.organizationName,
     canManage: Boolean(account.organizationId), isAdmin: account.isAdmin, email: account.email,
     hasSignup: Boolean(account.signup), mpStatus: account.signup?.mp_status ?? null,
+    periodEnd: account.periodEnd,
   }} plans={plans} returning={params.retorno === "mercadopago"} />;
 }

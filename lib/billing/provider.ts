@@ -1,11 +1,5 @@
 import "server-only";
-import { getPlatformMercadoPago } from "../mercadopago/server";
 import { validResourceId, type ProviderPayment } from "./rules";
-
-export type Invoice = {
-  id: number | string; preapproval_id: string; debit_date?: string;
-  payment?: { id?: number | string; status?: string };
-};
 
 async function get<T>(path: string): Promise<T> {
   const token = process.env.MERCADOPAGO_PLATFORM_ACCESS_TOKEN?.trim();
@@ -23,24 +17,25 @@ function resource(value: string) {
   return encodeURIComponent(value);
 }
 
-export function getPreapproval(id: string) {
-  resource(id);
-  return getPlatformMercadoPago().preApproval.get({ id });
+export function getPayment(id: string) { return get<ProviderPayment>(`/v1/payments/${resource(id)}`); }
+
+let cachedCollectorId: number | null = null;
+
+// El id de nuestra propia cuenta de cobro, para verificar que un pago
+// reportado por Mercado Pago efectivamente nos pertenece a nosotros.
+export async function getPlatformCollectorId() {
+  if (cachedCollectorId != null) return cachedCollectorId;
+  const me = await get<{ id: number }>("/users/me");
+  cachedCollectorId = me.id;
+  return me.id;
 }
 
-export function getPayment(id: string) { return get<ProviderPayment>(`/v1/payments/${resource(id)}`); }
-export function getInvoice(id: string) { return get<Invoice>(`/authorized_payments/${resource(id)}`); }
-
-export async function invoicesFor(filter: { preapproval_id: string } | { payment_id: string }) {
-  const params = new URLSearchParams({ ...filter, limit: "100" });
-  const all: Invoice[] = [];
-  // Incluye las renovaciones; nunca usa solo la primera pagina del historial.
-  for (let offset = 0; offset < 1000; offset += 100) {
-    params.set("offset", String(offset));
-    const page = await get<{ results?: Invoice[]; paging?: { total?: number } }>(`/authorized_payments/search?${params}`);
-    const results = page.results ?? [];
-    all.push(...results);
-    if (results.length < 100 || offset + results.length >= (page.paging?.total ?? Infinity)) return all;
-  }
-  throw new Error("El historial requiere una conciliacion adicional.");
+// Busca pagos de Checkout Pro por external_reference (formato
+// "capitalpass_signup:<uuid>"). Se usa tanto desde el webhook como desde
+// "Verificar mi pago" para reconciliar sin depender de una notificacion.
+export async function paymentsForReference(externalReference: string) {
+  if (!/^capitalpass_signup:[0-9a-f-]{36}$/i.test(externalReference)) throw new Error("Referencia invalida.");
+  const params = new URLSearchParams({ external_reference: externalReference, sort: "date_created", criteria: "desc" });
+  const page = await get<{ results?: ProviderPayment[] }>(`/v1/payments/search?${params}`);
+  return page.results ?? [];
 }
