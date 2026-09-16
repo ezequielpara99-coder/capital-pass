@@ -45,7 +45,10 @@ async function tokenRequest(body: Record<string, string>) {
       ...body,
     }),
   });
-  if (!response.ok) throw new Error(`No se pudo intercambiar el token de Mercado Pago (${response.status}).`);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`No se pudo intercambiar el token de Mercado Pago (${response.status}): ${detail}`);
+  }
   return response.json() as Promise<OAuthTokenResponse>;
 }
 
