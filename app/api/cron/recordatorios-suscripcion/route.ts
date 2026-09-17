@@ -40,16 +40,37 @@ export async function GET(request: NextRequest) {
 
   for (const subscription of pending) {
     const { data: signup } = subscription.signup_id
-      ? await admin.from("subscription_signups").select("first_name, last_name").eq("id", subscription.signup_id).maybeSingle()
+      ? await admin.from("subscription_signups").select("first_name, last_name, organization_id").eq("id", subscription.signup_id).maybeSingle()
       : { data: null };
 
     const customerName = signup ? `${signup.first_name} ${signup.last_name}`.trim() : subscription.organization_name;
+
+    // Si pago un upgrade a Gestion avanzada vigente para este mismo
+    // periodo, avisar con ese nombre de plan en vez del original (que no
+    // se toca al hacer un upgrade, para no arriesgar pisarlo con un
+    // reintento del webhook de la basica).
+    let planName = subscription.plan_name;
+    if (signup?.organization_id) {
+      const { data: upgrade } = await admin
+        .from("plan_upgrade_charges")
+        .select("to_plan_id")
+        .eq("organization_id", signup.organization_id)
+        .eq("status", "approved")
+        .eq("period_end_at_charge", subscription.current_period_end)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (upgrade?.to_plan_id) {
+        const { data: upgradedPlan } = await admin.from("subscription_plans").select("name").eq("id", upgrade.to_plan_id).maybeSingle();
+        if (upgradedPlan?.name) planName = upgradedPlan.name;
+      }
+    }
 
     const result = await sendRenewalReminder({
       to: subscription.payer_email,
       customerName,
       organizationName: subscription.organization_name,
-      planName: subscription.plan_name,
+      planName,
       periodEnd: subscription.current_period_end,
       renewUrl: `${getAppBaseUrl()}/cuenta`,
     });
