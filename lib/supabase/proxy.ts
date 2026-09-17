@@ -45,6 +45,10 @@ function isDoorRoute(pathname: string) {
   return isSameOrChildRoute(pathname, "/puerta");
 }
 
+function isBartenderRoute(pathname: string) {
+  return isSameOrChildRoute(pathname, "/bartender");
+}
+
 function isPrivateRoute(pathname: string) {
   return (
     isSameOrChildRoute(pathname, "/cuenta") ||
@@ -52,7 +56,8 @@ function isPrivateRoute(pathname: string) {
     isRRPPRoute(pathname) ||
     isAdminRoute(pathname) ||
     isControlRoute(pathname) ||
-    isDoorRoute(pathname)
+    isDoorRoute(pathname) ||
+    isBartenderRoute(pathname)
   );
 }
 
@@ -91,6 +96,10 @@ function roleDestination(memberships: Membership[]) {
     (membership) => membership.role === "door_seller"
   );
 
+  const isBartender = memberships.some(
+    (membership) => membership.role === "bartender"
+  );
+
   if (isOrganizer) {
     return "/panel";
   }
@@ -105,6 +114,10 @@ function roleDestination(memberships: Membership[]) {
 
   if (isDoorSeller) {
     return "/puerta";
+  }
+
+  if (isBartender) {
+    return "/bartender";
   }
 
   return "/cuenta";
@@ -248,6 +261,14 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (isDoorRoute(pathname) && !hasRole("door_seller")) {
+    return redirectKeepingCookies(
+      request,
+      supabaseResponse,
+      destination
+    );
+  }
+
+  if (isBartenderRoute(pathname) && !hasRole("bartender")) {
     return redirectKeepingCookies(
       request,
       supabaseResponse,
