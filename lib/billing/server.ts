@@ -17,7 +17,7 @@ export async function accountFor(user: User) {
   const admin = createAdminClient();
   const { data: platformAdmin, error: adminError } = await admin.from("platform_admins").select("user_id").eq("user_id", user.id).maybeSingle();
   if (adminError) throw new Error("No se pudo verificar el acceso.");
-  if (platformAdmin) return { active: true, destination: "/admin", organizationId: null, organizationName: "Capital Pass", isAdmin: true, signup: null, email: user.email ?? "", periodEnd: null as string | null };
+  if (platformAdmin) return { active: true, destination: "/admin", organizationId: null, organizationName: "Capital Pass", isAdmin: true, signup: null, email: user.email ?? "", periodEnd: null as string | null, lastPlanId: null as string | null };
   const { data, error } = await admin.from("organization_members").select("organization_id, role, status").eq("user_id", user.id).order("created_at");
   if (error) throw new Error("No se pudo verificar la cuenta.");
   const members = (data ?? []) as BillingMembership[];
@@ -41,11 +41,21 @@ export async function accountFor(user: User) {
   const { data: subscription } = organizationId
     ? await admin.from("organization_subscriptions").select("current_period_end").eq("organization_id", organizationId).maybeSingle()
     : { data: null };
+  // Si la organizacion pago un upgrade de plan vigente para el periodo
+  // actual, ese es el plan a preseleccionar en la renovacion -- no el de
+  // la solicitud original, que sigue apuntando al plan viejo.
+  const { data: upgrade } = organizationId
+    ? await admin.from("plan_upgrade_charges").select("to_plan_id")
+        .eq("organization_id", organizationId).eq("status", "approved")
+        .gte("period_end_at_charge", new Date().toISOString())
+        .order("created_at", { ascending: false }).limit(1).maybeSingle()
+    : { data: null };
   return {
     active: entitled.length > 0, destination: destinationFor(entitled), organizationId,
     organizationName: org?.name ?? "Mi cuenta", isAdmin: false,
     signup: (signups?.[0] ?? null) as Signup | null, email: user.email ?? "",
     periodEnd: subscription?.current_period_end ?? null,
+    lastPlanId: upgrade?.to_plan_id ?? signups?.[0]?.plan_id ?? null,
   };
 }
 

@@ -4,11 +4,15 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Plan = { id: string; name: string; price_minor: number; currency: string; billing_interval: string };
-type Account = { active: boolean; destination: string; organizationName: string; canManage: boolean; isAdmin: boolean; email: string; hasSignup: boolean; mpStatus: string | null; periodEnd: string | null };
+type Account = { active: boolean; destination: string; organizationName: string; canManage: boolean; isAdmin: boolean; email: string; hasSignup: boolean; mpStatus: string | null; periodEnd: string | null; lastPlanId: string | null };
 
 export default function AccountPanel({ initial, plans, returning }: { initial: Account; plans: Plan[]; returning: boolean }) {
   const [account, setAccount] = useState(initial);
-  const [planId, setPlanId] = useState(plans[0]?.id ?? "");
+  // Si la organizacion ya eligio un plan antes (incluye un upgrade pagado
+  // en el periodo vigente), lo recordamos para la renovacion en vez de
+  // arrancar siempre desde el plan mas barato.
+  const preferredPlanId = initial.lastPlanId && plans.some((p) => p.id === initial.lastPlanId) ? initial.lastPlanId : plans[0]?.id ?? "";
+  const [planId, setPlanId] = useState(preferredPlanId);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
