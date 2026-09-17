@@ -18,6 +18,7 @@ const perfilReclamosMigration = readFileSync(new URL("../supabase/migrations/202
 const pushNotificationsMigration = readFileSync(new URL("../supabase/migrations/20260925_notificaciones_push.sql", import.meta.url), "utf8");
 const planAvanzadoTrialMigration = readFileSync(new URL("../supabase/migrations/20260926_plan_avanzado_trial_stock.sql", import.meta.url), "utf8");
 const capitalRentalsMigration = readFileSync(new URL("../supabase/migrations/20260927_capital_rentals.sql", import.meta.url), "utf8");
+const trialAlUsarStockMigration = readFileSync(new URL("../supabase/migrations/20260928_trial_arranca_al_usar_stock.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -77,6 +78,7 @@ async function database() {
   await db.exec(pushNotificationsMigration);
   await db.exec(planAvanzadoTrialMigration);
   await db.exec(capitalRentalsMigration);
+  await db.exec(trialAlUsarStockMigration);
   return db;
 }
 
@@ -403,9 +405,13 @@ test("plan gestion avanzada y prueba de 7 dias del modulo de stock", async () =>
     insert into subscription_signups(id,plan_id,organization_id,first_name,last_name,organization_name,email,expected_amount,expected_currency,frequency_months)
       values ('${signupExpired}','${basicPlan}','${orgExpired}','Org','Test','Club Vencido','vencido@example.test',10000,'ARS',1);`);
 
-  // Basica recien activada: dentro de la prueba de 7 dias, tiene acceso a stock.
+  // Basica recien activada: todavia no toco el modulo de stock, no debe existir ninguna prueba.
   await db.query(`select cp_record_payment('${signupTrial}','pay-trial','approved',10000,'ARS',now(),now())`);
+  assert.equal(await scalar(`select count(*)::int from stock_trial where organization_id = '${orgTrial}'`), 0, "la prueba no arranca sola al pagar");
+
+  // La primera vez que abre/usa el modulo de stock, recien ahi arranca la prueba de 7 dias.
   assert.equal(await scalar(`select cp_org_has_stock_access('${orgTrial}')`), true);
+  assert.equal(await scalar(`select count(*)::int from stock_trial where organization_id = '${orgTrial}'`), 1, "el primer uso crea la prueba");
 
   // Gestion avanzada: acceso a stock sin depender de ninguna prueba.
   await db.query(`select cp_record_payment('${signupAvanzada}','pay-avanzada','approved',190000,'ARS',now(),now())`);
@@ -414,8 +420,9 @@ test("plan gestion avanzada y prueba de 7 dias del modulo de stock", async () =>
 
   // Basica con la prueba ya vencida: pierde el acceso a stock (pero sigue con el servicio activo para entradas).
   await db.query(`select cp_record_payment('${signupExpired}','pay-vencido','approved',10000,'ARS',now(),now())`);
-  await db.exec(`update stock_trial set starts_at = now() - interval '10 days', ends_at = now() - interval '3 days' where organization_id = '${orgExpired}'`);
   assert.equal(await scalar(`select cp_org_has_service('${orgExpired}')`), true, "la suscripcion basica sigue activa");
+  assert.equal(await scalar(`select cp_org_has_stock_access('${orgExpired}')`), true, "primera vez que usa stock, arranca la prueba recien ahora");
+  await db.exec(`update stock_trial set starts_at = now() - interval '10 days', ends_at = now() - interval '3 days' where organization_id = '${orgExpired}'`);
   assert.equal(await scalar(`select cp_org_has_stock_access('${orgExpired}')`), false, "la prueba de stock ya vencio");
 
   // Un segundo cobro (renovacion) no reinicia la prueba ya usada.
