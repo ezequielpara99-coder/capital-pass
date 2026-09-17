@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
-import { authorizationUrl } from "../../../lib/mercadopago/oauth";
 
 async function updateFee(formData: FormData) {
   "use server";
@@ -161,7 +160,7 @@ export default async function CobrosPage({
                   Te vamos a redirigir a Mercado Pago para autorizar la conexión. Nunca vemos ni guardamos tu contraseña — solo un acceso para crear cobros en tu nombre.
                 </p>
                 <a
-                  href={authorizationUrl(membership.organization_id)}
+                  href="/api/mercadopago/oauth/start"
                   className="mt-7 inline-flex h-14 items-center bg-[#ff3b24] px-6 text-[11px] font-black uppercase tracking-[0.24em] text-white shadow-[0_18px_50px_rgba(255,59,36,.3)] transition hover:scale-[1.01] hover:bg-[#ff4a32] active:scale-[0.99]"
                 >
                   Conectar mi Mercado Pago

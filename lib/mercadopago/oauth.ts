@@ -20,17 +20,20 @@ export function oauthCallbackUrl() {
 }
 
 // Link de autorizacion que el organizador visita para conectar su propia
-// cuenta de Mercado Pago (Marketplace / OAuth). El state lleva su
-// organization_id para saber a quien pertenece el token cuando MP nos
-// devuelva el codigo.
-export function authorizationUrl(organizationId: string) {
+// cuenta de Mercado Pago (Marketplace / OAuth). El state es un token
+// aleatorio de un solo uso (no el organization_id): protege contra que
+// alguien arme a mano un link de callback con el "state" de otro, use un
+// "code" propio, y termine conectando SU cuenta de Mercado Pago a la
+// organizacion de otro organizador. Ver /api/mercadopago/oauth/start y
+// /api/mercadopago/oauth/callback.
+export function authorizationUrl(state: string) {
   const clientId = requiredEnv("MERCADOPAGO_CLIENT_ID");
   const params = new URLSearchParams({
     client_id: clientId,
     response_type: "code",
     platform_id: "mp",
     redirect_uri: oauthCallbackUrl(),
-    state: organizationId,
+    state,
   });
   return `https://auth.mercadopago.com.ar/authorization?${params}`;
 }

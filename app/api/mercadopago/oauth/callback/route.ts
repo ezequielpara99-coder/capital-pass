@@ -7,24 +7,44 @@ import { getAppBaseUrl } from "../../../../../lib/mercadopago/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const COOKIE_NAME = "mp_oauth_csrf";
+
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
-  const organizationId = request.nextUrl.searchParams.get("state");
+  const state = request.nextUrl.searchParams.get("state");
   const mpError = request.nextUrl.searchParams.get("error");
-  const failed = (reason: string) => NextResponse.redirect(`${getAppBaseUrl()}/panel/cobros?error=${encodeURIComponent(reason)}`);
+  const failed = (reason: string) => {
+    const response = NextResponse.redirect(`${getAppBaseUrl()}/panel/cobros?error=${encodeURIComponent(reason)}`);
+    response.cookies.delete({ name: COOKIE_NAME, path: "/api/mercadopago/oauth" });
+    return response;
+  };
 
   if (mpError) return failed(`Mercado Pago: ${mpError}`);
   if (!code) return failed("Falta el codigo de autorizacion en la respuesta de Mercado Pago.");
-  if (!organizationId || !/^[0-9a-f-]{36}$/i.test(organizationId)) return failed("El parametro state no es un organization_id valido.");
+  if (!state) return failed("Falta el parametro state en la respuesta de Mercado Pago.");
+
+  // El "state" que vuelve de Mercado Pago tiene que coincidir con el token
+  // que guardamos en una cookie propia cuando arrancamos este flow (ver
+  // /api/mercadopago/oauth/start). Sin esto, alguien podria armar a mano un
+  // link de callback con el organization_id de otro organizador y un
+  // "code" propio, y terminar conectando SU cuenta de Mercado Pago a la
+  // organizacion de otro -- el organization_id NUNCA sale del query string,
+  // sale de esta cookie.
+  const cookieValue = request.cookies.get(COOKIE_NAME)?.value;
+  const [csrfToken, organizationId] = cookieValue?.split(":") ?? [];
+  if (!csrfToken || !organizationId || !/^[0-9a-f-]{36}$/i.test(organizationId)) {
+    return failed("El enlace de conexión venció o ya se usó. Volvé a intentar desde Cobros.");
+  }
+  if (state !== csrfToken) {
+    return failed("El enlace de conexión no es válido.");
+  }
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return failed("No hay una sesion de Capital Pass activa en este navegador.");
 
-  // El state trae el organization_id, pero antes de guardar nada verificamos
-  // que quien completo el OAuth sea efectivamente organizador activo de esa
-  // organizacion -- si no, alguien podria intentar conectar su propia cuenta
-  // de Mercado Pago a una organizacion ajena armando el link a mano.
+  // Defensa en profundidad: ademas del CSRF token, confirmamos que quien
+  // completo el OAuth sigue siendo organizador activo de esa organizacion.
   const admin = createAdminClient();
   const { data: membership } = await admin.from("organization_members")
     .select("id").eq("organization_id", organizationId).eq("user_id", user.id)
@@ -37,5 +57,7 @@ export async function GET(request: NextRequest) {
     return failed(`No se pudo canjear el codigo con Mercado Pago: ${error instanceof Error ? error.message : "error desconocido"}`);
   }
 
-  return NextResponse.redirect(`${getAppBaseUrl()}/panel/cobros?conectado=1`);
+  const response = NextResponse.redirect(`${getAppBaseUrl()}/panel/cobros?conectado=1`);
+  response.cookies.delete({ name: COOKIE_NAME, path: "/api/mercadopago/oauth" });
+  return response;
 }
