@@ -822,8 +822,7 @@ export default function Home() {
               <p className="mt-8 max-w-[680px] text-sm leading-7 text-[var(--cp-muted)] md:text-base">
                 Desde la primera entrada
                 vendida hasta el último
-                ingreso de la noche —y la
-                barra en el medio—.
+                ingreso de la noche.
                 Capital Pass organiza toda
                 la operación, incluyendo
                 stock, barras y bartenders,
