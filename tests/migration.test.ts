@@ -347,7 +347,15 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
     /ya estaba cancelada/
   );
 
+  // Un bartender tampoco puede cancelar ventas de mesa (solo el organizador).
+  await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
+  await assert.rejects(
+    () => db.query(`select cancel_table_sale('${tableSale}','Me equivoque')`),
+    /No tenes permiso/
+  );
+
   // Cancelar una venta de mesa libera la mesa para volver a venderla.
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);`);
   await db.query(`select cancel_table_sale('${tableSale}','Cliente no llego')`);
   assert.equal(await scalar(`select status from sales where id='${tableSale}'`), "cancelled");
   assert.equal(await scalar(`select status from bar_tables where id='${table}'`), "available");
