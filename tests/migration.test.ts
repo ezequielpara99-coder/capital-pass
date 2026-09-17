@@ -16,6 +16,8 @@ const barraSinMesaMigration = readFileSync(new URL("../supabase/migrations/20260
 const productAssetsMigration = readFileSync(new URL("../supabase/migrations/20260923_product_assets_bucket.sql", import.meta.url), "utf8");
 const perfilReclamosMigration = readFileSync(new URL("../supabase/migrations/20260924_perfil_reclamos_cancelaciones.sql", import.meta.url), "utf8");
 const pushNotificationsMigration = readFileSync(new URL("../supabase/migrations/20260925_notificaciones_push.sql", import.meta.url), "utf8");
+const planAvanzadoTrialMigration = readFileSync(new URL("../supabase/migrations/20260926_plan_avanzado_trial_stock.sql", import.meta.url), "utf8");
+const capitalRentalsMigration = readFileSync(new URL("../supabase/migrations/20260927_capital_rentals.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -73,6 +75,8 @@ async function database() {
   await db.exec(productAssetsMigration);
   await db.exec(perfilReclamosMigration);
   await db.exec(pushNotificationsMigration);
+  await db.exec(planAvanzadoTrialMigration);
+  await db.exec(capitalRentalsMigration);
   return db;
 }
 
@@ -369,5 +373,55 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
   assert.ok(resoldTable, "la mesa liberada se puede volver a vender");
 
   void organizerMember;
+  await db.close();
+});
+
+test("plan gestion avanzada y prueba de 7 dias del modulo de stock", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const orgTrial = "b1111111-1111-4111-8111-111111111111";
+  const orgAvanzada = "b2222222-2222-4222-8222-222222222222";
+  const orgExpired = "b3333333-3333-4333-8333-333333333333";
+  const basicPlan = "b4444444-4444-4444-8444-444444444444";
+  const signupTrial = "b5555555-5555-4555-8555-555555555555";
+  const signupAvanzada = "b6666666-6666-4666-8666-666666666666";
+  const signupExpired = "b7777777-7777-4777-8777-777777777777";
+
+  const avanzadaPlan = await scalar(`select id::text from subscription_plans where code = 'gestion_avanzada'`);
+  assert.ok(avanzadaPlan, "la migracion debe crear el plan gestion_avanzada");
+  assert.equal(await scalar(`select price_minor from subscription_plans where code = 'gestion_avanzada'`), 190000);
+
+  await db.exec(`insert into organizations(id,name,slug) values ('${orgTrial}','Club Trial','club-trial');
+    insert into organizations(id,name,slug) values ('${orgAvanzada}','Club Avanzada','club-avanzada');
+    insert into organizations(id,name,slug) values ('${orgExpired}','Club Vencido','club-vencido');
+    insert into subscription_plans(id,code,name,price_minor) values ('${basicPlan}','gestion_basica','Gestión básica',10000);
+    insert into subscription_signups(id,plan_id,organization_id,first_name,last_name,organization_name,email,expected_amount,expected_currency,frequency_months)
+      values ('${signupTrial}','${basicPlan}','${orgTrial}','Org','Test','Club Trial','trial@example.test',10000,'ARS',1);
+    insert into subscription_signups(id,plan_id,organization_id,first_name,last_name,organization_name,email,expected_amount,expected_currency,frequency_months)
+      values ('${signupAvanzada}','${avanzadaPlan}','${orgAvanzada}','Org','Test','Club Avanzada','avanzada@example.test',190000,'ARS',1);
+    insert into subscription_signups(id,plan_id,organization_id,first_name,last_name,organization_name,email,expected_amount,expected_currency,frequency_months)
+      values ('${signupExpired}','${basicPlan}','${orgExpired}','Org','Test','Club Vencido','vencido@example.test',10000,'ARS',1);`);
+
+  // Basica recien activada: dentro de la prueba de 7 dias, tiene acceso a stock.
+  await db.query(`select cp_record_payment('${signupTrial}','pay-trial','approved',10000,'ARS',now(),now())`);
+  assert.equal(await scalar(`select cp_org_has_stock_access('${orgTrial}')`), true);
+
+  // Gestion avanzada: acceso a stock sin depender de ninguna prueba.
+  await db.query(`select cp_record_payment('${signupAvanzada}','pay-avanzada','approved',190000,'ARS',now(),now())`);
+  assert.equal(await scalar(`select cp_org_has_stock_access('${orgAvanzada}')`), true);
+  assert.equal(await scalar(`select count(*)::int from stock_trial where organization_id = '${orgAvanzada}'`), 0, "gestion avanzada no necesita fila de prueba");
+
+  // Basica con la prueba ya vencida: pierde el acceso a stock (pero sigue con el servicio activo para entradas).
+  await db.query(`select cp_record_payment('${signupExpired}','pay-vencido','approved',10000,'ARS',now(),now())`);
+  await db.exec(`update stock_trial set starts_at = now() - interval '10 days', ends_at = now() - interval '3 days' where organization_id = '${orgExpired}'`);
+  assert.equal(await scalar(`select cp_org_has_service('${orgExpired}')`), true, "la suscripcion basica sigue activa");
+  assert.equal(await scalar(`select cp_org_has_stock_access('${orgExpired}')`), false, "la prueba de stock ya vencio");
+
+  // Un segundo cobro (renovacion) no reinicia la prueba ya usada.
+  await db.query(`select cp_record_payment('${signupExpired}','pay-vencido-2','approved',10000,'ARS',now(),now() + interval '1 month')`);
+  assert.equal(await scalar(`select count(*)::int from stock_trial where organization_id = '${orgExpired}'`), 1, "la prueba no se duplica ni se reinicia");
+  assert.equal(await scalar(`select cp_org_has_stock_access('${orgExpired}')`), false, "sigue vencida tras renovar la basica");
+
   await db.close();
 });

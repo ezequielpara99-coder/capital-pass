@@ -6,6 +6,19 @@ type VerifyResult =
   | { ok: true; userId: string; organizationId: string }
   | { ok: false; status: number; error: string };
 
+const STOCK_TRIAL_EXPIRED_ERROR =
+  "Tu prueba gratuita de 7 días del módulo de stock terminó. Actualizá a Gestión avanzada para seguir usándolo.";
+
+async function hasStockAccess(organizationId: string): Promise<boolean> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("cp_org_has_stock_access", { p_organization_id: organizationId });
+  if (error) {
+    console.error("cp_org_has_stock_access:", error);
+    return false;
+  }
+  return Boolean(data);
+}
+
 const FALLBACK_ADMIN_EMAILS = ["ezequiel.para99@gmail.com"];
 
 // Confirma que hay una sesion activa y que ese usuario es organizador
@@ -45,6 +58,10 @@ export async function verifyOrganizerForEvent(eventId: string): Promise<VerifyRe
 
   if (membershipError || !membership) {
     return { ok: false, status: 403, error: "No tenés permiso para administrar este evento." };
+  }
+
+  if (!(await hasStockAccess(event.organization_id))) {
+    return { ok: false, status: 402, error: STOCK_TRIAL_EXPIRED_ERROR };
   }
 
   return { ok: true, userId: user.id, organizationId: event.organization_id };
@@ -105,6 +122,10 @@ export async function verifyProductAccess(productId: string): Promise<VerifyResu
 
   if (!membership) {
     return { ok: false, status: 403, error: "No tenés permiso para editar este producto." };
+  }
+
+  if (!(await hasStockAccess(product.organization_id))) {
+    return { ok: false, status: 402, error: STOCK_TRIAL_EXPIRED_ERROR };
   }
 
   return { ok: true, userId: user.id, organizationId: product.organization_id };

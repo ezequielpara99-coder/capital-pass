@@ -12,6 +12,7 @@ import {
 import Link from "next/link";
 import { createClient } from "../lib/supabase/client";
 import InstallAppButton from "./install-app-button";
+import RentalsSection from "./rentals-section";
 
 /* =========================================================
    CONFIG
@@ -517,7 +518,7 @@ export default function Home() {
       "Hola Capital Pass, necesito ayuda con la plataforma."
     )}`;
 
-  const commonFeatures = [
+  const ticketFeatures = [
     "Gestión de eventos",
     "Tandas de entradas",
     "Entradas digitales con QR",
@@ -525,10 +526,20 @@ export default function Home() {
     "Control de accesos",
     "Venta en puerta",
     "Informes y métricas",
+  ];
+
+  const stockFeatures = [
     "Control de stock y barras",
     "Gestión de bartenders y mesas",
     "Análisis de precios y ganancia",
   ];
+
+  function featuresFor(plan: SubscriptionPlan) {
+    if (plan.code === "gestion_avanzada") {
+      return [...ticketFeatures, ...stockFeatures, "Futuras actualizaciones de la plataforma"];
+    }
+    return [...ticketFeatures, ...stockFeatures.map((f) => `${f} (prueba 7 días gratis)`)];
+  }
 
   return (
     <main
@@ -1232,7 +1243,7 @@ export default function Home() {
                           {/* FEATURES */}
 
                           <div className="relative mt-10 flex-1 border-t border-white/10 pt-5">
-                            {commonFeatures.map(
+                            {featuresFor(plan).map(
                               (
                                 feature
                               ) => (
@@ -1304,6 +1315,12 @@ export default function Home() {
           </p>
         </div>
       </section>
+
+      {/* =====================================================
+          CAPITAL RENTALS
+      ===================================================== */}
+
+      <RentalsSection />
 
       {/* =====================================================
           FINAL CTA
