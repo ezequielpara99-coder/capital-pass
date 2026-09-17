@@ -255,6 +255,33 @@ function StockGeneralTab({
   const [newProductBrand, setNewProductBrand] = useState("");
   const [creatingProduct, setCreatingProduct] = useState(false);
 
+  // Si el producto elegido ya tiene datos cargados para este evento, hay que
+  // traerlos al formulario -- si no, "Guardar" pisa el stock/costo/umbral
+  // existentes con lo que haya quedado tipeado del producto anterior.
+  useEffect(() => {
+    const existing = eventProducts.find((ep) => ep.product_id === productId);
+    const catalogProduct = catalog.find((p) => p.id === productId);
+    if (existing) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCostPrice(String(existing.cost_price_minor));
+      setServings(String(catalogProduct?.servings_per_bottle ?? 15));
+      setMargin(String(existing.profit_margin_percent));
+      setManualSalePrice(String(existing.sale_price_minor));
+      setManualOverride(true);
+      setTotalStock(String(existing.total_stock));
+      setThreshold(String(existing.low_stock_threshold));
+    } else {
+      setCostPrice("0");
+      setServings(String(catalogProduct?.servings_per_bottle ?? 15));
+      setMargin("50");
+      setManualSalePrice("0");
+      setManualOverride(false);
+      setTotalStock("0");
+      setThreshold("5");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId]);
+
   async function createCustomProduct() {
     if (!newProductName.trim()) return;
     setCreatingProduct(true);
