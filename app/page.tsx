@@ -524,6 +524,9 @@ export default function Home() {
     "Control de accesos",
     "Venta en puerta",
     "Informes y métricas",
+    "Control de stock y barras",
+    "Gestión de bartenders y mesas",
+    "Análisis de precios y ganancia",
   ];
 
   return (
@@ -701,16 +704,6 @@ export default function Home() {
         {/* CONTENT — todo el bloque entra en la primera pantalla (pc/tablet/mobile) */}
 
         <div className="relative z-10 mx-auto flex w-full max-w-[1560px] flex-1 flex-col items-center justify-center gap-4 px-5 text-center sm:gap-5 md:gap-6 md:px-8 xl:px-10">
-          <Reveal>
-            <div className="inline-flex items-center gap-3 border-2 border-[#ff5a2a]/45 bg-[#ff3b24]/[0.14] px-3 py-1.5 shadow-[0_0_30px_rgba(255,59,36,.25)] backdrop-blur-xl sm:px-4 sm:py-2">
-              <span className="cp-pulse h-2 w-2 rounded-full bg-[#ff3b24] shadow-[0_0_14px_#ff3b24]" />
-
-              <span className="text-[8px] font-black uppercase tracking-[0.22em] text-[#ffc2ac] sm:text-[9px]">
-                Event Operating System
-              </span>
-            </div>
-          </Reveal>
-
           {/* TITLE */}
 
           <Reveal
@@ -963,6 +956,12 @@ export default function Home() {
               "06",
               "Informes",
               "Datos históricos y métricas de rendimiento.",
+            ],
+
+            [
+              "07",
+              "Barras",
+              "Stock de bebidas, barras, bartenders, mesas y análisis de precios.",
             ],
           ].map(
             (
@@ -1330,8 +1329,8 @@ export default function Home() {
               >
                 Soporte
 
-                <span>
-                  ↗
+                <span className="transition group-hover:translate-x-1">
+                  →
                 </span>
               </a>
             </div>
