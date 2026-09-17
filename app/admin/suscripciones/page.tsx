@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import PlanesClient from "./planes-client";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -55,7 +56,7 @@ export default async function AdminSubscriptionsPage() {
     redirect("/admin");
   }
 
-  const [organizationsResult, subscriptionsResult] = await Promise.all([
+  const [organizationsResult, subscriptionsResult, plansResult] = await Promise.all([
     admin.from("organizations").select("id, name").limit(1000),
     admin
       .from("organization_subscriptions")
@@ -74,7 +75,22 @@ export default async function AdminSubscriptionsPage() {
       `)
       .order("created_at", { ascending: false })
       .limit(500),
+    admin
+      .from("subscription_plans")
+      .select("id, code, name, description, price_minor, currency, billing_interval, active")
+      .order("price_minor", { ascending: true }),
   ]);
+
+  const plans = (plansResult.data ?? []) as {
+    id: string;
+    code: string;
+    name: string;
+    description: string | null;
+    price_minor: number;
+    currency: string;
+    billing_interval: string;
+    active: boolean;
+  }[];
 
   const organizations =
     (organizationsResult.data ?? []) as OrganizationRow[];
@@ -171,6 +187,8 @@ export default async function AdminSubscriptionsPage() {
             accent
           />
         </section>
+
+        {plans.length > 0 && <PlanesClient plans={plans} />}
 
         <section className="mt-5 border border-white/[0.08] bg-[#090807]/92">
           <div className="border-b border-white/[0.07] px-5 py-5 md:px-6">
