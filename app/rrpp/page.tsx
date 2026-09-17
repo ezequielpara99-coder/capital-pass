@@ -326,19 +326,13 @@ export default async function RRPPPage() {
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  disabled
-                  className="rounded-2xl bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] px-7 py-3.5 text-sm font-bold text-white opacity-60"
+                <a
+                  href="/rrpp/nueva-venta"
+                  className="rounded-2xl bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] px-7 py-3.5 text-center text-sm font-bold text-white"
                 >
                   + Nueva venta
-                </button>
+                </a>
               </div>
-
-              <p className="mt-4 text-xs text-white/25">
-                Vamos a habilitar este botón en el próximo
-                paso.
-              </p>
             </section>
 
             {/* VENDER MESA */}
