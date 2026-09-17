@@ -17,6 +17,11 @@ export function saleFromReference(reference: unknown): string | null {
   return /^capitalpass_sale:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(reference)?.[1] ?? null;
 }
 
+export function upgradeChargeFromReference(reference: unknown): string | null {
+  if (typeof reference !== "string") return null;
+  return /^capitalpass_upgrade:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(reference)?.[1] ?? null;
+}
+
 export function validResourceId(value: unknown): value is string {
   return typeof value === "string" && /^[a-zA-Z0-9_-]{1,120}$/.test(value);
 }

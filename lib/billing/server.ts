@@ -1,7 +1,7 @@
 import "server-only";
 import type { User } from "@supabase/supabase-js";
 import { createAdminClient } from "../supabase/admin";
-import { destinationFor, signupFromReference, verifiedPayment, type BillingMembership, type ProviderPayment } from "./rules";
+import { destinationFor, signupFromReference, upgradeChargeFromReference, verifiedPayment, type BillingMembership, type ProviderPayment } from "./rules";
 import { getPayment, getPlatformCollectorId, paymentsForReference } from "./provider";
 import { sendSubscriptionReceipt } from "../email/subscription-receipt";
 
@@ -97,11 +97,68 @@ async function applyPayment(payment: ProviderPayment, signupId: string) {
   return true;
 }
 
+// =========================================================
+// UPGRADE DE PLAN (cobro unico de la diferencia prorrateada)
+// =========================================================
+
+async function applyUpgradeCharge(payment: ProviderPayment, chargeId: string) {
+  const admin = createAdminClient();
+  const { data, error } = await admin.from("plan_upgrade_charges").select("*").eq("id", chargeId).maybeSingle();
+  if (error) throw new Error("No se pudo consultar la actualizacion de plan.");
+  if (!data) return false;
+  const collectorId = await getPlatformCollectorId();
+  const verified = verifiedPayment(payment, {
+    amount: Number(data.amount_minor), currency: data.currency,
+    collectorId, live: process.env.MERCADOPAGO_ENV !== "sandbox",
+  });
+  const result = await admin.rpc("cp_apply_upgrade_payment", {
+    p_charge_id: chargeId, p_payment_id: String(payment.id), p_status: verified.status,
+    p_amount: payment.transaction_amount, p_currency: payment.currency_id, p_paid_at: verified.paidAt,
+  });
+  if (result.error) throw new Error("No se pudo registrar el cobro de actualizacion.");
+  return true;
+}
+
 export async function reconcilePayment(paymentId: string) {
   const payment = await getPayment(paymentId);
   const signupId = signupFromReference(payment.external_reference);
-  if (!signupId) return false;
-  return applyPayment(payment, signupId);
+  if (signupId) return applyPayment(payment, signupId);
+  const chargeId = upgradeChargeFromReference(payment.external_reference);
+  if (chargeId) return applyUpgradeCharge(payment, chargeId);
+  return false;
+}
+
+export async function reconcileUpgradeCharge(chargeId: string) {
+  const payments = await paymentsForReference(`capitalpass_upgrade:${chargeId}`);
+  let applied = false;
+  for (const payment of payments) {
+    if (await applyUpgradeCharge(payment, chargeId)) applied = true;
+  }
+  return applied;
+}
+
+export async function reconcileUpgradesForUser(user: User) {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("organization_members")
+    .select("organization_id")
+    .eq("user_id", user.id).eq("role", "organizer").eq("status", "active");
+  if (error) throw new Error("No se pudo verificar la organizacion.");
+  const orgIds = [...new Set((data ?? []).map((m) => m.organization_id))];
+  if (!orgIds.length) return { upgraded: false };
+  const { data: charges, error: chargesError } = await admin
+    .from("plan_upgrade_charges")
+    .select("id, status")
+    .in("organization_id", orgIds)
+    .eq("status", "pending")
+    .order("created_at", { ascending: false })
+    .limit(5);
+  if (chargesError) throw new Error("No se pudo buscar la actualizacion de plan.");
+  let upgraded = false;
+  for (const charge of charges ?? []) {
+    if (await reconcileUpgradeCharge(charge.id)) upgraded = true;
+  }
+  return { upgraded };
 }
 
 export async function reconcileSignup(signupId: string) {

@@ -19,6 +19,7 @@ const pushNotificationsMigration = readFileSync(new URL("../supabase/migrations/
 const planAvanzadoTrialMigration = readFileSync(new URL("../supabase/migrations/20260926_plan_avanzado_trial_stock.sql", import.meta.url), "utf8");
 const capitalRentalsMigration = readFileSync(new URL("../supabase/migrations/20260927_capital_rentals.sql", import.meta.url), "utf8");
 const trialAlUsarStockMigration = readFileSync(new URL("../supabase/migrations/20260928_trial_arranca_al_usar_stock.sql", import.meta.url), "utf8");
+const upgradePlanDiferenciaMigration = readFileSync(new URL("../supabase/migrations/20260929_upgrade_plan_diferencia.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -79,6 +80,7 @@ async function database() {
   await db.exec(planAvanzadoTrialMigration);
   await db.exec(capitalRentalsMigration);
   await db.exec(trialAlUsarStockMigration);
+  await db.exec(upgradePlanDiferenciaMigration);
   return db;
 }
 
@@ -429,6 +431,65 @@ test("plan gestion avanzada y prueba de 7 dias del modulo de stock", async () =>
   await db.query(`select cp_record_payment('${signupExpired}','pay-vencido-2','approved',10000,'ARS',now(),now() + interval '1 month')`);
   assert.equal(await scalar(`select count(*)::int from stock_trial where organization_id = '${orgExpired}'`), 1, "la prueba no se duplica ni se reinicia");
   assert.equal(await scalar(`select cp_org_has_stock_access('${orgExpired}')`), false, "sigue vencida tras renovar la basica");
+
+  await db.close();
+});
+
+test("upgrade de plan basica -> avanzada: cobra solo la diferencia prorrateada", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const org = "c1111111-1111-4111-8111-111111111111";
+  const organizerUser = "c2222222-2222-4222-8222-222222222222";
+  const basicPlan = "c3333333-3333-4333-8333-333333333333";
+  const signup = "c4444444-4444-4444-8444-444444444444";
+  const basicPrice = 10000;
+
+  const avanzadaId = await scalar(`select id::text from subscription_plans where code = 'gestion_avanzada'`);
+  assert.ok(avanzadaId, "el plan gestion_avanzada debe existir");
+
+  await db.exec(`insert into auth.users values ('${organizerUser}','upgrade-org@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club Upgrade','club-upgrade');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${organizerUser}','organizer','active');
+    insert into subscription_plans(id,code,name,price_minor) values ('${basicPlan}','basica-upgrade-test','Básica test',${basicPrice});
+    insert into subscription_signups(id,plan_id,organization_id,first_name,last_name,organization_name,email,expected_amount,expected_currency,frequency_months)
+      values ('${signup}','${basicPlan}','${org}','Org','Test','Club Upgrade','upgrade-org@example.test',${basicPrice},'ARS',1);`);
+
+  // Pago aprobado hace 15 dias de un periodo de 1 mes: quedan ~15 dias, o sea ~mitad del periodo.
+  await db.query(`select cp_record_payment('${signup}','pay-basica-upgrade','approved',${basicPrice},'ARS', now() - interval '15 days', now())`);
+  assert.equal(await scalar(`select cp_org_has_service('${org}')`), true);
+
+  const chargeResult = await db.query<{ result: { id: string; amount_minor: number; currency: string; checkout_url: string | null } }>(
+    `select cp_prepare_plan_upgrade('${organizerUser}','${avanzadaId}') as result`
+  );
+  const charge = chargeResult.rows[0].result;
+  assert.ok(charge.id, "debe crear un cobro de actualizacion");
+  assert.equal(charge.checkout_url, null);
+  // Diferencia completa (190000-10000=180000) prorrateada a ~mitad de periodo: cerca de 90000.
+  assert.ok(charge.amount_minor > 80000 && charge.amount_minor < 100000, `el monto prorrateado deberia rondar 90000, dio ${charge.amount_minor}`);
+
+  // Doble click / reintento: reutiliza el mismo cobro pendiente, no crea uno nuevo.
+  const secondCall = await db.query<{ result: { id: string } }>(
+    `select cp_prepare_plan_upgrade('${organizerUser}','${avanzadaId}') as result`
+  );
+  assert.equal(secondCall.rows[0].result.id, charge.id, "no debe duplicar el cobro pendiente");
+  assert.equal(await scalar(`select count(*)::int from plan_upgrade_charges where organization_id = '${org}'`), 1);
+
+  // Se aprueba el pago de la diferencia (sin haber tocado nunca el modulo de stock antes).
+  await db.query(`select cp_apply_upgrade_payment('${charge.id}','mp-payment-upgrade-1','approved',${charge.amount_minor},'ARS', now())`);
+  assert.equal(await scalar(`select status from plan_upgrade_charges where id = '${charge.id}'`), "approved");
+  assert.equal(await scalar(`select cp_org_has_stock_access('${org}')`), true, "el upgrade pagado da acceso solo, sin necesitar la prueba");
+  assert.equal(await scalar(`select count(*)::int from stock_trial where organization_id = '${org}'`), 0, "el upgrade no debe crear ni gastar la prueba de 7 dias");
+
+  // No se puede volver a pagar el mismo upgrade para el mismo periodo.
+  await assert.rejects(
+    () => db.query(`select cp_prepare_plan_upgrade('${organizerUser}','${avanzadaId}')`),
+    /Ya actualizaste tu plan/
+  );
+
+  // Reintento del webhook (mismo pago aplicado dos veces) es un no-op seguro.
+  await db.query(`select cp_apply_upgrade_payment('${charge.id}','mp-payment-upgrade-1','approved',${charge.amount_minor},'ARS', now())`);
+  assert.equal(await scalar(`select count(*)::int from plan_upgrade_charges where id = '${charge.id}' and status = 'approved'`), 1);
 
   await db.close();
 });

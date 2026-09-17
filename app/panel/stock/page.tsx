@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import StockPanelClient from "./stock-panel-client";
+import UpgradeScreen from "./upgrade-screen";
 
 export const dynamic = "force-dynamic";
 
@@ -35,31 +36,14 @@ export default async function StockPage({
   });
 
   if (!hasStockAccess) {
-    return (
-      <main className="relative min-h-screen overflow-hidden bg-black text-white">
-        <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-[#ff3b24]/20 blur-[120px]" />
-        <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-[#ff6530]/15 blur-[120px]" />
-        <div className="relative mx-auto max-w-xl px-5 py-20 text-center">
-          <p className="text-xs uppercase tracking-[0.2em] text-white/40">Capital Pass · Stock</p>
-          <h1 className="mt-4 text-3xl font-black">Tu prueba gratuita terminó</h1>
-          <p className="mt-3 text-sm text-white/50">
-            Ya usaste los 7 días de prueba del módulo de stock y barras. Para seguir usándolo —control de stock,
-            barras, bartenders y mesas— actualizá tu suscripción a <span className="font-bold text-white">Gestión avanzada</span>.
-          </p>
-          <Link
-            href="/cuenta"
-            className="mt-7 inline-flex h-12 items-center rounded-xl bg-gradient-to-r from-[#ff2a1a] via-[#ff3b24] to-[#ff6530] px-6 text-sm font-bold text-white shadow-[0_0_30px_rgba(255,59,36,.3)]"
-          >
-            Actualizar a Gestión avanzada
-          </Link>
-          <div className="mt-4">
-            <Link href="/panel" className="text-xs text-white/40 hover:text-white">
-              ← Volver al panel
-            </Link>
-          </div>
-        </div>
-      </main>
-    );
+    const { data: avanzadaPlan } = await admin
+      .from("subscription_plans")
+      .select("id, name, price_minor, currency")
+      .eq("code", "gestion_avanzada")
+      .eq("active", true)
+      .maybeSingle();
+
+    return <UpgradeScreen plan={avanzadaPlan} />;
   }
 
   const { data: events } = await admin
