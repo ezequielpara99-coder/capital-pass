@@ -128,10 +128,10 @@ export default function BartenderPage() {
             <p className="mt-4 text-xs font-bold uppercase tracking-[0.2em] text-emerald-300">Venta registrada</p>
           </div>
 
-          <div id="recibo" className="mt-6 rounded-2xl border border-white/15 bg-white/[0.03] p-6 font-mono text-sm print:border-black print:bg-white print:text-black">
-            <p className="text-center text-base font-bold">Capital Pass — Barra</p>
-            <p className="mt-1 text-center text-xs opacity-60">{eventName} · {barName}</p>
-            <div className="mt-4 border-t border-dashed border-white/20 pt-4 print:border-black">
+          <div id="recibo" className="mt-6 rounded-2xl border border-white/15 bg-white/[0.03] p-6 font-mono text-sm print:m-0 print:rounded-none print:border-0 print:bg-white print:p-1 print:text-[11px] print:text-black">
+            <p className="text-center text-base font-bold print:text-[12px]">Capital Pass — Barra</p>
+            <p className="mt-1 text-center text-xs opacity-60 print:text-[9px]">{eventName} · {barName}</p>
+            <div className="mt-4 border-t border-dashed border-white/20 pt-4 print:mt-2 print:border-black print:pt-2">
               <Row label="Mesa" value={receipt.tableName} />
               <Row label="Bebida" value={receipt.productName} />
               <Row label="Cantidad" value={String(receipt.quantity)} />
@@ -139,8 +139,8 @@ export default function BartenderPage() {
               <Row label="Pago" value={receipt.paymentMethod === "efectivo" ? "Efectivo" : "Transferencia"} />
               <Row label="Hora" value={new Date(receipt.createdAt).toLocaleTimeString("es-AR")} />
             </div>
-            <div className="mt-4 border-t border-dashed border-white/20 pt-4 print:border-black">
-              <div className="flex items-center justify-between text-lg font-bold">
+            <div className="mt-4 border-t border-dashed border-white/20 pt-4 print:mt-2 print:border-black print:pt-2">
+              <div className="flex items-center justify-between text-lg font-bold print:text-[13px]">
                 <span>TOTAL</span>
                 <span>{money(receipt.totalMinor)}</span>
               </div>
@@ -290,9 +290,16 @@ export default function BartenderPage() {
 
       <style>{`
         @media print {
+          @page { size: 58mm auto; margin: 0; }
+          html, body { width: 58mm; }
           body * { visibility: hidden; }
           #recibo, #recibo * { visibility: visible; }
-          #recibo { position: fixed; top: 0; left: 0; width: 100%; }
+          #recibo { position: fixed; top: 0; left: 0; width: 58mm; }
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
+          }
         }
       `}</style>
     </main>
