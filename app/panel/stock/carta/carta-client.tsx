@@ -205,7 +205,12 @@ export default function CartaClient({
       <style>{`
         @media print {
           @page { size: A4; margin: 14mm; }
-          body { background: ${isDesign ? "#000" : "#fff"} !important; }
+          html, body { background: ${isDesign ? "#000" : "#fff"} !important; }
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
+          }
         }
       `}</style>
     </main>
