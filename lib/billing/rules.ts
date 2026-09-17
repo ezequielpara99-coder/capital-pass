@@ -1,7 +1,7 @@
 export type BillingMembership = { organization_id: string; role: string; status: string };
 
 export function destinationFor(members: BillingMembership[]) {
-  for (const [role, path] of [["organizer", "/panel"], ["controller", "/control"], ["rrpp", "/rrpp"], ["door_seller", "/puerta"]]) {
+  for (const [role, path] of [["organizer", "/panel"], ["controller", "/control"], ["rrpp", "/rrpp"], ["door_seller", "/puerta"], ["bartender", "/bartender"]]) {
     if (members.some((m) => m.status === "active" && m.role === role)) return path;
   }
   return "/cuenta";
