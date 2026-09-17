@@ -910,6 +910,46 @@ export default async function NotificationsPage() {
     pendingRefunds.length +
     pendingDeliveryNotifications.length;
 
+  // ==========================================================
+  // STOCK BAJO (modulo de barra) -- seccion propia, independiente
+  // de las devoluciones/entregas de arriba, para no tocar esos
+  // calculos existentes.
+  // ==========================================================
+
+  const { data: eventProductsForStock } = await admin
+    .from("event_products")
+    .select("id, product_id, low_stock_threshold")
+    .eq("event_id", event.id);
+
+  const eventProductIdsForStock = (eventProductsForStock ?? []).map((ep) => ep.id);
+  const stockProductIds = (eventProductsForStock ?? []).map((ep) => ep.product_id);
+
+  const [{ data: barStockRows }, { data: barsForStock }, { data: productsForStock }] = await Promise.all([
+    eventProductIdsForStock.length
+      ? admin.from("bar_stock").select("bar_id, event_product_id, quantity").in("event_product_id", eventProductIdsForStock)
+      : Promise.resolve({ data: [] as { bar_id: string; event_product_id: string; quantity: number }[] }),
+    admin.from("bars").select("id, name").eq("event_id", event.id),
+    stockProductIds.length
+      ? admin.from("products").select("id, name").in("id", stockProductIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+  ]);
+
+  const eventProductByIdForStock = new Map((eventProductsForStock ?? []).map((ep) => [ep.id, ep]));
+  const barNameByIdForStock = new Map((barsForStock ?? []).map((b) => [b.id, b.name]));
+  const productNameByIdForStock = new Map((productsForStock ?? []).map((p) => [p.id, p.name]));
+
+  const lowStockAlerts = (barStockRows ?? [])
+    .map((row) => {
+      const ep = eventProductByIdForStock.get(row.event_product_id);
+      if (!ep || row.quantity > ep.low_stock_threshold) return null;
+      return {
+        barName: barNameByIdForStock.get(row.bar_id) ?? "Barra",
+        productName: productNameByIdForStock.get(ep.product_id) ?? "Producto",
+        quantity: row.quantity,
+        threshold: ep.low_stock_threshold,
+      };
+    })
+    .filter((a): a is { barName: string; productName: string; quantity: number; threshold: number } => a !== null);
 
   // ==========================================================
   // UI
@@ -1274,6 +1314,38 @@ export default async function NotificationsPage() {
             detail="Permanecen en el historial del evento."
           />
         )}
+
+        <section className="mt-6 border border-white/[0.09] bg-[#080706]/88">
+          <SectionTitle
+            eyebrow="Stock"
+            title="Bebidas con stock bajo"
+            count={lowStockAlerts.length}
+            tone="accent"
+          />
+
+          {lowStockAlerts.length === 0 ? (
+            <EmptyState
+              title="Todo en orden"
+              detail="Ninguna bebida está por debajo del umbral de alerta que configuraste en Stock general."
+              success
+            />
+          ) : (
+            <div className="divide-y divide-white/[0.08]">
+              {lowStockAlerts.map((alert, i) => (
+                <div key={i} className="flex items-center justify-between gap-4 px-5 py-4 md:px-6">
+                  <div>
+                    <p className="text-sm font-black text-[#f7f3ed]">{alert.productName}</p>
+                    <p className="mt-1 text-xs text-[#f7f3ed]/40">{alert.barName}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-black text-[#ffb29f]">{alert.quantity}</p>
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-[#f7f3ed]/30">de {alert.threshold}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
     </main>
   );

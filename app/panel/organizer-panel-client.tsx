@@ -792,25 +792,25 @@ function Sidebar({
       {/* ORGANIZACIÓN */}
 
       <div className="border-t border-white/[0.07] p-4">
-        <div className="border border-white/[0.07] bg-white/[0.018] p-4">
-
-          <div className="flex items-center gap-3">
-
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#ff5a2a]/20 bg-[#ff3b24]/[0.055] text-[9px] font-black">
-              {initials}
-            </div>
-
-            <div className="min-w-0">
-              <p className="truncate text-xs font-bold text-white/65">
-                {organizationName}
-              </p>
-
-              <p className="mt-1 text-[8px] font-bold uppercase tracking-[0.16em] text-white/20">
-                Organizador
-              </p>
-            </div>
+        <Link
+          href="/panel/perfil"
+          onClick={onNavigate}
+          className="flex items-center gap-3 border border-white/[0.07] bg-white/[0.018] p-4 transition hover:border-[#ff5a2a]/25 hover:bg-white/[0.03]"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#ff5a2a]/20 bg-[#ff3b24]/[0.055] text-[9px] font-black">
+            {initials}
           </div>
-        </div>
+
+          <div className="min-w-0">
+            <p className="truncate text-xs font-bold text-white/65">
+              {organizationName}
+            </p>
+
+            <p className="mt-1 text-[8px] font-bold uppercase tracking-[0.16em] text-white/20">
+              Ver mi perfil
+            </p>
+          </div>
+        </Link>
       </div>
     </>
   );

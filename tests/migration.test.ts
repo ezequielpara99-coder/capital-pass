@@ -14,6 +14,7 @@ const paymentMethodMigration = readFileSync(new URL("../supabase/migrations/2026
 const stockMigration = readFileSync(new URL("../supabase/migrations/20260921_stock_barras_bartenders_mesas.sql", import.meta.url), "utf8");
 const barraSinMesaMigration = readFileSync(new URL("../supabase/migrations/20260922_venta_barra_sin_mesa.sql", import.meta.url), "utf8");
 const productAssetsMigration = readFileSync(new URL("../supabase/migrations/20260923_product_assets_bucket.sql", import.meta.url), "utf8");
+const perfilReclamosMigration = readFileSync(new URL("../supabase/migrations/20260924_perfil_reclamos_cancelaciones.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -69,6 +70,7 @@ async function database() {
   await db.exec(stockMigration);
   await db.exec(barraSinMesaMigration);
   await db.exec(productAssetsMigration);
+  await db.exec(perfilReclamosMigration);
   return db;
 }
 
@@ -326,6 +328,35 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
     "la venta sin mesa debe guardar table_id null"
   );
   assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 3, "4 - 1 vendido sin mesa");
+
+  // Un bartender no puede cancelar ventas (solo el organizador).
+  await assert.rejects(
+    () => db.query(`select cancel_bar_sale('${barSaleNoTable.rows[0].bar_sale_id}','Me equivoque de trago')`),
+    /No tenes permiso/
+  );
+
+  // El organizador cancela la venta de barra: el stock vuelve y queda registrado el motivo.
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);`);
+  await db.query(`select cancel_bar_sale('${barSaleNoTable.rows[0].bar_sale_id}','Me equivoque de trago')`);
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 4, "vuelve el trago cancelado");
+  assert.ok(await scalar(`select cancelled_at from bar_sales where id='${barSaleNoTable.rows[0].bar_sale_id}'`), "debe quedar marcada como cancelada");
+
+  // No se puede cancelar dos veces la misma venta.
+  await assert.rejects(
+    () => db.query(`select cancel_bar_sale('${barSaleNoTable.rows[0].bar_sale_id}','De nuevo')`),
+    /ya estaba cancelada/
+  );
+
+  // Cancelar una venta de mesa libera la mesa para volver a venderla.
+  await db.query(`select cancel_table_sale('${tableSale}','Cliente no llego')`);
+  assert.equal(await scalar(`select status from sales where id='${tableSale}'`), "cancelled");
+  assert.equal(await scalar(`select status from bar_tables where id='${table}'`), "available");
+
+  // Con la mesa liberada, se puede volver a vender.
+  const resoldTable = await scalar(
+    `select sale_id::text from sell_table('${event}','${table}','Otro','Cliente','30555666','3462555666','efectivo')`
+  );
+  assert.ok(resoldTable, "la mesa liberada se puede volver a vender");
 
   void organizerMember;
   await db.close();

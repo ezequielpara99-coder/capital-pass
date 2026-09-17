@@ -25,6 +25,11 @@ type Bartender = { memberId: string; firstName: string; lastName: string; active
 type Sale = {
   id: string; bar_id: string; event_product_id: string; quantity: number; unit_price_minor: number; total_minor: number;
   payment_method: string; created_at: string; table_id: string | null; bartenderName: string; tableName: string;
+  cancelled_at: string | null; cancel_reason: string | null;
+};
+type MesaSale = {
+  id: string; table_id: string | null; total_minor: number; status: string; payment_method: string; created_at: string;
+  tableName: string; buyerName: string;
 };
 
 type Overview = {
@@ -34,10 +39,11 @@ type Overview = {
   tables: TableRow[];
   movements: Movement[];
   recentSales: Sale[];
+  mesaSales: MesaSale[];
   bartenders: Bartender[];
 };
 
-const TABS = ["Stock general", "Barras", "Bartenders", "Mesas", "Movimientos", "Alertas", "Cierre de noche"] as const;
+const TABS = ["Stock general", "Barras", "Bartenders", "Mesas", "Movimientos", "Alertas", "Reportes", "Cierre de noche"] as const;
 type Tab = (typeof TABS)[number];
 
 function money(value: number) {
@@ -208,13 +214,17 @@ export default function StockPanelClient({
               <MovimientosTab
                 movements={overview.movements}
                 sales={overview.recentSales}
+                mesaSales={overview.mesaSales}
                 eventProductById={eventProductById}
                 barById={barById}
+                onSaved={() => { notify("Listo."); reload(); }}
+                onError={setError}
               />
             )}
             {tab === "Alertas" && (
               <AlertasTab bars={overview.bars} eventProducts={overview.eventProducts} barStock={overview.barStock} />
             )}
+            {tab === "Reportes" && <ReportesTab eventId={currentEventId} />}
             {tab === "Cierre de noche" && (
               <CierreTab
                 bars={overview.bars}
@@ -842,12 +852,15 @@ function MesasTab({
 // =====================================================================
 
 function MovimientosTab({
-  movements, sales, eventProductById, barById,
+  movements, sales, mesaSales, eventProductById, barById, onSaved, onError,
 }: {
   movements: Movement[];
   sales: Sale[];
+  mesaSales: MesaSale[];
   eventProductById: Map<string, EventProduct>;
   barById: Map<string, Bar>;
+  onSaved: () => void;
+  onError: (msg: string) => void;
 }) {
   const typeLabel: Record<string, string> = {
     ingreso: "Ingreso", asignacion_barra: "Asignación a barra", venta: "Venta", ajuste: "Ajuste", perdida: "Pérdida",
@@ -862,12 +875,12 @@ function MovimientosTab({
             <thead>
               <tr className="text-left text-xs uppercase text-white/30">
                 <th className="pb-2">Hora</th><th className="pb-2">Barra</th><th className="pb-2">Bebida</th><th className="pb-2">Cant.</th>
-                <th className="pb-2">Mesa</th><th className="pb-2">Bartender</th><th className="pb-2">Precio</th><th className="pb-2">Pago</th>
+                <th className="pb-2">Mesa</th><th className="pb-2">Bartender</th><th className="pb-2">Precio</th><th className="pb-2">Pago</th><th className="pb-2">​</th>
               </tr>
             </thead>
             <tbody>
               {sales.map((s) => (
-                <tr key={s.id} className="border-t border-white/5">
+                <tr key={s.id} className={`border-t border-white/5 ${s.cancelled_at ? "opacity-40" : ""}`}>
                   <td className="py-2 text-white/50">{new Date(s.created_at).toLocaleTimeString("es-AR")}</td>
                   <td className="py-2">{barById.get(s.bar_id)?.name ?? "—"}</td>
                   <td className="py-2">{eventProductById.get(s.event_product_id)?.product?.name ?? "—"}</td>
@@ -876,11 +889,50 @@ function MovimientosTab({
                   <td className="py-2">{s.bartenderName}</td>
                   <td className="py-2 font-bold">{money(s.total_minor)}</td>
                   <td className="py-2 text-white/40">{s.payment_method === "efectivo" ? "Efectivo" : "Transferencia"}</td>
+                  <td className="py-2">
+                    {s.cancelled_at ? (
+                      <span className="text-[10px] uppercase text-red-300">Cancelada</span>
+                    ) : (
+                      <CancelSaleButton endpoint="/api/stock/bar-sales/cancel" saleId={s.id} onCancelled={onSaved} onError={onError} />
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
           {sales.length === 0 && <p className="py-4 text-sm text-white/35">Sin ventas de barra todavía.</p>}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+        <h2 className="text-lg font-bold">Ventas de mesas</h2>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase text-white/30">
+                <th className="pb-2">Hora</th><th className="pb-2">Mesa</th><th className="pb-2">Cliente</th>
+                <th className="pb-2">Precio</th><th className="pb-2">Pago</th><th className="pb-2">Estado</th><th className="pb-2">​</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mesaSales.map((s) => (
+                <tr key={s.id} className={`border-t border-white/5 ${s.status === "cancelled" ? "opacity-40" : ""}`}>
+                  <td className="py-2 text-white/50">{new Date(s.created_at).toLocaleTimeString("es-AR")}</td>
+                  <td className="py-2">{s.tableName}</td>
+                  <td className="py-2">{s.buyerName}</td>
+                  <td className="py-2 font-bold">{money(s.total_minor)}</td>
+                  <td className="py-2 text-white/40">{s.payment_method === "efectivo" ? "Efectivo" : "Transferencia"}</td>
+                  <td className="py-2 text-white/40">{s.status === "cancelled" ? "Cancelada" : "Confirmada"}</td>
+                  <td className="py-2">
+                    {s.status !== "cancelled" && (
+                      <CancelSaleButton endpoint="/api/stock/tables/cancel" saleId={s.id} onCancelled={onSaved} onError={onError} />
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {mesaSales.length === 0 && <p className="py-4 text-sm text-white/35">Sin ventas de mesas todavía.</p>}
         </div>
       </section>
 
@@ -943,6 +995,100 @@ function AlertasTab({
         {alerts.length === 0 && <p className="text-sm text-white/35">Sin alertas por ahora.</p>}
       </div>
     </section>
+  );
+}
+
+// =====================================================================
+// REPORTES
+// =====================================================================
+
+type Report = {
+  topProducts: { name: string; quantity: number; totalMinor: number }[];
+  byBar: { name: string; quantity: number; totalMinor: number }[];
+  byPaymentMethod: { method: string; totalMinor: number }[];
+  barTotalMinor: number;
+  mesaTotalMinor: number;
+};
+
+function ReportesTab({ eventId }: { eventId: string }) {
+  const [report, setReport] = useState<Report | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      setError("");
+      try {
+        const response = await fetch(`/api/stock/reports?eventId=${eventId}`, { cache: "no-store" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "No se pudo cargar el reporte.");
+        setReport(result);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo cargar el reporte.");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [eventId]);
+
+  if (loading) return <p className="text-sm text-white/40">Cargando reporte...</p>;
+  if (error) return <p className="text-sm text-red-400">{error}</p>;
+  if (!report) return null;
+
+  const methodLabel: Record<string, string> = { efectivo: "Efectivo", transferencia: "Transferencia" };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+        <h2 className="text-lg font-bold">Más vendido de la noche</h2>
+        <div className="mt-4 space-y-2">
+          {report.topProducts.map((p, i) => (
+            <div key={i} className="flex items-center justify-between border-b border-white/5 pb-2">
+              <span className="font-bold">{p.name}</span>
+              <span className="text-sm text-white/40">{p.quantity} u. · {money(p.totalMinor)}</span>
+            </div>
+          ))}
+          {report.topProducts.length === 0 && <p className="text-sm text-white/35">Sin ventas de barra todavía.</p>}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+        <h2 className="text-lg font-bold">Por barra</h2>
+        <div className="mt-4 space-y-2">
+          {report.byBar.map((b, i) => (
+            <div key={i} className="flex items-center justify-between border-b border-white/5 pb-2">
+              <span className="font-bold">{b.name}</span>
+              <span className="text-sm text-white/40">{b.quantity} u. · {money(b.totalMinor)}</span>
+            </div>
+          ))}
+          {report.byBar.length === 0 && <p className="text-sm text-white/35">Sin ventas de barra todavía.</p>}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+        <h2 className="text-lg font-bold">Por medio de pago</h2>
+        <div className="mt-4 space-y-2">
+          {report.byPaymentMethod.map((m, i) => (
+            <div key={i} className="flex items-center justify-between border-b border-white/5 pb-2">
+              <span className="font-bold">{methodLabel[m.method] ?? m.method}</span>
+              <span className="text-sm text-white/40">{money(m.totalMinor)}</span>
+            </div>
+          ))}
+          {report.byPaymentMethod.length === 0 && <p className="text-sm text-white/35">Sin ventas todavía.</p>}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-[#ff5a2a]/20 bg-[#ff3b24]/[0.05] p-6">
+        <h2 className="text-lg font-bold">Totales</h2>
+        <div className="mt-4 space-y-2 text-sm">
+          <div className="flex items-center justify-between"><span className="text-white/40">Ventas de barra</span><span className="font-bold">{money(report.barTotalMinor)}</span></div>
+          <div className="flex items-center justify-between"><span className="text-white/40">Ventas de mesas</span><span className="font-bold">{money(report.mesaTotalMinor)}</span></div>
+          <div className="flex items-center justify-between border-t border-white/10 pt-2 text-base"><span className="font-bold">Total</span><span className="font-black">{money(report.barTotalMinor + report.mesaTotalMinor)}</span></div>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1073,6 +1219,57 @@ function CierreTab({
           </section>
         );
       })}
+    </div>
+  );
+}
+
+function CancelSaleButton({
+  endpoint, saleId, onCancelled, onError,
+}: {
+  endpoint: string; saleId: string; onCancelled: () => void; onError: (msg: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+
+  async function confirmCancel() {
+    if (!reason.trim()) return;
+    setCancelling(true);
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ saleId, reason: reason.trim() }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setOpen(false);
+      setReason("");
+      onCancelled();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "No se pudo cancelar la venta.");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="rounded-lg border border-red-500/25 px-2 py-1 text-[10px] font-bold uppercase text-red-300">
+        Cancelar
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Motivo"
+        className="h-7 w-24 rounded border border-white/15 bg-black px-2 text-[10px]"
+      />
+      <button type="button" disabled={cancelling || !reason.trim()} onClick={confirmCancel} className="rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-[10px] font-bold text-red-300 disabled:opacity-40">
+        {cancelling ? "..." : "OK"}
+      </button>
+      <button type="button" onClick={() => { setOpen(false); setReason(""); }} className="text-[10px] text-white/30">✕</button>
     </div>
   );
 }

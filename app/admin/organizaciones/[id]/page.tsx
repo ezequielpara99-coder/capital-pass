@@ -52,7 +52,7 @@ export default async function AdminOrganizationDetailPage({
     notFound();
   }
 
-  const [membersResult, eventsResult, subscriptionResult, signupResult] =
+  const [membersResult, eventsResult, subscriptionResult, signupResult, complaintsResult] =
     await Promise.all([
       admin
         .from("organization_members")
@@ -75,11 +75,17 @@ export default async function AdminOrganizationDetailPage({
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      admin
+        .from("complaints")
+        .select("id, subject, message, status, admin_response, created_at")
+        .eq("organization_id", id)
+        .order("created_at", { ascending: false }),
     ]);
 
   const members = membersResult.data ?? [];
   const events = eventsResult.data ?? [];
   const subscription = subscriptionResult.data;
+  const complaints = complaintsResult.data ?? [];
 
   const organizerMember = members.find(
     (m) => m.role === "organizer" && m.status === "active"
@@ -206,9 +212,34 @@ export default async function AdminOrganizationDetailPage({
           )}
         </section>
 
-        <p className="mt-8 text-xs leading-6 text-white/25">
-          Nota: todavía no existe un sistema de reclamos/tickets de soporte en la plataforma — esta sección no muestra reportes porque no hay dónde cargarlos. Si lo querés, es una funcionalidad nueva a construir aparte.
-        </p>
+        {/* RECLAMOS */}
+        <section className="mt-5 border border-white/[0.08] bg-[#090807]/92">
+          <div className="flex items-center justify-between border-b border-white/[0.07] px-6 py-5">
+            <div>
+              <p className="text-[8px] font-black uppercase tracking-[0.22em] text-[#ff7958]">Reclamos</p>
+              <h2 className="mt-2 text-lg font-black uppercase tracking-[-0.03em]">{complaints.length} en total</h2>
+            </div>
+            <Link href="/admin/reclamos" className="text-[10px] font-black uppercase tracking-[0.15em] text-white/40 hover:text-white">
+              Ver todos →
+            </Link>
+          </div>
+
+          {complaints.length === 0 ? (
+            <div className="p-6 text-sm text-white/35">Nunca envió un reclamo.</div>
+          ) : (
+            <div className="divide-y divide-white/[0.06]">
+              {complaints.map((c) => (
+                <div key={c.id} className="px-6 py-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-black text-white/80">{c.subject}</p>
+                    <span className={`text-[9px] font-black uppercase ${c.status === "resuelto" ? "text-emerald-300" : "text-amber-300"}`}>{c.status}</span>
+                  </div>
+                  <p className="mt-1 truncate text-xs text-white/40">{c.message}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </section>
     </main>
   );
