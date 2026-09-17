@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/limpiar-ventas-pendientes",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/resumen-notificaciones",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

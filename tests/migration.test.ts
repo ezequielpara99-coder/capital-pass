@@ -15,6 +15,7 @@ const stockMigration = readFileSync(new URL("../supabase/migrations/20260921_sto
 const barraSinMesaMigration = readFileSync(new URL("../supabase/migrations/20260922_venta_barra_sin_mesa.sql", import.meta.url), "utf8");
 const productAssetsMigration = readFileSync(new URL("../supabase/migrations/20260923_product_assets_bucket.sql", import.meta.url), "utf8");
 const perfilReclamosMigration = readFileSync(new URL("../supabase/migrations/20260924_perfil_reclamos_cancelaciones.sql", import.meta.url), "utf8");
+const pushNotificationsMigration = readFileSync(new URL("../supabase/migrations/20260925_notificaciones_push.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -71,6 +72,7 @@ async function database() {
   await db.exec(barraSinMesaMigration);
   await db.exec(productAssetsMigration);
   await db.exec(perfilReclamosMigration);
+  await db.exec(pushNotificationsMigration);
   return db;
 }
 

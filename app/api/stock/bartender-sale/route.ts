@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { sendPushToOrganizers } from "../../../../lib/push/server";
 
 export async function POST(request: NextRequest) {
   try {
@@ -48,6 +49,43 @@ export async function POST(request: NextRequest) {
     if (eventProduct?.product_id) {
       const { data: product } = await admin.from("products").select("name").eq("id", eventProduct.product_id).maybeSingle();
       productName = product?.name ?? productName;
+    }
+
+    // Notificaciones push al organizador: venta en tiempo real, y stock
+    // bajo si esta venta hizo que la barra cruce el umbral de alerta.
+    // No debe frenar la respuesta si algo falla acá.
+    try {
+      const [{ data: bar }, { data: barStock }] = await Promise.all([
+        admin.from("bars").select("name, event_id").eq("id", barId).maybeSingle(),
+        admin.from("bar_stock").select("quantity").eq("bar_id", barId).eq("event_product_id", eventProductId).maybeSingle(),
+      ]);
+
+      if (bar?.event_id) {
+        const { data: event } = await admin.from("events").select("organization_id").eq("id", bar.event_id).maybeSingle();
+        if (event?.organization_id) {
+          const totalMinor = Number(result?.total_minor ?? 0);
+          const moneyLabel = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(totalMinor);
+
+          await sendPushToOrganizers(event.organization_id, "bar_sale", {
+            title: `🍹 Venta en ${bar.name}`,
+            body: `${productName} x${quantity} — ${moneyLabel}`,
+            url: "/panel/stock",
+          });
+
+          if (barStock && eventProduct) {
+            const { data: ep } = await admin.from("event_products").select("low_stock_threshold").eq("id", eventProductId).maybeSingle();
+            if (ep && barStock.quantity <= ep.low_stock_threshold) {
+              await sendPushToOrganizers(event.organization_id, "low_stock", {
+                title: "⚠️ Stock bajo",
+                body: `Quedan ${barStock.quantity} de ${productName} en ${bar.name}`,
+                url: "/panel/stock",
+              });
+            }
+          }
+        }
+      }
+    } catch (pushError) {
+      console.error("PUSH bartender-sale:", pushError);
     }
 
     return NextResponse.json({

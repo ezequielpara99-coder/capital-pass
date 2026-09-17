@@ -11,6 +11,7 @@ import {
 
 import Link from "next/link";
 import { createClient } from "../lib/supabase/client";
+import InstallAppButton from "./install-app-button";
 
 /* =========================================================
    CONFIG
@@ -1011,6 +1012,25 @@ export default function Home() {
             )
           )}
         </div>
+      </section>
+
+      {/* =====================================================
+          INSTALL APP
+      ===================================================== */}
+
+      <section className="relative z-10 mx-auto max-w-[1560px] px-5 py-16 md:px-8 xl:px-10">
+        <Reveal>
+          <div className="flex flex-col items-center gap-5 rounded-3xl border border-[#ff5537]/20 bg-[#ff3b24]/[0.05] px-6 py-12 text-center">
+            <p className="text-[9px] font-bold uppercase tracking-[0.24em] text-[#ff7655]">Llevala en el bolsillo</p>
+            <h2 className="max-w-[600px] text-3xl font-black uppercase leading-[0.95] tracking-[-0.04em] md:text-5xl">
+              Capital Pass, instalada en tu celular.
+            </h2>
+            <p className="max-w-[520px] text-sm leading-6 text-[var(--cp-muted)] md:text-base">
+              Organizadores, RRPP, puerta y bartenders entran directo desde un ícono, sin buscar la URL cada vez.
+            </p>
+            <InstallAppButton className="cp-punch mt-2 flex h-14 min-w-[220px] items-center justify-center rounded-full border-2 border-white/25 bg-gradient-to-r from-[#ff2a1a] via-[#ff3b24] to-[#ff5a2a] px-8 text-[11px] font-black uppercase tracking-[0.17em] text-white shadow-[0_18px_55px_rgba(255,59,36,.4)] transition hover:scale-[1.04]" />
+          </div>
+        </Reveal>
       </section>
 
       {/* =====================================================

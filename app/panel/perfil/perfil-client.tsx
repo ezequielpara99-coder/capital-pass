@@ -44,6 +44,104 @@ export default function PerfilClient({
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
+  const [pushSupported, setPushSupported] = useState(false);
+  const [subscribed, setSubscribed] = useState(false);
+  const [subscribing, setSubscribing] = useState(false);
+  const [barSaleAlerts, setBarSaleAlerts] = useState(true);
+  const [lowStockAlerts, setLowStockAlerts] = useState(true);
+  const [summaryInterval, setSummaryInterval] = useState<string>("");
+  const [savingNotifications, setSavingNotifications] = useState(false);
+
+  async function loadNotificationSettings() {
+    try {
+      const response = await fetch("/api/push/settings", { cache: "no-store" });
+      const result = await response.json();
+      if (response.ok) {
+        setBarSaleAlerts(result.settings.barSaleAlerts);
+        setLowStockAlerts(result.settings.lowStockAlerts);
+        setSummaryInterval(result.settings.summaryIntervalMinutes ? String(result.settings.summaryIntervalMinutes) : "");
+      }
+    } catch {
+      // no bloquea el resto del perfil
+    }
+
+    if ("serviceWorker" in navigator && "PushManager" in window) {
+      setPushSupported(true);
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const existing = await registration.pushManager.getSubscription();
+        setSubscribed(Boolean(existing));
+      } catch {
+        // no bloquea el resto del perfil
+      }
+    }
+  }
+
+  function urlBase64ToUint8Array(base64String: string) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+    return outputArray;
+  }
+
+  async function enableNotifications() {
+    setSubscribing(true);
+    setError("");
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") throw new Error("Necesitamos tu permiso para poder avisarte.");
+
+      const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+      if (!vapidKey) throw new Error("Notificaciones no configuradas todavía.");
+
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      });
+
+      const json = subscription.toJSON();
+      const response = await fetch("/api/push/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+
+      setSubscribed(true);
+      notify("Notificaciones activadas en este dispositivo.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron activar las notificaciones.");
+    } finally {
+      setSubscribing(false);
+    }
+  }
+
+  async function saveNotificationSettings() {
+    setSavingNotifications(true);
+    setError("");
+    try {
+      const response = await fetch("/api/push/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          barSaleAlerts, lowStockAlerts,
+          summaryIntervalMinutes: summaryInterval ? Number(summaryInterval) : null,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      notify("Preferencias guardadas.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron guardar las preferencias.");
+    } finally {
+      setSavingNotifications(false);
+    }
+  }
+
   async function loadComplaints() {
     setLoadingComplaints(true);
     try {
@@ -61,6 +159,7 @@ export default function PerfilClient({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadComplaints();
+    loadNotificationSettings();
   }, []);
 
   function notify(text: string) {
@@ -208,6 +307,58 @@ export default function PerfilClient({
           <Link href="/cuenta" className="mt-4 inline-block text-xs font-bold text-[#ff9a7c] hover:underline">
             Gestionar suscripción y pagos →
           </Link>
+        </section>
+
+        <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+          <h2 className="text-lg font-bold">Notificaciones</h2>
+          <p className="mt-1 text-xs text-white/40">Avisos en tiempo real de ventas de barra/mesa, stock bajo, y un resumen periódico.</p>
+
+          {!pushSupported ? (
+            <p className="mt-4 text-sm text-white/35">Este navegador no soporta notificaciones push.</p>
+          ) : !subscribed ? (
+            <button
+              type="button" disabled={subscribing} onClick={enableNotifications}
+              className="mt-4 h-11 rounded-xl bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] px-6 text-sm font-black text-white disabled:opacity-40"
+            >
+              {subscribing ? "Activando..." : "🔔 Activar notificaciones en este dispositivo"}
+            </button>
+          ) : (
+            <>
+              <p className="mt-4 inline-flex items-center gap-2 text-xs font-bold text-emerald-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Activadas en este dispositivo
+              </p>
+
+              <div className="mt-4 space-y-3">
+                <label className="flex items-center justify-between gap-3 text-sm">
+                  <span>Venta de barra / mesa</span>
+                  <input type="checkbox" checked={barSaleAlerts} onChange={(e) => setBarSaleAlerts(e.target.checked)} className="h-5 w-5" />
+                </label>
+                <label className="flex items-center justify-between gap-3 text-sm">
+                  <span>Alertas de stock bajo</span>
+                  <input type="checkbox" checked={lowStockAlerts} onChange={(e) => setLowStockAlerts(e.target.checked)} className="h-5 w-5" />
+                </label>
+                <label className="flex items-center justify-between gap-3 text-sm">
+                  <span>Resumen periódico</span>
+                  <select
+                    value={summaryInterval} onChange={(e) => setSummaryInterval(e.target.value)}
+                    className="h-9 rounded-lg border border-white/15 bg-black px-2 text-xs"
+                  >
+                    <option value="" className="bg-black">Desactivado</option>
+                    <option value="15" className="bg-black">Cada 15 min</option>
+                    <option value="30" className="bg-black">Cada 30 min</option>
+                    <option value="60" className="bg-black">Cada 60 min</option>
+                  </select>
+                </label>
+              </div>
+
+              <button
+                type="button" disabled={savingNotifications} onClick={saveNotificationSettings}
+                className="mt-4 h-10 rounded-xl border border-white/15 px-5 text-xs font-bold text-white/70 disabled:opacity-40"
+              >
+                {savingNotifications ? "Guardando..." : "Guardar preferencias"}
+              </button>
+            </>
+          )}
         </section>
 
         <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.02] p-6">
