@@ -822,10 +822,12 @@ export default function Home() {
               <p className="mt-8 max-w-[680px] text-sm leading-7 text-[var(--cp-muted)] md:text-base">
                 Desde la primera entrada
                 vendida hasta el último
-                ingreso de la noche.
+                ingreso de la noche —y la
+                barra en el medio—.
                 Capital Pass organiza toda
-                la operación desde un mismo
-                lugar.
+                la operación, incluyendo
+                stock, barras y bartenders,
+                desde un mismo lugar.
               </p>
             </div>
           </div>
@@ -873,16 +875,22 @@ export default function Home() {
             <div className="mt-10 max-w-[590px] border-l border-[#ff3b24] pl-6">
               <p className="text-sm leading-7 text-[var(--cp-muted)] md:text-base">
                 Cada entrada incluye su
-                identificación digital.
-                El QR puede validarse desde
-                el acceso y queda asociado
-                al evento, comprador y tanda.
+                identificación digital y
+                llega directo al WhatsApp
+                del comprador. El QR puede
+                validarse desde el acceso y
+                queda asociado al evento,
+                comprador y tanda.
               </p>
             </div>
 
             <div className="mt-10 flex flex-wrap gap-x-8 gap-y-4 text-[9px] font-bold uppercase tracking-[0.17em] text-[var(--cp-muted)]">
               <span>
                 QR Ticket
+              </span>
+
+              <span>
+                Envío por WhatsApp
               </span>
 
               <span>
