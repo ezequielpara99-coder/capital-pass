@@ -31,11 +31,18 @@ export default async function StockPage({
 
   const admin = createAdminClient();
 
+  const fallbackAdminEmails = ["ezequiel.para99@gmail.com"];
+  const isFallbackAdmin = Boolean(user.email && fallbackAdminEmails.includes(user.email.toLowerCase()));
+  const { data: platformAdmin } = isFallbackAdmin
+    ? { data: null }
+    : await admin.from("platform_admins").select("user_id").eq("user_id", user.id).maybeSingle();
+  const isPlatformAdmin = isFallbackAdmin || Boolean(platformAdmin);
+
   const { data: hasStockAccess } = await admin.rpc("cp_org_has_stock_access", {
     p_organization_id: membership.organization_id,
   });
 
-  if (!hasStockAccess) {
+  if (!isPlatformAdmin && !hasStockAccess) {
     const { data: avanzadaPlan } = await admin
       .from("subscription_plans")
       .select("id, name, price_minor, currency")

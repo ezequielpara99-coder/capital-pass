@@ -20,6 +20,7 @@ const planAvanzadoTrialMigration = readFileSync(new URL("../supabase/migrations/
 const capitalRentalsMigration = readFileSync(new URL("../supabase/migrations/20260927_capital_rentals.sql", import.meta.url), "utf8");
 const trialAlUsarStockMigration = readFileSync(new URL("../supabase/migrations/20260928_trial_arranca_al_usar_stock.sql", import.meta.url), "utf8");
 const upgradePlanDiferenciaMigration = readFileSync(new URL("../supabase/migrations/20260929_upgrade_plan_diferencia.sql", import.meta.url), "utf8");
+const adminBypassStockTrialMigration = readFileSync(new URL("../supabase/migrations/20260930_admin_bypass_stock_trial.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -81,6 +82,7 @@ async function database() {
   await db.exec(capitalRentalsMigration);
   await db.exec(trialAlUsarStockMigration);
   await db.exec(upgradePlanDiferenciaMigration);
+  await db.exec(adminBypassStockTrialMigration);
   return db;
 }
 

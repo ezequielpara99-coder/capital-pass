@@ -21,6 +21,16 @@ async function hasStockAccess(organizationId: string): Promise<boolean> {
 
 const FALLBACK_ADMIN_EMAILS = ["ezequiel.para99@gmail.com"];
 
+// El admin de la plataforma nunca queda bloqueado por la prueba/plan de
+// stock de ninguna organizacion (necesita poder entrar a cualquier evento
+// para soporte, demos, etc).
+async function isPlatformAdmin(userId: string, email: string | null | undefined): Promise<boolean> {
+  if (email && FALLBACK_ADMIN_EMAILS.includes(email.toLowerCase())) return true;
+  const admin = createAdminClient();
+  const { data } = await admin.from("platform_admins").select("user_id").eq("user_id", userId).maybeSingle();
+  return Boolean(data);
+}
+
 // Confirma que hay una sesion activa y que ese usuario es organizador
 // activo del evento indicado. Mismo patron que ya usan las rutas de
 // vendedores-puerta/controladores, factorizado porque el modulo de stock
@@ -60,7 +70,7 @@ export async function verifyOrganizerForEvent(eventId: string): Promise<VerifyRe
     return { ok: false, status: 403, error: "No tenés permiso para administrar este evento." };
   }
 
-  if (!(await hasStockAccess(event.organization_id))) {
+  if (!(await isPlatformAdmin(user.id, user.email)) && !(await hasStockAccess(event.organization_id))) {
     return { ok: false, status: 402, error: STOCK_TRIAL_EXPIRED_ERROR };
   }
 
@@ -94,16 +104,7 @@ export async function verifyProductAccess(productId: string): Promise<VerifyResu
   }
 
   if (!product.organization_id) {
-    const { data: adminAccess } = await admin
-      .from("platform_admins")
-      .select("user_id")
-      .eq("user_id", user.id)
-      .limit(1)
-      .maybeSingle();
-
-    const isFallbackAdmin = Boolean(user.email && FALLBACK_ADMIN_EMAILS.includes(user.email.toLowerCase()));
-
-    if (!adminAccess && !isFallbackAdmin) {
+    if (!(await isPlatformAdmin(user.id, user.email))) {
       return { ok: false, status: 403, error: "Este producto es del catálogo global de Capital Pass." };
     }
 
@@ -124,7 +125,7 @@ export async function verifyProductAccess(productId: string): Promise<VerifyResu
     return { ok: false, status: 403, error: "No tenés permiso para editar este producto." };
   }
 
-  if (!(await hasStockAccess(product.organization_id))) {
+  if (!(await isPlatformAdmin(user.id, user.email)) && !(await hasStockAccess(product.organization_id))) {
     return { ok: false, status: 402, error: STOCK_TRIAL_EXPIRED_ERROR };
   }
 
