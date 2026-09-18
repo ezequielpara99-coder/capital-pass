@@ -1432,7 +1432,15 @@ export default function Home() {
             </a>
 
             <p className="mt-3 text-[8px] uppercase tracking-[0.14em] text-[var(--cp-muted)]">
-              Capital Studio · Argentina
+              CapitalStudio · Argentina ·{" "}
+              <a
+                href="https://www.instagram.com/capitalpass.ar/"
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-[#ff6b48]"
+              >
+                Instagram ↗
+              </a>
             </p>
           </div>
         </div>
