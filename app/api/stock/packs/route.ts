@@ -27,11 +27,49 @@ async function verifyOrganizer(eventId: string) {
   return { ok: true as const };
 }
 
+// Leer los packs disponibles hace falta tambien para venderlos -- RRPP y
+// vendedores de puerta asignados al evento, no solo el organizador.
+async function verifyCanReadPacks(eventId: string) {
+  const organizerCheck = await verifyOrganizer(eventId);
+  if (organizerCheck.ok) return organizerCheck;
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, status: 401, error: "No hay una sesión válida." };
+
+  const { data: event } = await supabase.from("events").select("id, organization_id").eq("id", eventId).maybeSingle();
+  if (!event) return { ok: false as const, status: 404, error: "No se encontró el evento." };
+
+  const { data: membership } = await supabase
+    .from("organization_members")
+    .select("id, role")
+    .eq("organization_id", event.organization_id)
+    .eq("user_id", user.id)
+    .in("role", ["rrpp", "door_seller"])
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+  if (!membership) return { ok: false as const, status: 403, error: "No tenés permiso para ver este evento." };
+
+  const { data: staff } = await supabase
+    .from("event_staff")
+    .select("id")
+    .eq("event_id", eventId)
+    .eq("organization_member_id", membership.id)
+    .eq("staff_role", membership.role)
+    .eq("active", true)
+    .limit(1)
+    .maybeSingle();
+  if (!staff) return { ok: false as const, status: 403, error: "No estás asignado a este evento." };
+
+  return { ok: true as const };
+}
+
 export async function GET(request: NextRequest) {
   const eventId = request.nextUrl.searchParams.get("eventId");
   if (!eventId) return NextResponse.json({ error: "Falta el evento." }, { status: 400 });
 
-  const verification = await verifyOrganizer(eventId);
+  const verification = await verifyCanReadPacks(eventId);
   if (!verification.ok) return NextResponse.json({ error: verification.error }, { status: verification.status });
 
   const admin = createAdminClient();
