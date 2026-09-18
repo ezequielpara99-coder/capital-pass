@@ -52,7 +52,7 @@ export async function POST(
     });
 
     if (created.error) {
-      return NextResponse.json({ ok: false, error: created.error.message.replace(/^.*?:\s*/, "") || "No pudimos registrar la compra." }, { status: 400 });
+      return NextResponse.json({ ok: false, error: created.error.message.replace(/^[A-Z0-9]{5}:\s*/, "") || "No pudimos registrar la compra." }, { status: 400 });
     }
 
     type SaleItem = { ticket_type_id: string; name: string; quantity: number; unit_price_minor: number };

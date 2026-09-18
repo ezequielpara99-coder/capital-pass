@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
-      return NextResponse.json({ error: error.message.replace(/^.*?:\s*/, "") || "No se pudo canjear el combo." }, { status: 400 });
+      return NextResponse.json({ error: error.message.replace(/^[A-Z0-9]{5}:\s*/, "") || "No se pudo canjear el combo." }, { status: 400 });
     }
 
     const row = data?.[0];

@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     const { error } = await supabase.rpc("cancel_table_sale", { p_sale_id: saleId, p_reason: reason });
 
     if (error) {
-      return NextResponse.json({ error: error.message.replace(/^.*?:\s*/, "") || "No se pudo cancelar la venta." }, { status: 400 });
+      return NextResponse.json({ error: error.message.replace(/^[A-Z0-9]{5}:\s*/, "") || "No se pudo cancelar la venta." }, { status: 400 });
     }
 
     return NextResponse.json({ ok: true });
