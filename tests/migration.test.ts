@@ -23,6 +23,7 @@ const upgradePlanDiferenciaMigration = readFileSync(new URL("../supabase/migrati
 const adminBypassStockTrialMigration = readFileSync(new URL("../supabase/migrations/20260930_admin_bypass_stock_trial.sql", import.meta.url), "utf8");
 const fixUpgradeProrationMigration = readFileSync(new URL("../supabase/migrations/20260931_fix_upgrade_proration_bugs.sql", import.meta.url), "utf8");
 const fixOnlineSaleStaleCashMigration = readFileSync(new URL("../supabase/migrations/20260932_fix_online_sale_stale_cash_payment.sql", import.meta.url), "utf8");
+const capPositiveStockAdjustmentMigration = readFileSync(new URL("../supabase/migrations/20260933_cap_positive_stock_adjustment.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -87,6 +88,7 @@ async function database() {
   await db.exec(adminBypassStockTrialMigration);
   await db.exec(fixUpgradeProrationMigration);
   await db.exec(fixOnlineSaleStaleCashMigration);
+  await db.exec(capPositiveStockAdjustmentMigration);
   return db;
 }
 
@@ -355,6 +357,19 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
     () => db.query(`select adjust_bar_stock('${bar}','${eventProduct}',-100,'perdida','Motivo')`),
     /negativo/
   );
+
+  // Un ajuste positivo tampoco puede "inventar" mas stock del total
+  // comprado: bar=4 + otherBar=2 = 6 repartido, total_stock=10, asi que
+  // solo hay lugar para 4 mas entre todas las barras.
+  await assert.rejects(
+    () => db.query(`select adjust_bar_stock('${bar}','${eventProduct}',5,'ajuste','Conteo')`),
+    /superaria el stock total/
+  );
+  await db.query(`select adjust_bar_stock('${bar}','${eventProduct}',2,'ajuste','Conteo correcto')`);
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 6);
+  // Se revierte para no alterar los conteos que verifican los pasos siguientes.
+  await db.query(`select adjust_bar_stock('${bar}','${eventProduct}',-2,'ajuste','Revertir prueba de tope')`);
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 4);
 
   // El bartender tambien puede vender sin atarse a una mesa (cliente en el mostrador).
   await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);

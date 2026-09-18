@@ -476,6 +476,16 @@ function BarrasTab({
   const [adjustReason, setAdjustReason] = useState("");
   const [adjusting, setAdjusting] = useState(false);
 
+  // selectedBar/adjustBar/assignProduct/adjustProduct pueden haber quedado
+  // en "" (no habia barras/productos cuando se monto la pestaña) o apuntar
+  // a algo que ya no esta en la lista. En vez de resincronizar el estado
+  // con un efecto, se deriva el valor efectivo en cada render -- si lo
+  // guardado ya no es valido, cae al primero disponible.
+  const effectiveSelectedBar = bars.some((b) => b.id === selectedBar) ? selectedBar : bars[0]?.id ?? "";
+  const effectiveAdjustBar = bars.some((b) => b.id === adjustBar) ? adjustBar : bars[0]?.id ?? "";
+  const effectiveAssignProduct = eventProducts.some((ep) => ep.id === assignProduct) ? assignProduct : eventProducts[0]?.id ?? "";
+  const effectiveAdjustProduct = eventProducts.some((ep) => ep.id === adjustProduct) ? adjustProduct : eventProducts[0]?.id ?? "";
+
   async function createBar() {
     if (!name.trim()) return;
     setSaving(true);
@@ -496,12 +506,12 @@ function BarrasTab({
   }
 
   async function assignStock() {
-    if (!selectedBar || !assignProduct || Number(assignQty) <= 0) return;
+    if (!effectiveSelectedBar || !effectiveAssignProduct || Number(assignQty) <= 0) return;
     setSaving(true);
     try {
       const response = await fetch("/api/stock/assign", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ barId: selectedBar, eventProductId: assignProduct, quantity: Number(assignQty) }),
+        body: JSON.stringify({ barId: effectiveSelectedBar, eventProductId: effectiveAssignProduct, quantity: Number(assignQty) }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
@@ -515,13 +525,13 @@ function BarrasTab({
   }
 
   async function submitAdjustment() {
-    if (!adjustBar || !adjustProduct || Number(adjustQty) === 0 || !adjustReason.trim()) return;
+    if (!effectiveAdjustBar || !effectiveAdjustProduct || Number(adjustQty) === 0 || !adjustReason.trim()) return;
     setAdjusting(true);
     try {
       const delta = adjustType === "perdida" ? -Math.abs(Number(adjustQty)) : Number(adjustQty);
       const response = await fetch("/api/stock/adjust", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ barId: adjustBar, eventProductId: adjustProduct, quantityDelta: delta, type: adjustType, reason: adjustReason.trim() }),
+        body: JSON.stringify({ barId: effectiveAdjustBar, eventProductId: effectiveAdjustProduct, quantityDelta: delta, type: adjustType, reason: adjustReason.trim() }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
@@ -560,13 +570,13 @@ function BarrasTab({
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <label className="block text-xs text-white/40">
             Barra
-            <select value={selectedBar} onChange={(e) => setSelectedBar(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm">
+            <select value={effectiveSelectedBar} onChange={(e) => setSelectedBar(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm">
               {bars.map((b) => <option key={b.id} value={b.id} className="bg-black">{b.name}</option>)}
             </select>
           </label>
           <label className="block text-xs text-white/40">
             Producto
-            <select value={assignProduct} onChange={(e) => setAssignProduct(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm">
+            <select value={effectiveAssignProduct} onChange={(e) => setAssignProduct(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm">
               {eventProducts.map((ep) => <option key={ep.id} value={ep.id} className="bg-black">{ep.product?.name ?? "Producto"}</option>)}
             </select>
           </label>
@@ -606,13 +616,13 @@ function BarrasTab({
         <div className="mt-4 grid gap-3 sm:grid-cols-5">
           <label className="block text-xs text-white/40">
             Barra
-            <select value={adjustBar} onChange={(e) => setAdjustBar(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm">
+            <select value={effectiveAdjustBar} onChange={(e) => setAdjustBar(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm">
               {bars.map((b) => <option key={b.id} value={b.id} className="bg-black">{b.name}</option>)}
             </select>
           </label>
           <label className="block text-xs text-white/40">
             Producto
-            <select value={adjustProduct} onChange={(e) => setAdjustProduct(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm">
+            <select value={effectiveAdjustProduct} onChange={(e) => setAdjustProduct(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm">
               {eventProducts.map((ep) => <option key={ep.id} value={ep.id} className="bg-black">{ep.product?.name ?? "Producto"}</option>)}
             </select>
           </label>
