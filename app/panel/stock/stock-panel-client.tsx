@@ -1017,6 +1017,7 @@ type Report = {
   byBar: { name: string; quantity: number; totalMinor: number }[];
   byPaymentMethod: { method: string; totalMinor: number }[];
   barTotalMinor: number;
+  comboValueMinor: number;
   mesaTotalMinor: number;
 };
 
@@ -1047,7 +1048,7 @@ function ReportesTab({ eventId }: { eventId: string }) {
   if (error) return <p className="text-sm text-red-400">{error}</p>;
   if (!report) return null;
 
-  const methodLabel: Record<string, string> = { efectivo: "Efectivo", transferencia: "Transferencia" };
+  const methodLabel: Record<string, string> = { efectivo: "Efectivo", transferencia: "Transferencia", combo: "Combo de entrada" };
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
@@ -1096,6 +1097,11 @@ function ReportesTab({ eventId }: { eventId: string }) {
           <div className="flex items-center justify-between"><span className="text-white/40">Ventas de barra</span><span className="font-bold">{money(report.barTotalMinor)}</span></div>
           <div className="flex items-center justify-between"><span className="text-white/40">Ventas de mesas</span><span className="font-bold">{money(report.mesaTotalMinor)}</span></div>
           <div className="flex items-center justify-between border-t border-white/10 pt-2 text-base"><span className="font-bold">Total</span><span className="font-black">{money(report.barTotalMinor + report.mesaTotalMinor)}</span></div>
+          {report.comboValueMinor > 0 && (
+            <p className="mt-2 border-t border-white/10 pt-2 text-xs text-white/35">
+              + {money(report.comboValueMinor)} consumidos con combos de entrada (ya cobrados al vender la entrada, no suma al total de arriba).
+            </p>
+          )}
         </div>
       </section>
     </div>

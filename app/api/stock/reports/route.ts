@@ -51,22 +51,30 @@ export async function GET(request: NextRequest) {
   const byBar = new Map<string, { name: string; quantity: number; totalMinor: number }>();
   const byPaymentMethod = new Map<string, number>();
   let barTotalMinor = 0;
+  let comboValueMinor = 0;
 
   for (const sale of barSales ?? []) {
+    // Un canje de combo no es plata que entro a la barra -- ya se cobro
+    // cuando se vendio la entrada. Se cuenta la cantidad consumida (sigue
+    // siendo stock real que salio), pero no se suma a la plata recaudada.
+    const isCombo = sale.payment_method === "combo";
+    const saleMoney = isCombo ? 0 : sale.total_minor;
+
     const productName = productNameByEventProductId.get(sale.event_product_id) ?? "Producto";
     const productRow = byProduct.get(sale.event_product_id) ?? { name: productName, quantity: 0, totalMinor: 0 };
     productRow.quantity += sale.quantity;
-    productRow.totalMinor += sale.total_minor;
+    productRow.totalMinor += saleMoney;
     byProduct.set(sale.event_product_id, productRow);
 
     const barName = barNameById.get(sale.bar_id) ?? "Barra";
     const barRow = byBar.get(sale.bar_id) ?? { name: barName, quantity: 0, totalMinor: 0 };
     barRow.quantity += sale.quantity;
-    barRow.totalMinor += sale.total_minor;
+    barRow.totalMinor += saleMoney;
     byBar.set(sale.bar_id, barRow);
 
     byPaymentMethod.set(sale.payment_method, (byPaymentMethod.get(sale.payment_method) ?? 0) + sale.total_minor);
-    barTotalMinor += sale.total_minor;
+    barTotalMinor += saleMoney;
+    if (isCombo) comboValueMinor += sale.total_minor;
   }
 
   let mesaTotalMinor = 0;
@@ -81,6 +89,7 @@ export async function GET(request: NextRequest) {
     byBar: Array.from(byBar.values()).sort((a, b) => b.totalMinor - a.totalMinor),
     byPaymentMethod: Array.from(byPaymentMethod.entries()).map(([method, totalMinor]) => ({ method, totalMinor })),
     barTotalMinor,
+    comboValueMinor,
     mesaTotalMinor,
   });
 }
