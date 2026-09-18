@@ -35,13 +35,14 @@ export async function GET(request: NextRequest) {
     .maybeSingle();
   if (!staff || !staff.bar_id) return NextResponse.json({ error: "No tenés ninguna barra asignada." }, { status: 403 });
 
-  const { data: ticket } = await admin
+  const { data: ticket, error: ticketError } = await admin
     .from("tickets")
     .select("id, status, combo_remaining_quantity, combo_remaining_credit_minor, sale_id, ticket_types(name, combo_type, combo_event_product_id)")
     .eq("event_id", staff.event_id)
     .ilike("manual_code", manualCode)
     .maybeSingle();
 
+  if (ticketError) console.error("COMBO LOOKUP ticket query:", ticketError);
   if (!ticket) return NextResponse.json({ error: "No se encontró ninguna entrada con ese código." }, { status: 404 });
 
   const ticketType = Array.isArray(ticket.ticket_types) ? ticket.ticket_types[0] : ticket.ticket_types;
