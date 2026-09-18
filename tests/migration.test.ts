@@ -25,6 +25,7 @@ const fixUpgradeProrationMigration = readFileSync(new URL("../supabase/migration
 const fixOnlineSaleStaleCashMigration = readFileSync(new URL("../supabase/migrations/20260932_fix_online_sale_stale_cash_payment.sql", import.meta.url), "utf8");
 const capPositiveStockAdjustmentMigration = readFileSync(new URL("../supabase/migrations/20260933_cap_positive_stock_adjustment.sql", import.meta.url), "utf8");
 const combosYPacksMigration = readFileSync(new URL("../supabase/migrations/20260934_combos_y_packs.sql", import.meta.url), "utf8");
+const tragoNoDescuentaStockMigration = readFileSync(new URL("../supabase/migrations/20260935_venta_trago_no_descuenta_stock.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -96,6 +97,7 @@ async function database() {
   await db.exec(fixOnlineSaleStaleCashMigration);
   await db.exec(capPositiveStockAdjustmentMigration);
   await db.exec(combosYPacksMigration);
+  await db.exec(tragoNoDescuentaStockMigration);
   return db;
 }
 
@@ -328,19 +330,37 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
     insert into event_staff(event_id,organization_member_id,staff_role,active,bar_id)
       values ('${event}','${bartenderMember}','bartender',true,'${bar}');`);
 
-  // El bartender vende un trago: debe descontar stock de SU barra.
+  // El bartender vende un trago: ya NO descuenta bar_stock en tiempo real
+  // (no hay forma de saber cuanto le queda realmente a una botella hasta
+  // el conteo fisico del cierre de noche) -- solo se registra la venta.
   await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
   const barSale = await db.query<{ bar_sale_id: string; total_minor: string }>(
     `select bar_sale_id, total_minor from create_bartender_sale('${bar}','${table}','${eventProduct}',3,'transferencia')`
   );
   assert.equal(Number(barSale.rows[0].total_minor), 6000, "3 tragos a 2000 cada uno");
-  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 5, "8 asignados - 3 vendidos");
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 8, "vender tragos no descuenta el stock del sistema");
   assert.equal(await scalar(`select count(*)::int from stock_movements where type='venta'`), 1);
 
-  // No puede vender mas de lo que le queda en la barra.
+  // Vender mas tragos de los que "figuran" ya no se bloquea (el numero de
+  // stock no baja con cada trago, asi que no hay contra que comparar).
+  const bigSale = await db.query<{ bar_sale_id: string; total_minor: string }>(
+    `select bar_sale_id, total_minor from create_bartender_sale('${bar}','${table}','${eventProduct}',10,'efectivo')`
+  );
+  assert.equal(Number(bigSale.rows[0].total_minor), 20000, "10 tragos a 2000 cada uno, sin bloqueo por stock");
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 8, "sigue sin descontarse");
+
+  // Pero solo puede vender productos que el organizador realmente asigno a
+  // esa barra (aunque sea con cantidad 0) -- si no hay fila de bar_stock,
+  // se rechaza.
+  const otherProductId = await scalar(`select id::text from products where name like 'Vodka Absolut%' limit 1`);
+  const unassignedEventProduct = "88888888-8888-4888-8888-888888888801";
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);
+    insert into event_products(id,event_id,product_id,cost_price_minor,sale_price_minor,profit_margin_percent,total_stock,low_stock_threshold)
+      values ('${unassignedEventProduct}','${event}','${otherProductId}',10000,2000,50,10,3);
+    select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
   await assert.rejects(
-    () => db.query(`select create_bartender_sale('${bar}','${table}','${eventProduct}',10,'efectivo')`),
-    /No hay suficiente stock en esta barra/
+    () => db.query(`select create_bartender_sale('${bar}','${table}','${unassignedEventProduct}',1,'efectivo')`),
+    /no esta asignado a esta barra/
   );
 
   // Un bartender no puede vender desde una barra a la que no esta asignado.
@@ -354,10 +374,12 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
     /No estas asignado a esta barra/
   );
 
-  // Ajuste manual por perdida (ej: se rompio una botella).
+  // Ajuste manual por perdida (ej: se rompio una botella) -- este si mueve
+  // bar_stock, es la unica forma de corregirlo ahora que los tragos no lo
+  // hacen solos.
   await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);`);
   await db.query(`select adjust_bar_stock('${bar}','${eventProduct}',-1,'perdida','Se rompio una botella')`);
-  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 4);
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 7, "8 - 1 de perdida");
 
   // No puede dejar el stock en negativo.
   await assert.rejects(
@@ -366,17 +388,17 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
   );
 
   // Un ajuste positivo tampoco puede "inventar" mas stock del total
-  // comprado: bar=4 + otherBar=2 = 6 repartido, total_stock=10, asi que
-  // solo hay lugar para 4 mas entre todas las barras.
+  // comprado: bar=7 + otherBar=2 = 9 repartido, total_stock=10, asi que
+  // solo hay lugar para 1 mas entre todas las barras.
   await assert.rejects(
     () => db.query(`select adjust_bar_stock('${bar}','${eventProduct}',5,'ajuste','Conteo')`),
     /superaria el stock total/
   );
-  await db.query(`select adjust_bar_stock('${bar}','${eventProduct}',2,'ajuste','Conteo correcto')`);
-  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 6);
+  await db.query(`select adjust_bar_stock('${bar}','${eventProduct}',1,'ajuste','Conteo correcto')`);
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 8);
   // Se revierte para no alterar los conteos que verifican los pasos siguientes.
-  await db.query(`select adjust_bar_stock('${bar}','${eventProduct}',-2,'ajuste','Revertir prueba de tope')`);
-  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 4);
+  await db.query(`select adjust_bar_stock('${bar}','${eventProduct}',-1,'ajuste','Revertir prueba de tope')`);
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 7);
 
   // El bartender tambien puede vender sin atarse a una mesa (cliente en el mostrador).
   await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
@@ -389,7 +411,7 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
     null,
     "la venta sin mesa debe guardar table_id null"
   );
-  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 3, "4 - 1 vendido sin mesa");
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 7, "vender un trago no toca el stock");
 
   // Un bartender no puede cancelar ventas (solo el organizador).
   await assert.rejects(
@@ -397,10 +419,12 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
     /No tenes permiso/
   );
 
-  // El organizador cancela la venta de barra: el stock vuelve y queda registrado el motivo.
+  // El organizador cancela la venta de barra: como un trago suelto nunca
+  // descuenta bar_stock, cancelarlo tampoco le devuelve nada (no hay nada
+  // que devolver) -- solo queda registrada la cancelacion.
   await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);`);
   await db.query(`select cancel_bar_sale('${barSaleNoTable.rows[0].bar_sale_id}','Me equivoque de trago')`);
-  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 4, "vuelve el trago cancelado");
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 7, "cancelar un trago no mueve stock, nunca se habia descontado");
   assert.ok(await scalar(`select cancelled_at from bar_sales where id='${barSaleNoTable.rows[0].bar_sale_id}'`), "debe quedar marcada como cancelada");
 
   // No se puede cancelar dos veces la misma venta.
@@ -713,7 +737,7 @@ test("combos (entrada + consumicion) y packs de entradas", async () => {
     `select * from redeem_combo_ticket('${bar}','VIPCODE1','${eventProductFernet}',1)`
   );
   assert.equal(redeem1.rows[0].remaining_quantity, 1, "quedaba 1 Fernet incluido despues de canjear 1 de 2");
-  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProductFernet}'`), 9, "el stock de la barra se descuenta igual que una venta normal");
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProductFernet}'`), 9, "canjear un combo si descuenta stock de la barra (a diferencia de un trago suelto)");
   assert.equal(await scalar(`select count(*)::int from bar_sales where ticket_id = '${vipTicketId}' and payment_method = 'combo'`), 1);
 
   // No puede canjear un producto distinto al incluido en un combo tipo 'producto'.
