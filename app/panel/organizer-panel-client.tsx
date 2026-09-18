@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import RRPPCoverageCard from "./rrpp-coverage-card";
+import BarCoverageCard from "./bar-coverage-card";
 
 type EventData = {
   id: string;
@@ -489,6 +490,14 @@ export default function OrganizerPanelClient({
 
             <section className="mt-5">
               <RRPPCoverageCard />
+            </section>
+
+            {/* =================================================
+                COBERTURA DE BARRAS
+            ================================================= */}
+
+            <section className="mt-5">
+              <BarCoverageCard />
             </section>
 
             {/* =================================================

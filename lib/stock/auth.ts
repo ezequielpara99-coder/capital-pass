@@ -9,7 +9,7 @@ type VerifyResult =
 const STOCK_TRIAL_EXPIRED_ERROR =
   "Tu prueba gratuita de 7 días del módulo de stock terminó. Actualizá a Gestión avanzada para seguir usándolo.";
 
-async function hasStockAccess(organizationId: string): Promise<boolean> {
+export async function hasStockAccess(organizationId: string): Promise<boolean> {
   const admin = createAdminClient();
   const { data, error } = await admin.rpc("cp_org_has_stock_access", { p_organization_id: organizationId });
   if (error) {
@@ -24,7 +24,7 @@ const FALLBACK_ADMIN_EMAILS = ["ezequiel.para99@gmail.com"];
 // El admin de la plataforma nunca queda bloqueado por la prueba/plan de
 // stock de ninguna organizacion (necesita poder entrar a cualquier evento
 // para soporte, demos, etc).
-async function isPlatformAdmin(userId: string, email: string | null | undefined): Promise<boolean> {
+export async function isPlatformAdmin(userId: string, email: string | null | undefined): Promise<boolean> {
   if (email && FALLBACK_ADMIN_EMAILS.includes(email.toLowerCase())) return true;
   const admin = createAdminClient();
   const { data } = await admin.from("platform_admins").select("user_id").eq("user_id", userId).maybeSingle();
