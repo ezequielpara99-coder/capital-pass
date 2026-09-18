@@ -963,6 +963,7 @@ function ManageEventContent() {
       .eq("id", ticket.id);
 
     if (error) {
+      console.error("saveTicketType:", error);
       showError(
         readableDatabaseError(
           error.message,
