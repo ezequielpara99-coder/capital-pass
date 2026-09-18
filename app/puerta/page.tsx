@@ -28,6 +28,15 @@ type TicketType = {
   active: boolean;
 };
 
+type PackRow = {
+  id: string;
+  name: string;
+  ticket_type_id: string;
+  quantity_per_pack: number;
+  price_minor: number;
+  active: boolean;
+};
+
 type GeneratedEntry = {
   id: string;
   displayNumber: number;
@@ -137,6 +146,12 @@ export default function DoorSellerPage() {
     useState<"efectivo" | "transferencia" | "">("");
 
   const [ticketTypeId, setTicketTypeId] =
+    useState("");
+
+  const [packs, setPacks] =
+    useState<PackRow[]>([]);
+
+  const [packId, setPackId] =
     useState("");
 
   const [quantity, setQuantity] =
@@ -322,6 +337,24 @@ export default function DoorSellerPage() {
             availableTypes[0].id
           );
         }
+
+        // PACKS -- best-effort, si falla la venta individual sigue andando.
+        try {
+          const packsResponse = await fetch(
+            `/api/stock/packs?eventId=${currentEvent.id}`,
+            { cache: "no-store" }
+          );
+          if (packsResponse.ok) {
+            const packsResult = await packsResponse.json();
+            setPacks(
+              ((packsResult.packs ?? []) as PackRow[]).filter(
+                (p) => p.active
+              )
+            );
+          }
+        } catch {
+          // silencioso
+        }
       } catch (err) {
         console.error(
           "ERROR PUERTA:",
@@ -347,8 +380,12 @@ export default function DoorSellerPage() {
         type.id === ticketTypeId
     ) ?? null;
 
-  const unitPrice =
-    selectedType
+  const selectedPack =
+    packs.find((pack) => pack.id === packId) ?? null;
+
+  const unitPrice = selectedPack
+    ? Number(selectedPack.price_minor)
+    : selectedType
       ? Number(
           selectedType.price_minor
         )
@@ -356,6 +393,10 @@ export default function DoorSellerPage() {
 
   const total =
     unitPrice * quantity;
+
+  const ticketsToGenerate = selectedPack
+    ? selectedPack.quantity_per_pack * quantity
+    : quantity;
 
   // =====================================================
   // DISPONIBILIDAD DE PUERTA
@@ -448,7 +489,7 @@ export default function DoorSellerPage() {
           p_event_id: event.id,
 
           p_ticket_type_id:
-            ticketTypeId,
+            selectedPack ? selectedPack.ticket_type_id : ticketTypeId,
 
           p_quantity:
             quantity,
@@ -467,6 +508,9 @@ export default function DoorSellerPage() {
 
           p_payment_method:
             paymentMethod,
+
+          p_pack_id:
+            selectedPack ? selectedPack.id : null,
         }
       );
 
@@ -541,6 +585,7 @@ export default function DoorSellerPage() {
     setPaymentMethod("");
     setQuantity(1);
     setError("");
+    setPackId("");
 
     if (ticketTypes.length > 0) {
       setTicketTypeId(
@@ -996,14 +1041,18 @@ export default function DoorSellerPage() {
 
                 <select
                   value={
-                    ticketTypeId
+                    packId ? `pack:${packId}` : ticketTypeId
                   }
                   required
-                  onChange={(e) =>
-                    setTicketTypeId(
-                      e.target.value
-                    )
-                  }
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value.startsWith("pack:")) {
+                      setPackId(value.slice(5));
+                    } else {
+                      setPackId("");
+                      setTicketTypeId(value);
+                    }
+                  }}
                   className="mt-2 h-13 w-full rounded-xl border border-white/10 bg-[#100b15] px-4 text-sm outline-none"
                 >
                   {ticketTypes.map(
@@ -1028,8 +1077,20 @@ export default function DoorSellerPage() {
                       </option>
                     )
                   )}
+                  {packs.map((pack) => (
+                    <option key={pack.id} value={`pack:${pack.id}`}>
+                      📦 {pack.name} · {formatMoney(Number(pack.price_minor))}
+                    </option>
+                  ))}
                 </select>
               </label>
+
+              {selectedPack && (
+                <p className="text-xs text-[#ff9b82]">
+                  Cada pack genera {selectedPack.quantity_per_pack} entradas de{" "}
+                  {ticketTypes.find((t) => t.id === selectedPack.ticket_type_id)?.name ?? "la tanda"}.
+                </p>
+              )}
 
               {/* CANTIDAD */}
 
@@ -1081,13 +1142,15 @@ export default function DoorSellerPage() {
                 <div className="flex items-end justify-between">
                   <div>
                     <p className="text-xs text-white/35">
-                      Precio unitario
+                      {selectedPack ? "Entradas a generar" : "Precio unitario"}
                     </p>
 
                     <p className="mt-1 text-sm">
-                      {formatMoney(
-                        unitPrice
-                      )}
+                      {selectedPack
+                        ? ticketsToGenerate
+                        : formatMoney(
+                            unitPrice
+                          )}
                     </p>
                   </div>
 
