@@ -6,6 +6,28 @@ import { createClient } from "../../lib/supabase/client";
 export default function LogoutPage() {
   useEffect(() => {
     async function logout() {
+      // Si el navegador tiene una suscripcion push activa, hay que darla
+      // de baja ANTES de cerrar sesion -- si no, queda viva en este
+      // dispositivo y le siguen llegando notificaciones de esta cuenta a
+      // quien use el aparato despues (tablet/celular compartido entre
+      // turnos de control, puerta o bartenders).
+      try {
+        if ("serviceWorker" in navigator) {
+          const registration = await navigator.serviceWorker.ready;
+          const subscription = await registration.pushManager.getSubscription();
+          if (subscription) {
+            await fetch("/api/push/subscribe", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ endpoint: subscription.endpoint }),
+            }).catch(() => {});
+            await subscription.unsubscribe();
+          }
+        }
+      } catch {
+        // No bloquear el cierre de sesion si esto falla.
+      }
+
       const supabase = createClient();
 
       await supabase.auth.signOut();
