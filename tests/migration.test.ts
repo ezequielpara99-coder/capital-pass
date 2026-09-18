@@ -21,6 +21,8 @@ const capitalRentalsMigration = readFileSync(new URL("../supabase/migrations/202
 const trialAlUsarStockMigration = readFileSync(new URL("../supabase/migrations/20260928_trial_arranca_al_usar_stock.sql", import.meta.url), "utf8");
 const upgradePlanDiferenciaMigration = readFileSync(new URL("../supabase/migrations/20260929_upgrade_plan_diferencia.sql", import.meta.url), "utf8");
 const adminBypassStockTrialMigration = readFileSync(new URL("../supabase/migrations/20260930_admin_bypass_stock_trial.sql", import.meta.url), "utf8");
+const fixUpgradeProrationMigration = readFileSync(new URL("../supabase/migrations/20260931_fix_upgrade_proration_bugs.sql", import.meta.url), "utf8");
+const fixOnlineSaleStaleCashMigration = readFileSync(new URL("../supabase/migrations/20260932_fix_online_sale_stale_cash_payment.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -83,6 +85,8 @@ async function database() {
   await db.exec(trialAlUsarStockMigration);
   await db.exec(upgradePlanDiferenciaMigration);
   await db.exec(adminBypassStockTrialMigration);
+  await db.exec(fixUpgradeProrationMigration);
+  await db.exec(fixOnlineSaleStaleCashMigration);
   return db;
 }
 
@@ -212,6 +216,30 @@ test("ventas online: carrito, confirmacion, cupo y limpieza de pendientes", asyn
   await db.exec(`update sales set created_at = now() - interval '40 minutes' where id='${staleSale}'`);
   assert.equal(await scalar("select cp_cancel_stale_online_sales()"), 1);
   assert.equal(await scalar(`select status from sales where id='${staleSale}'`), "cancelled");
+
+  // Un pago en efectivo que se acredita DESPUES de que el cron ya cancelo
+  // el carrito por los 30 minutos (tipico de Pago Facil/Rapipago) no debe
+  // perderse: si todavia hay cupo, la venta se revive en vez de quedar
+  // cancelada para siempre con el comprador ya habiendo pagado.
+  await db.query("select confirm_online_sale($1,'approved')", [staleSale]);
+  assert.equal(await scalar(`select status from sales where id='${staleSale}'`), "confirmed", "el pago tardio revive la venta si hay cupo");
+  assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${staleSale}'`), 1);
+
+  // Si en cambio el cupo ya se agoto para cuando llega el pago tardio
+  // (otro comprador se quedo con los lugares mientras este esperaba),
+  // no debe sobrevender: la venta queda cancelada, no se emiten entradas.
+  // 3 entradas confirmadas hasta aca (2 de "sale" + 1 de "staleSale"); dejamos
+  // lugar para reservar el carrito (capacidad 4) y despues lo ajustamos a 3
+  // para simular que ya no queda cupo para cuando el pago tardio se acredita.
+  await db.exec(`update ticket_types set capacity = 4 where id='${ticketType}'`);
+  const lateStaleSale = await scalar(`select sale_id::text from create_online_sale('${event}', ${cart(1)}, ${buyer("666666")})`);
+  await db.exec(`update sales set created_at = now() - interval '40 minutes' where id='${lateStaleSale}'`);
+  assert.equal(await scalar("select cp_cancel_stale_online_sales()"), 1);
+  assert.equal(await scalar(`select status from sales where id='${lateStaleSale}'`), "cancelled");
+  await db.exec(`update ticket_types set capacity = 3 where id='${ticketType}'`);
+  await db.query("select confirm_online_sale($1,'approved')", [lateStaleSale]);
+  assert.equal(await scalar(`select status from sales where id='${lateStaleSale}'`), "cancelled", "no debe revivir ni sobrevender si ya no hay cupo");
+  assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${lateStaleSale}'`), 0);
 
   await db.close();
 });
@@ -492,6 +520,59 @@ test("upgrade de plan basica -> avanzada: cobra solo la diferencia prorrateada",
   // Reintento del webhook (mismo pago aplicado dos veces) es un no-op seguro.
   await db.query(`select cp_apply_upgrade_payment('${charge.id}','mp-payment-upgrade-1','approved',${charge.amount_minor},'ARS', now())`);
   assert.equal(await scalar(`select count(*)::int from plan_upgrade_charges where id = '${charge.id}' and status = 'approved'`), 1);
+
+  await db.close();
+});
+
+test("upgrade de plan: usa lo que se pago (no el precio de lista) y recalcula si el monto queda viejo", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const org = "c5555555-5555-4555-8555-555555555555";
+  const organizerUser = "c6666666-6666-4666-8666-666666666666";
+  const basicPlan = "c7777777-7777-4777-8777-777777777777";
+  const signup = "c8888888-8888-4888-8888-888888888888";
+  const paidPrice = 10000;
+
+  const avanzadaId = await scalar(`select id::text from subscription_plans where code = 'gestion_avanzada'`);
+
+  await db.exec(`insert into auth.users values ('${organizerUser}','upgrade-stale@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club Stale','club-stale');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${organizerUser}','organizer','active');
+    insert into subscription_plans(id,code,name,price_minor) values ('${basicPlan}','basica-stale-test','Básica test',${paidPrice});
+    insert into subscription_signups(id,plan_id,organization_id,first_name,last_name,organization_name,email,expected_amount,expected_currency,frequency_months)
+      values ('${signup}','${basicPlan}','${org}','Org','Test','Club Stale','upgrade-stale@example.test',${paidPrice},'ARS',1);`);
+
+  await db.query(`select cp_record_payment('${signup}','pay-stale-basica','approved',${paidPrice},'ARS', now() - interval '15 days', now())`);
+
+  // El admin sube el precio de lista del plan basico DESPUES de que la
+  // organizacion ya pago -- el prorrateo debe seguir usando lo que
+  // realmente se pago (10000), no el precio nuevo.
+  await db.exec(`update subscription_plans set price_minor = 15000 where id = '${basicPlan}'`);
+
+  const first = await db.query<{ result: { id: string; amount_minor: number } }>(
+    `select cp_prepare_plan_upgrade('${organizerUser}','${avanzadaId}') as result`
+  );
+  // (190000-10000)*~0.5 ~= 90000, no (190000-15000)*~0.5 ~= 87500 -- la diferencia
+  // entre ambos calculos alcanza para distinguir cual precio se uso.
+  assert.ok(first.rows[0].result.amount_minor > 88000, `debe prorratear contra lo pagado (10000), no el precio de lista nuevo (15000); dio ${first.rows[0].result.amount_minor}`);
+
+  // Alguien abre el checkout (queda con checkout_url) y no completa el pago.
+  await db.query(`select cp_save_upgrade_checkout('${first.rows[0].result.id}', 'https://mercadopago.example/checkout-viejo')`);
+
+  // El admin despues ajusta el precio de Gestion avanzada -- si se vuelve a
+  // pedir el mismo upgrade (mismo periodo), el monto tiene que recalcularse
+  // con el precio nuevo, no reusar el que se calculo la primera vez.
+  await db.exec(`update subscription_plans set price_minor = 100000 where code = 'gestion_avanzada'`);
+  const second = await db.query<{ result: { id: string; amount_minor: number; checkout_url: string | null } }>(
+    `select cp_prepare_plan_upgrade('${organizerUser}','${avanzadaId}') as result`
+  );
+  assert.equal(second.rows[0].result.id, first.rows[0].result.id, "sigue siendo el mismo cobro pendiente, no uno nuevo");
+  // (100000-10000)*~0.5 ~= 45000, bien distinto del ~90000 original.
+  assert.ok(second.rows[0].result.amount_minor < 55000, `debe recalcular con el precio nuevo, no reusar el monto viejo; dio ${second.rows[0].result.amount_minor}`);
+  assert.equal(second.rows[0].result.checkout_url, null, "el link de pago viejo (con el monto viejo) queda invalidado");
+
+  await db.exec(`update subscription_plans set price_minor = 190000 where code = 'gestion_avanzada'`);
 
   await db.close();
 });
