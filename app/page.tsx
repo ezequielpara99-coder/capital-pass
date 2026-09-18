@@ -1387,7 +1387,7 @@ export default function Home() {
       ===================================================== */}
 
       <footer className="relative z-10 border-t border-[var(--cp-border)]">
-        <div className="mx-auto grid max-w-[1560px] gap-10 px-5 py-10 md:grid-cols-3 md:px-8 xl:px-10">
+        <div className="mx-auto max-w-[1560px] gap-4 px-5 py-10 pr-28 md:px-8 md:pr-32 xl:px-10">
           <div>
             <p className="text-sm font-black tracking-[0.08em]">
               CAPITAL
@@ -1401,8 +1401,8 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="md:text-center">
-            <div className="flex flex-wrap gap-5 text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--cp-muted)] md:justify-center">
+          <div className="mt-6">
+            <div className="flex flex-wrap gap-5 text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--cp-muted)]">
               <a href="#platform">
                 Plataforma
               </a>
@@ -1431,19 +1431,6 @@ export default function Home() {
                 Instagram ↗
               </a>
             </p>
-          </div>
-
-          <div className="md:text-right">
-            <a
-              href={
-                whatsappUrl
-              }
-              target="_blank"
-              rel="noreferrer"
-              className="text-[9px] font-black uppercase tracking-[0.16em] text-[#ff6b48]"
-            >
-              Soporte por WhatsApp ↗
-            </a>
           </div>
         </div>
       </footer>
