@@ -55,7 +55,6 @@ export default function AccountPanel({ initial, plans, returning }: { initial: A
     } catch (e) { setError(e instanceof Error ? e.message : "No pudimos iniciar la suscripción."); setBusy(false); }
   }
 
-  const awaitingCharge = account.hasSignup && account.mpStatus !== "pending" && account.mpStatus !== "cancelled";
   return <main className="relative min-h-screen overflow-hidden bg-[#050505] px-5 py-6 text-[#f7f3ed] selection:bg-[#ff3b24] selection:text-white md:px-8 xl:px-10">
     {/* FONDO — luz neutra centrada, punto de llegada del recorrido */}
     <div className="pointer-events-none absolute inset-0">
@@ -91,8 +90,7 @@ export default function AccountPanel({ initial, plans, returning }: { initial: A
                 <select value={planId} onChange={(e) => setPlanId(e.target.value)} className="mt-3 block h-14 w-full border border-white/[0.10] bg-black/25 px-4 text-sm font-semibold outline-none focus:border-[#ff3b24]/70">{plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
               </label>}
               {plan && <div className="mt-7 border-t border-white/[0.08] pt-6"><p className="text-sm font-bold text-white/70">{plan.name}</p><p className="mt-2 text-4xl font-black tracking-[-0.04em]">{new Intl.NumberFormat("es-AR", { style: "currency", currency: plan.currency, maximumFractionDigits: 0 }).format(Number(plan.price_minor))}<span className="ml-2 text-sm font-normal text-white/40">/ {plan.billing_interval === "yearly" ? "año" : "mes"}</span></p></div>}
-              {awaitingCharge ? <p className="mt-7 text-sm leading-6 text-white/60">Hay una suscripción en proceso. Verificá el pago para continuar.</p>
-                : plan ? <button onClick={checkout} disabled={busy} className="cp-punch mt-7 h-14 w-full bg-[#ff3b24] px-6 text-[11px] font-black uppercase tracking-[0.24em] text-white shadow-[0_18px_50px_rgba(255,59,36,.3)] transition hover:scale-[1.01] hover:bg-[#ff4a32] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45">{busy ? "Procesando..." : account.hasSignup && account.mpStatus === "pending" ? "Continuar en Mercado Pago" : "Activar suscripción"}</button>
+              {plan ? <button onClick={checkout} disabled={busy} className="cp-punch mt-7 h-14 w-full bg-[#ff3b24] px-6 text-[11px] font-black uppercase tracking-[0.24em] text-white shadow-[0_18px_50px_rgba(255,59,36,.3)] transition hover:scale-[1.01] hover:bg-[#ff4a32] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45">{busy ? "Procesando..." : account.hasSignup && account.mpStatus === "pending" ? "Continuar en Mercado Pago" : "Activar suscripción"}</button>
                 : <p className="mt-5 text-sm text-white/50">No hay planes disponibles en este momento.</p>}
             </>}
         </section>
