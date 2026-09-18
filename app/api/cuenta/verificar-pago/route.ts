@@ -13,7 +13,8 @@ export async function POST(request: NextRequest) {
   try {
     const account = await reconcileUser(user);
     return NextResponse.json({ active: account.active, destination: account.destination, mpStatus: account.signup?.mp_status ?? null }, { headers: { "Cache-Control": "no-store" } });
-  } catch {
+  } catch (err) {
+    console.error("VERIFICAR PAGO:", user.email, err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "Todavia no pudimos confirmar el pago. No vuelvas a pagar; reintenta en unos instantes." }, { status: 503 });
   }
 }
