@@ -17,6 +17,7 @@ export default function AccountPanel({ initial, plans, returning }: { initial: A
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const checking = useRef(false);
+  const activeRef = useRef(initial.active);
   const plan = plans.find((p) => p.id === planId);
 
   const verify = useCallback(async (signal?: AbortSignal) => {
@@ -26,6 +27,7 @@ export default function AccountPanel({ initial, plans, returning }: { initial: A
       const response = await fetch("/api/cuenta/verificar-pago", { method: "POST", signal });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No pudimos verificar el pago.");
+      activeRef.current = result.active;
       setAccount((previous) => ({ ...previous, active: result.active, destination: result.destination, mpStatus: result.mpStatus }));
       setMessage(result.active ? "Tu servicio está activo." : "La confirmación del cobro sigue pendiente. No hace falta iniciar otra compra.");
       if (result.active && returning) window.location.replace(result.destination);
@@ -35,14 +37,17 @@ export default function AccountPanel({ initial, plans, returning }: { initial: A
   }, [returning]);
 
   useEffect(() => {
-    if (initial.isAdmin || (!initial.hasSignup && !returning)) return;
+    if (initial.isAdmin || initial.active || (!initial.hasSignup && !returning)) return;
     const controller = new AbortController();
     let attempts = 0;
     const run = () => { attempts++; void verify(controller.signal); };
     const start = window.setTimeout(run, 0);
-    const interval = window.setInterval(() => { if (attempts < 6) run(); else window.clearInterval(interval); }, 10000);
+    const interval = window.setInterval(() => {
+      if (activeRef.current || attempts >= 6) { window.clearInterval(interval); return; }
+      run();
+    }, 10000);
     return () => { controller.abort(); window.clearTimeout(start); window.clearInterval(interval); };
-  }, [initial.hasSignup, initial.isAdmin, returning, verify]);
+  }, [initial.active, initial.hasSignup, initial.isAdmin, returning, verify]);
 
   async function checkout() {
     if (busy) return;
