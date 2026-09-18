@@ -78,9 +78,19 @@ export default function PerfilClient({
   }
 
   function urlBase64ToUint8Array(base64String: string) {
-    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-    const rawData = window.atob(base64);
+    // La clave VAPID a veces llega con espacios/saltos de linea invisibles
+    // si se pego mal en algun lado (terminal, panel de Vercel) -- eso hace
+    // que atob() explote con "characters outside of the Latin1 range".
+    // Sacamos todo lo que no sea un caracter valido de base64url primero.
+    const cleaned = base64String.trim().replace(/[^A-Za-z0-9_-]/g, "");
+    const padding = "=".repeat((4 - (cleaned.length % 4)) % 4);
+    const base64 = (cleaned + padding).replace(/-/g, "+").replace(/_/g, "/");
+    let rawData: string;
+    try {
+      rawData = window.atob(base64);
+    } catch {
+      throw new Error("La clave de notificaciones está mal configurada. Avisale a soporte.");
+    }
     const outputArray = new Uint8Array(rawData.length);
     for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
     return outputArray;

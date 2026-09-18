@@ -97,3 +97,19 @@ export async function sendPushToOrganizers(
 
   await sendToSubscriptions(subs ?? [], payload);
 }
+
+// Manda a todos los admins de la plataforma (ej: aviso de nueva suscripcion).
+export async function sendPushToPlatformAdmins(payload: PushPayload) {
+  const admin = createAdminClient();
+
+  const { data: admins } = await admin.from("platform_admins").select("user_id");
+  const userIds = (admins ?? []).map((a) => a.user_id);
+  if (userIds.length === 0) return;
+
+  const { data: subs } = await admin
+    .from("push_subscriptions")
+    .select("id, endpoint, p256dh, auth_key")
+    .in("user_id", userIds);
+
+  await sendToSubscriptions(subs ?? [], payload);
+}

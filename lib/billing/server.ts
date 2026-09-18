@@ -4,6 +4,7 @@ import { createAdminClient } from "../supabase/admin";
 import { destinationFor, signupFromReference, upgradeChargeFromReference, verifiedPayment, type BillingMembership, type ProviderPayment } from "./rules";
 import { getPayment, getPlatformCollectorId, paymentsForReference } from "./provider";
 import { sendSubscriptionReceipt } from "../email/subscription-receipt";
+import { sendPushToPlatformAdmins } from "../push/server";
 
 export type Signup = {
   id: string; user_id: string | null; organization_id: string | null; plan_id: string;
@@ -106,6 +107,29 @@ async function applyPayment(payment: ProviderPayment, signupId: string) {
         if (sent.ok) await admin.from("subscription_payments").update({ receipt_sent_at: new Date().toISOString() }).eq("payment_id", receipt.payment_id);
       }
     } catch { console.error("BILLING: recibo pendiente de envio."); }
+  }
+  // Aviso push a los admins de la plataforma cuando una organizacion nueva
+  // paga por primera vez (no en cada renovacion).
+  if (verified.status === "approved") {
+    try {
+      const { data: orgSignups } = await admin
+        .from("subscription_signups")
+        .select("id")
+        .eq("organization_id", signup.organization_id);
+      const orgSignupIds = (orgSignups ?? []).map((s) => s.id);
+      const { count } = await admin
+        .from("subscription_payments")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "approved")
+        .in("signup_id", orgSignupIds);
+      if (count === 1) {
+        await sendPushToPlatformAdmins({
+          title: "🎉 Nueva suscripción",
+          body: `${signup.organization_name} se suscribió a Capital Pass.`,
+          url: "/admin/suscripciones",
+        });
+      }
+    } catch { console.error("BILLING: no se pudo avisar la nueva suscripcion."); }
   }
   return true;
 }

@@ -140,6 +140,30 @@ a {
 }
 
 /* =========================================================
+   LOGO CON MOVIMIENTO — leve balanceo, sin romper el diseño
+========================================================= */
+
+@keyframes cpLogoSway {
+  0%,
+  100% {
+    transform: rotate(-18deg) scale(1);
+  }
+  50% {
+    transform: rotate(-8deg) scale(1.05);
+  }
+}
+
+.cp-logo-sway {
+  animation: cpLogoSway 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-logo-sway {
+    animation: none;
+  }
+}
+
+/* =========================================================
    BRILLO EN BUCLE — barrido automático, no depende de hover
 ========================================================= */
 

@@ -44,6 +44,14 @@ export default async function OrganizerPanel({
     return null;
   }
 
+  const admin = createAdminClient();
+  const fallbackAdminEmails = ["ezequiel.para99@gmail.com"];
+  const isFallbackAdmin = Boolean(user.email && fallbackAdminEmails.includes(user.email.toLowerCase()));
+  const { data: platformAdminRow } = isFallbackAdmin
+    ? { data: null }
+    : await admin.from("platform_admins").select("user_id").eq("user_id", user.id).maybeSingle();
+  const isAdmin = isFallbackAdmin || Boolean(platformAdminRow);
+
   const { data: profile } =
     await supabase
       .from("profiles")
@@ -1390,6 +1398,7 @@ export default async function OrganizerPanel({
     <>
       <OrganizerPanelClient
         section={section}
+        isAdmin={isAdmin}
         organizerName={
           organizerName
         }

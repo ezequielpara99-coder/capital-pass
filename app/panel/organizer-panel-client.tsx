@@ -42,6 +42,7 @@ type RecentSale = {
 
 type Props = {
   section: string;
+  isAdmin: boolean;
   organizerName: string;
   initials: string;
   organizationName: string;
@@ -53,6 +54,7 @@ type Props = {
 
 export default function OrganizerPanelClient({
   section,
+  isAdmin,
   organizerName,
   initials,
   organizationName,
@@ -62,6 +64,9 @@ export default function OrganizerPanelClient({
   recentSales,
 }: Props) {
   const [mobileMenu, setMobileMenu] =
+    useState(false);
+
+  const [profileMenu, setProfileMenu] =
     useState(false);
 
   const [linkCopied, setLinkCopied] =
@@ -119,6 +124,7 @@ export default function OrganizerPanelClient({
           <Sidebar
             section={section}
             eventId={eventId}
+            isAdmin={isAdmin}
             organizationName={
               organizationName
             }
@@ -157,6 +163,7 @@ export default function OrganizerPanelClient({
               <Sidebar
                 section={section}
                 eventId={eventId}
+                isAdmin={isAdmin}
                 organizationName={
                   organizationName
                 }
@@ -248,8 +255,54 @@ export default function OrganizerPanelClient({
                   + Crear evento
                 </Link>
 
-                <div className="flex h-10 w-10 items-center justify-center border border-[#ff5a2a]/20 bg-[#ff3b24]/[0.06] text-[10px] font-black">
-                  {initials}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setProfileMenu((open) => !open)}
+                    className="flex h-10 w-10 items-center justify-center border border-[#ff5a2a]/20 bg-[#ff3b24]/[0.06] text-[10px] font-black transition hover:border-[#ff5a2a]/40"
+                  >
+                    {initials}
+                  </button>
+
+                  {profileMenu && (
+                    <>
+                      <button
+                        type="button"
+                        aria-label="Cerrar menú"
+                        onClick={() => setProfileMenu(false)}
+                        className="fixed inset-0 z-[290] cursor-default"
+                      />
+                      <div className="absolute right-0 top-[52px] z-[300] w-56 border border-white/[0.09] bg-[#0a0908] shadow-[0_25px_70px_rgba(0,0,0,.5)]">
+                        <div className="border-b border-white/[0.07] px-4 py-3">
+                          <p className="truncate text-xs font-bold text-white/75">{organizerName}</p>
+                          <p className="mt-0.5 truncate text-[10px] text-white/35">{organizationName}</p>
+                        </div>
+                        <Link
+                          href="/panel/perfil"
+                          onClick={() => setProfileMenu(false)}
+                          className="flex items-center gap-3 border-b border-white/[0.06] px-4 py-3 text-[11px] font-bold uppercase tracking-[0.08em] text-white/60 transition hover:bg-white/[0.03] hover:text-white"
+                        >
+                          Mi perfil
+                        </Link>
+                        {isAdmin && (
+                          <Link
+                            href="/admin"
+                            onClick={() => setProfileMenu(false)}
+                            className="flex items-center gap-3 border-b border-white/[0.06] px-4 py-3 text-[11px] font-bold uppercase tracking-[0.08em] text-white/60 transition hover:bg-white/[0.03] hover:text-white"
+                          >
+                            Volver al panel Admin
+                          </Link>
+                        )}
+                        <Link
+                          href="/logout"
+                          onClick={() => setProfileMenu(false)}
+                          className="flex items-center gap-3 px-4 py-3 text-[11px] font-bold uppercase tracking-[0.08em] text-red-300/70 transition hover:bg-red-500/[0.06] hover:text-red-300"
+                        >
+                          Cerrar sesión
+                        </Link>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -609,12 +662,14 @@ export default function OrganizerPanelClient({
 function Sidebar({
   section,
   eventId,
+  isAdmin,
   organizationName,
   initials,
   onNavigate,
 }: {
   section: string;
   eventId: string | null;
+  isAdmin: boolean;
   organizationName: string;
   initials: string;
   onNavigate?: () => void;
@@ -709,7 +764,7 @@ function Sidebar({
 
           <div className="relative h-10 w-10 shrink-0 overflow-hidden">
 
-            <div className="absolute inset-[5px] rotate-[-18deg] rounded-[45%_55%_65%_35%] bg-gradient-to-br from-[#ff2a1a] via-[#ff3b24] to-[#ff6530] shadow-[0_0_24px_rgba(255,59,36,.25)]" />
+            <div className="cp-logo-sway absolute inset-[5px] rounded-[45%_55%_65%_35%] bg-gradient-to-br from-[#ff2a1a] via-[#ff3b24] to-[#ff6530] shadow-[0_0_24px_rgba(255,59,36,.25)]" />
 
             <div className="absolute inset-[7px] rounded-full bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,.6),transparent_35%)]" />
           </div>
@@ -787,6 +842,19 @@ function Sidebar({
             Stock
           </span>
         </Link>
+
+        {isAdmin && (
+          <Link
+            href="/admin"
+            onClick={onNavigate}
+            className="group mt-2 flex min-h-[48px] items-center gap-3 border border-white/15 bg-white/[0.03] px-3 text-white/60 transition hover:bg-white/[0.06] hover:text-white"
+          >
+            <span className="w-5 text-[13px]">🛠️</span>
+            <span className="flex-1 text-[10px] font-black uppercase tracking-[0.10em]">
+              Volver al panel Admin
+            </span>
+          </Link>
+        )}
       </nav>
 
       {/* ORGANIZACIÓN */}
