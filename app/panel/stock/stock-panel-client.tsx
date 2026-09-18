@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../../lib/supabase/client";
+import BarCoverageCard from "../bar-coverage-card";
 
 type EventOption = { id: string; name: string };
 type Product = { id: string; name: string; category: string; brand: string | null; image_path: string | null; servings_per_bottle: number | null; organization_id: string | null };
@@ -148,6 +149,10 @@ export default function StockPanelClient({
             </select>
           )}
         </header>
+
+        <div className="mt-6">
+          <BarCoverageCard />
+        </div>
 
         <nav className="mt-6 flex flex-wrap gap-2">
           {TABS.map((t) => (

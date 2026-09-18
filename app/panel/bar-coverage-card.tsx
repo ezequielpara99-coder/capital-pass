@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 type BartenderRow = {
@@ -112,12 +111,6 @@ export default function BarCoverageCard() {
         <p className="mt-4 text-sm text-red-300/80">
           {error || "No se pudo cargar la cobertura."}
         </p>
-        <Link
-          href="/panel/stock"
-          className="mt-5 inline-flex h-10 items-center justify-center bg-[#ff2a1a] px-4 text-[9px] font-black uppercase tracking-[0.15em] text-white"
-        >
-          Ir a Stock
-        </Link>
       </section>
     );
   }
@@ -135,12 +128,6 @@ export default function BarCoverageCard() {
           Activá el módulo de stock y barras (probalo gratis 7 días) para ver acá los bartenders
           activos y cuánto se vendió en cada barra.
         </p>
-        <Link
-          href="/panel/stock"
-          className="mt-5 inline-flex h-10 items-center justify-center bg-[#ff2a1a] px-4 text-[9px] font-black uppercase tracking-[0.15em] text-white transition hover:bg-[#ff4a2d]"
-        >
-          Ir a Stock
-        </Link>
       </section>
     );
   }
@@ -161,13 +148,6 @@ export default function BarCoverageCard() {
             {data.event ? data.event.name : "Sin evento seleccionado"}
           </p>
         </div>
-
-        <Link
-          href="/panel/stock"
-          className="inline-flex h-10 items-center justify-center bg-[#ff2a1a] px-4 text-[9px] font-black uppercase tracking-[0.15em] text-white transition hover:bg-[#ff4a2d]"
-        >
-          Gestionar Stock
-        </Link>
       </div>
 
       <div className="grid gap-[1px] bg-white/[0.07] sm:grid-cols-2 xl:grid-cols-4">

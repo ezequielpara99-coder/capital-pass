@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useState } from "react";
 
 import RRPPCoverageCard from "./rrpp-coverage-card";
-import BarCoverageCard from "./bar-coverage-card";
 
 type EventData = {
   id: string;
@@ -493,14 +492,6 @@ export default function OrganizerPanelClient({
             </section>
 
             {/* =================================================
-                COBERTURA DE BARRAS
-            ================================================= */}
-
-            <section className="mt-5">
-              <BarCoverageCard />
-            </section>
-
-            {/* =================================================
                 TANDAS + VENTAS
             ================================================= */}
 
@@ -844,10 +835,9 @@ function Sidebar({
         <Link
           href="/panel/stock"
           onClick={onNavigate}
-          className="group mt-4 flex min-h-[48px] items-center gap-3 border border-emerald-400/25 bg-emerald-500/[0.06] px-3 text-emerald-300 transition hover:bg-emerald-500/[0.12]"
+          className="group mt-4 flex min-h-[48px] items-center justify-center bg-gradient-to-b from-white to-white/85 px-3 text-black shadow-[0_10px_30px_rgba(255,255,255,.18)] transition hover:scale-[1.02] hover:shadow-[0_10px_40px_rgba(255,255,255,.3)]"
         >
-          <span className="w-5 text-[13px]">🍸</span>
-          <span className="flex-1 text-[10px] font-black uppercase tracking-[0.10em]">
+          <span className="text-[10px] font-black uppercase tracking-[0.10em]">
             Stock
           </span>
         </Link>
