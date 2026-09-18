@@ -213,6 +213,14 @@ export async function reconcileUser(user: User) {
   const { data, error } = await admin.from("subscription_signups").select("id")
     .eq("user_id", user.id).not("mercadopago_preapproval_id", "is", null).order("created_at", { ascending: false }).limit(10);
   if (error) throw new Error("No se pudo buscar el pago.");
-  for (const row of data ?? []) await reconcileSignup(row.id);
+  // Un intento viejo/abandonado (ej: de cuando se probaba otro precio) no
+  // tiene por que impedir confirmar el pago bueno de los demas intentos.
+  for (const row of data ?? []) {
+    try {
+      await reconcileSignup(row.id);
+    } catch (err) {
+      console.error("reconcileUser: fallo al reconciliar signup", row.id, err instanceof Error ? err.message : err);
+    }
+  }
   return accountFor(user);
 }
