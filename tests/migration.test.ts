@@ -24,6 +24,7 @@ const adminBypassStockTrialMigration = readFileSync(new URL("../supabase/migrati
 const fixUpgradeProrationMigration = readFileSync(new URL("../supabase/migrations/20260931_fix_upgrade_proration_bugs.sql", import.meta.url), "utf8");
 const fixOnlineSaleStaleCashMigration = readFileSync(new URL("../supabase/migrations/20260932_fix_online_sale_stale_cash_payment.sql", import.meta.url), "utf8");
 const capPositiveStockAdjustmentMigration = readFileSync(new URL("../supabase/migrations/20260933_cap_positive_stock_adjustment.sql", import.meta.url), "utf8");
+const combosYPacksMigration = readFileSync(new URL("../supabase/migrations/20260934_combos_y_packs.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -48,7 +49,9 @@ async function database() {
   for (const c of constraints) {
     await db.exec(`alter table public.${q(c.table)} add constraint ${q(c.nombre)} ${c.definicion}`);
   }
-  await db.exec(`create table events(id uuid primary key, organization_id uuid, status public.event_status);
+  await db.exec(`create table events(id uuid primary key, organization_id uuid, status public.event_status,
+      rrpp_sales_enabled boolean default true, rrpp_sales_cutoff_at timestamptz,
+      door_sales_enabled boolean default true, door_sales_start_at timestamptz, door_sales_end_at timestamptz);
     create table event_staff(event_id uuid, organization_member_id uuid, staff_role public.event_staff_role, active boolean);
     create table sales(id uuid primary key default gen_random_uuid(), organization_id uuid, event_id uuid, buyer_id uuid,
       seller_member_id uuid, status public.sale_status default 'confirmed', total_minor bigint default 0, currency text default 'ARS',
@@ -60,7 +63,10 @@ async function database() {
     create table sale_items(id uuid primary key default gen_random_uuid(), sale_id uuid, event_id uuid, ticket_type_id uuid,
       quantity integer, unit_price_minor bigint);
     create table tickets(id uuid primary key default gen_random_uuid(), sale_item_id uuid, sale_id uuid, event_id uuid,
-      ticket_type_id uuid, status public.ticket_status default 'issued', display_number integer, manual_code text);
+      ticket_type_id uuid, status public.ticket_status default 'issued', display_number integer, manual_code text,
+      used_at timestamptz, updated_at timestamptz default now());
+    create table audit_logs(id uuid primary key default gen_random_uuid(), actor_user_id uuid, organization_id uuid,
+      event_id uuid, action text, entity_type text, entity_id uuid, metadata jsonb, created_at timestamptz default now());
     create function public.is_platform_admin() returns boolean language sql stable security definer set search_path='' as $$
       select exists(select 1 from public.platform_admins where user_id=auth.uid()) $$;`);
   for (const row of fixture.filter((r) => r.seccion === "funciones_de_acceso")) await db.exec((row.detalle as { definicion: string }).definicion);
@@ -89,6 +95,7 @@ async function database() {
   await db.exec(fixUpgradeProrationMigration);
   await db.exec(fixOnlineSaleStaleCashMigration);
   await db.exec(capPositiveStockAdjustmentMigration);
+  await db.exec(combosYPacksMigration);
   return db;
 }
 
@@ -588,6 +595,174 @@ test("upgrade de plan: usa lo que se pago (no el precio de lista) y recalcula si
   assert.equal(second.rows[0].result.checkout_url, null, "el link de pago viejo (con el monto viejo) queda invalidado");
 
   await db.exec(`update subscription_plans set price_minor = 190000 where code = 'gestion_avanzada'`);
+
+  await db.close();
+});
+
+test("combos (entrada + consumicion) y packs de entradas", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "d1111111-1111-4111-8111-111111111111";
+  const event = "d2222222-2222-4222-8222-222222222222";
+  const organizerUser = "d3333333-3333-4333-8333-333333333333";
+  const bartenderUser = "d4444444-4444-4444-8444-444444444444";
+  const bar = "d5555555-5555-4555-8555-555555555555";
+  const eventProductFernet = "d6666666-6666-4666-8666-666666666666";
+  const eventProductCoca = "d7777777-7777-4777-8777-777777777777";
+  const ticketTypeGeneral = "d8888888-8888-4888-8888-888888888888";
+  const ticketTypeVip = "d9999999-9999-4999-8999-999999999999";
+  const ticketTypePremium = "daaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const pack = "dbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const plan = "dccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const signup = "ddddddd1-dddd-4ddd-8ddd-ddddddddddd1";
+
+  await db.exec(`insert into auth.users values ('${organizerUser}','combo-org@example.test',now(),'{}');
+    insert into auth.users values ('${bartenderUser}','combo-bartender@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club Combos','club-combos');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into subscription_plans(id,code,name,price_minor) values ('${plan}','monthly-combo','Mensual',10000);
+    insert into subscription_signups(id,plan_id,organization_id,first_name,last_name,organization_name,email,expected_amount,expected_currency,frequency_months)
+      values ('${signup}','${plan}','${org}','Org','Test','Club Combos','combo-org@example.test',10000,'ARS',1);`);
+
+  await db.query("select cp_record_payment($1,'combo-test-payment','approved',10000,'ARS',now(),now())", [signup]);
+
+  await db.exec(`insert into organization_members(organization_id,user_id,role,status) values ('${org}','${organizerUser}','organizer','active');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${bartenderUser}','bartender','active');`);
+  const bartenderMember = await scalar(`select id::text from organization_members where user_id = '${bartenderUser}'`);
+
+  const fernetProductId = await scalar(`select id::text from products where name like 'Fernet Branca%' limit 1`);
+  const cocaProductId = await scalar(`select id::text from products where name like 'Coca-Cola%' limit 1`);
+  assert.ok(fernetProductId && cocaProductId, "el catalogo global debe traer Fernet y Coca-Cola precargados");
+
+  await db.exec(`insert into event_products(id,event_id,product_id,cost_price_minor,sale_price_minor,profit_margin_percent,total_stock,low_stock_threshold)
+      values ('${eventProductFernet}','${event}','${fernetProductId}',10000,2000,50,20,3);
+    insert into event_products(id,event_id,product_id,cost_price_minor,sale_price_minor,profit_margin_percent,total_stock,low_stock_threshold)
+      values ('${eventProductCoca}','${event}','${cocaProductId}',5000,1000,50,20,3);
+    insert into bars(id,event_id,name) values ('${bar}','${event}','Barra 1');
+    insert into event_staff(event_id,organization_member_id,staff_role,active,bar_id)
+      values ('${event}','${bartenderMember}','bartender',true,'${bar}');
+    insert into ticket_types(id,event_id,name,price_minor,capacity) values ('${ticketTypeGeneral}','${event}','General',5000,50);
+    insert into ticket_types(id,event_id,name,price_minor,capacity,combo_type,combo_event_product_id,combo_quantity)
+      values ('${ticketTypeVip}','${event}','VIP',15000,50,'producto','${eventProductFernet}',2);
+    insert into ticket_types(id,event_id,name,price_minor,capacity,combo_type,combo_credit_minor)
+      values ('${ticketTypePremium}','${event}','Premium',20000,50,'credito',5000);
+    insert into ticket_packs(id,event_id,ticket_type_id,name,quantity_per_pack,price_minor)
+      values ('${pack}','${event}','${ticketTypeGeneral}','Pack x3 General',3,13500);`);
+
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);`);
+
+  // Un producto de otro evento no puede quedar configurado como combo (el trigger lo bloquea).
+  await db.exec(`insert into events(id,organization_id,status) values ('deeeeeee-eeee-4eee-8eee-eeeeeeeeeeee','${org}','active');
+    insert into event_products(id,event_id,product_id,cost_price_minor,sale_price_minor,total_stock)
+      values ('dfffffff-ffff-4fff-8fff-ffffffffffff','deeeeeee-eeee-4eee-8eee-eeeeeeeeeeee','${fernetProductId}',10000,2000,10);`);
+  await assert.rejects(
+    () => db.query(`update ticket_types set combo_event_product_id = 'dfffffff-ffff-4fff-8fff-ffffffffffff' where id = '${ticketTypeGeneral}'`),
+    /mismo evento/
+  );
+
+  // Venta normal (sin combo, sin pack): regresion del comportamiento de siempre.
+  const plainSale = await db.query<{ sale_id: string; total_minor: string; tickets_created: number }>(
+    `select * from create_sale('${event}','${ticketTypeGeneral}',2,'Cliente','General','30111111','3462111111',null)`
+  );
+  assert.equal(Number(plainSale.rows[0].total_minor), 10000, "2 generales a 5000");
+  assert.equal(plainSale.rows[0].tickets_created, 2);
+  assert.equal(await scalar(`select count(*)::int from tickets where sale_id = '${plainSale.rows[0].sale_id}' and combo_remaining_quantity is null and combo_remaining_credit_minor is null`), 2);
+
+  // Venta de un pack: 1 pack de "Pack x3 General" genera 3 entradas de General,
+  // cobra el precio del pack (no 3 x precio de lista), y prorratea el
+  // unit_price_minor de sale_items para que siga cuadrando con el total.
+  const packSale = await db.query<{ sale_id: string; total_minor: string; tickets_created: number }>(
+    `select * from create_sale('${event}','${ticketTypeGeneral}',1,'Cliente','Pack','30222222','3462222222',null,null,'${pack}')`
+  );
+  assert.equal(Number(packSale.rows[0].total_minor), 13500, "el pack cobra su propio precio, no 3 x 5000");
+  assert.equal(packSale.rows[0].tickets_created, 3);
+  assert.equal(await scalar(`select count(*)::int from tickets where sale_id = '${packSale.rows[0].sale_id}'`), 3);
+  assert.equal(await scalar(`select unit_price_minor from sale_items where sale_id = '${packSale.rows[0].sale_id}'`), 4500, "13500/3 = 4500 por entrada");
+  assert.equal(await scalar(`select pack_id::text from sale_items where sale_id = '${packSale.rows[0].sale_id}'`), pack);
+
+  // 2 packs a la vez = 6 entradas.
+  const doublePack = await db.query<{ tickets_created: number }>(
+    `select * from create_sale('${event}','${ticketTypeGeneral}',2,'Cliente','DoblePack','30333333','3462333333',null,null,'${pack}')`
+  );
+  assert.equal(doublePack.rows[0].tickets_created, 6);
+
+  // Venta de una entrada VIP (combo tipo producto: incluye 2 Fernet).
+  const vipSale = await db.query<{ sale_id: string }>(
+    `select * from create_sale('${event}','${ticketTypeVip}',1,'Cliente','Vip','30444444','3462444444',null)`
+  );
+  const vipTicketId = await scalar(`select id::text from tickets where sale_id = '${vipSale.rows[0].sale_id}'`);
+  assert.equal(await scalar(`select combo_remaining_quantity from tickets where id = '${vipTicketId}'`), 2);
+  await db.exec(`update tickets set manual_code = 'VIPCODE1' where id = '${vipTicketId}'`);
+
+  // Venta de una entrada Premium (combo tipo credito: incluye $5000).
+  const premiumSale = await db.query<{ sale_id: string }>(
+    `select * from create_sale('${event}','${ticketTypePremium}',1,'Cliente','Premium','30555555','3462555555',null)`
+  );
+  const premiumTicketId = await scalar(`select id::text from tickets where sale_id = '${premiumSale.rows[0].sale_id}'`);
+  assert.equal(await scalar(`select combo_remaining_credit_minor from tickets where id = '${premiumTicketId}'`), 5000);
+  await db.exec(`update tickets set manual_code = 'PREMIUMCODE1' where id = '${premiumTicketId}'`);
+
+  // Al bartender le asignamos stock para poder canjear.
+  await db.query(`select assign_stock_to_bar('${eventProductFernet}','${bar}',10)`);
+  await db.query(`select assign_stock_to_bar('${eventProductCoca}','${bar}',10)`);
+
+  await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
+
+  // Canjear el combo VIP: 1 de los 2 Fernet incluidos.
+  const redeem1 = await db.query<{ ticket_id: string; product_name: string; quantity: number; remaining_quantity: number; remaining_credit_minor: string | null }>(
+    `select * from redeem_combo_ticket('${bar}','VIPCODE1','${eventProductFernet}',1)`
+  );
+  assert.equal(redeem1.rows[0].remaining_quantity, 1, "quedaba 1 Fernet incluido despues de canjear 1 de 2");
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProductFernet}'`), 9, "el stock de la barra se descuenta igual que una venta normal");
+  assert.equal(await scalar(`select count(*)::int from bar_sales where ticket_id = '${vipTicketId}' and payment_method = 'combo'`), 1);
+
+  // No puede canjear un producto distinto al incluido en un combo tipo 'producto'.
+  await assert.rejects(
+    () => db.query(`select redeem_combo_ticket('${bar}','VIPCODE1','${eventProductCoca}',1)`),
+    /no incluye ese producto/
+  );
+
+  // No puede canjear mas de lo que queda incluido (queda 1, pide 2).
+  await assert.rejects(
+    () => db.query(`select redeem_combo_ticket('${bar}','VIPCODE1','${eventProductFernet}',2)`),
+    /Ya se canjeo/
+  );
+
+  // Canjear el credito Premium: gasta 2000 (1 Fernet) del saldo de 5000.
+  const redeem2 = await db.query<{ remaining_credit_minor: string }>(
+    `select * from redeem_combo_ticket('${bar}','PREMIUMCODE1','${eventProductFernet}',1)`
+  );
+  assert.equal(Number(redeem2.rows[0].remaining_credit_minor), 3000, "5000 - 2000 = 3000");
+
+  // Con el credito puede canjear OTRO producto distinto (no esta atado a uno fijo).
+  const redeem3 = await db.query<{ remaining_credit_minor: string }>(
+    `select * from redeem_combo_ticket('${bar}','PREMIUMCODE1','${eventProductCoca}',1)`
+  );
+  assert.equal(Number(redeem3.rows[0].remaining_credit_minor), 2000, "3000 - 1000 = 2000");
+
+  // No puede gastar mas credito del que le queda.
+  await assert.rejects(
+    () => db.query(`select redeem_combo_ticket('${bar}','PREMIUMCODE1','${eventProductFernet}',2)`),
+    /No queda suficiente credito/
+  );
+
+  // Una entrada sin combo (General) no se puede canjear.
+  const generalTicketId = await scalar(`select id::text from tickets where sale_id = '${plainSale.rows[0].sale_id}' limit 1`);
+  await db.exec(`update tickets set manual_code = 'GENERALCODE1' where id = '${generalTicketId}'`);
+  await assert.rejects(
+    () => db.query(`select redeem_combo_ticket('${bar}','GENERALCODE1','${eventProductFernet}',1)`),
+    /no incluye consumicion/
+  );
+
+  // Un bartender de otra barra (sin asignacion) no puede canjear.
+  const otherBar = "e1111111-1111-4111-8111-111111111111";
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);
+    insert into bars(id,event_id,name) values ('${otherBar}','${event}','Barra 2');`);
+  await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
+  await assert.rejects(
+    () => db.query(`select redeem_combo_ticket('${otherBar}','PREMIUMCODE1','${eventProductFernet}',1)`),
+    /No estas asignado a esta barra/
+  );
 
   await db.close();
 });
