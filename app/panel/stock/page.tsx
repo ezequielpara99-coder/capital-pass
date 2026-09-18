@@ -38,9 +38,12 @@ export default async function StockPage({
     : await admin.from("platform_admins").select("user_id").eq("user_id", user.id).maybeSingle();
   const isPlatformAdmin = isFallbackAdmin || Boolean(platformAdmin);
 
-  const { data: hasStockAccess } = await admin.rpc("cp_org_has_stock_access", {
+  const { data: hasStockAccess, error: stockAccessError } = await admin.rpc("cp_org_has_stock_access", {
     p_organization_id: membership.organization_id,
   });
+  if (stockAccessError) {
+    console.error("STOCK PAGE cp_org_has_stock_access:", stockAccessError);
+  }
 
   if (!isPlatformAdmin && !hasStockAccess) {
     const { data: avanzadaPlan } = await admin
