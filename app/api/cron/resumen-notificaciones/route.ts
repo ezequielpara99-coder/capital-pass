@@ -42,15 +42,23 @@ export async function GET(request: NextRequest) {
     .eq("role", "organizer")
     .eq("status", "active");
 
-  const orgByUser = new Map((members ?? []).map((m) => [m.user_id, m.organization_id]));
+  // Un organizador puede administrar mas de una organizacion -- hay que
+  // juntar todas, no quedarse con una sola (Map de user_id a un solo
+  // organization_id perdia en silencio la actividad de las demas).
+  const orgsByUser = new Map<string, string[]>();
+  for (const m of members ?? []) {
+    const list = orgsByUser.get(m.user_id) ?? [];
+    list.push(m.organization_id);
+    orgsByUser.set(m.user_id, list);
+  }
 
   let sent = 0;
 
   for (const item of due) {
-    const organizationId = orgByUser.get(item.user_id);
-    if (!organizationId) continue;
+    const organizationIds = orgsByUser.get(item.user_id);
+    if (!organizationIds || organizationIds.length === 0) continue;
 
-    const { data: events } = await admin.from("events").select("id").eq("organization_id", organizationId);
+    const { data: events } = await admin.from("events").select("id").in("organization_id", organizationIds);
     const eventIds = (events ?? []).map((e) => e.id);
     const nowIso = new Date().toISOString();
 
