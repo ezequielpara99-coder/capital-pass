@@ -1401,22 +1401,36 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-5 text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--cp-muted)]">
-            <a href="#platform">
-              Plataforma
-            </a>
+          <div className="md:text-center">
+            <div className="flex flex-wrap gap-5 text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--cp-muted)] md:justify-center">
+              <a href="#platform">
+                Plataforma
+              </a>
 
-            <a href="#tickets">
-              Tickets
-            </a>
+              <a href="#tickets">
+                Tickets
+              </a>
 
-            <a href="#pricing">
-              Suscripción
-            </a>
+              <a href="#pricing">
+                Suscripción
+              </a>
 
-            <Link href="/login">
-              Login
-            </Link>
+              <Link href="/login">
+                Login
+              </Link>
+            </div>
+
+            <p className="mt-3 text-[8px] uppercase tracking-[0.14em] text-[var(--cp-muted)]">
+              CapitalStudio · Argentina ·{" "}
+              <a
+                href="https://www.instagram.com/capitalpass.ar/"
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-[#ff6b48]"
+              >
+                Instagram ↗
+              </a>
+            </p>
           </div>
 
           <div className="md:text-right">
@@ -1430,18 +1444,6 @@ export default function Home() {
             >
               Soporte por WhatsApp ↗
             </a>
-
-            <p className="mt-3 text-[8px] uppercase tracking-[0.14em] text-[var(--cp-muted)]">
-              CapitalStudio · Argentina ·{" "}
-              <a
-                href="https://www.instagram.com/capitalpass.ar/"
-                target="_blank"
-                rel="noreferrer"
-                className="hover:text-[#ff6b48]"
-              >
-                Instagram ↗
-              </a>
-            </p>
           </div>
         </div>
       </footer>
