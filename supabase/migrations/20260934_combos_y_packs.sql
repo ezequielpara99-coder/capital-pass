@@ -33,7 +33,7 @@ alter table public.ticket_types add constraint ticket_types_combo_check check (
 -- Un check no puede hacer subconsultas: garantizamos con un trigger que el
 -- producto elegido para el combo sea del mismo evento que la tanda.
 create or replace function public.cp_check_ticket_type_combo_product()
-returns trigger language plpgsql set search_path = '' as $$
+returns trigger language plpgsql security definer set search_path = '' as $$
 begin
   if new.combo_event_product_id is not null then
     if not exists (
