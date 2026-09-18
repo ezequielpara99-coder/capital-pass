@@ -56,6 +56,22 @@ type TicketType = {
   capacity: number;
   status: string;
   active: boolean;
+  combo_type: "producto" | "credito" | null;
+  combo_event_product_id: string | null;
+  combo_quantity: number | null;
+  combo_credit_minor: number | null;
+};
+
+type EventProductOption = { eventProductId: string; name: string };
+
+type TicketPack = {
+  id: string;
+  name: string;
+  ticket_type_id: string;
+  quantity_per_pack: number;
+  price_minor: number;
+  currency: string;
+  active: boolean;
 };
 
 type TicketRecord = {
@@ -102,6 +118,10 @@ function ManageEventContent() {
   const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
   const [tickets, setTickets] = useState<TicketRecord[]>([]);
   const [saleItems, setSaleItems] = useState<SaleItemRecord[]>([]);
+  const [eventProducts, setEventProducts] = useState<EventProductOption[]>([]);
+  const [packs, setPacks] = useState<TicketPack[]>([]);
+  const [creatingPack, setCreatingPack] = useState(false);
+  const [newPack, setNewPack] = useState({ name: "", ticketTypeId: "", quantityPerPack: "", price: "" });
 
   const [loading, setLoading] = useState(true);
   const [savingEvent, setSavingEvent] = useState(false);
@@ -126,15 +146,16 @@ function ManageEventContent() {
     price: "",
     capacity: "",
     status: "upcoming",
+    comboEnabled: false,
+    comboType: "producto" as "producto" | "credito",
+    comboEventProductId: "",
+    comboQuantity: "1",
+    comboCredit: "",
   });
 
   // =======================================================
   // CARGAR DATOS
   // =======================================================
-
-  useEffect(() => {
-    loadData();
-  }, [requestedEventId]);
 
   async function loadData() {
     const supabase = createClient();
@@ -245,7 +266,11 @@ function ManageEventContent() {
           currency,
           capacity,
           status,
-          active
+          active,
+          combo_type,
+          combo_event_product_id,
+          combo_quantity,
+          combo_credit_minor
         `)
         .eq("event_id", selectedEvent.id)
         .order("created_at", { ascending: true });
@@ -257,6 +282,36 @@ function ManageEventContent() {
     }
 
     setTicketTypes((ticketTypeData ?? []) as TicketType[]);
+
+    // PRODUCTOS DE STOCK (para configurar combos) Y PACKS -- best-effort,
+    // si el modulo de stock no esta disponible para esta organizacion
+    // (prueba vencida, sin plan) simplemente no se puede configurar un
+    // combo todavia, pero el resto de la pagina sigue andando.
+    try {
+      const stockResponse = await fetch(`/api/stock/overview?eventId=${selectedEvent.id}`, { cache: "no-store" });
+      if (stockResponse.ok) {
+        const stockResult = await stockResponse.json();
+        const options: EventProductOption[] = (stockResult.eventProducts ?? []).map((ep: { id: string; product: { name: string } | null }) => ({
+          eventProductId: ep.id,
+          name: ep.product?.name ?? "Producto",
+        }));
+        setEventProducts(options);
+      } else {
+        setEventProducts([]);
+      }
+    } catch {
+      setEventProducts([]);
+    }
+
+    try {
+      const packsResponse = await fetch(`/api/stock/packs?eventId=${selectedEvent.id}`, { cache: "no-store" });
+      if (packsResponse.ok) {
+        const packsResult = await packsResponse.json();
+        setPacks((packsResult.packs ?? []) as TicketPack[]);
+      }
+    } catch {
+      // silencioso: la seccion de packs se muestra vacia
+    }
 
     // TICKETS YA GENERADOS
     const { data: ticketData } = await supabase
@@ -283,6 +338,11 @@ function ManageEventContent() {
 
     setLoading(false);
   }
+
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedEventId]);
 
   // =======================================================
   // MENSAJES
@@ -874,6 +934,15 @@ function ManageEventContent() {
       return;
     }
 
+    if (ticket.combo_type === "producto" && !ticket.combo_event_product_id) {
+      showError("Elegí qué producto incluye el combo.");
+      return;
+    }
+    if (ticket.combo_type === "credito" && !(Number(ticket.combo_credit_minor) > 0)) {
+      showError("Ingresá el crédito que incluye el combo.");
+      return;
+    }
+
     setSavingTicketId(ticket.id);
 
     const { error } = await supabase
@@ -885,6 +954,10 @@ function ManageEventContent() {
         capacity: Number(ticket.capacity),
         status: ticket.status,
         active: ticket.active,
+        combo_type: ticket.combo_type,
+        combo_event_product_id: ticket.combo_type === "producto" ? ticket.combo_event_product_id : null,
+        combo_quantity: ticket.combo_type === "producto" ? Number(ticket.combo_quantity) : null,
+        combo_credit_minor: ticket.combo_type === "credito" ? Number(ticket.combo_credit_minor) : null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", ticket.id);
@@ -996,6 +1069,15 @@ function ManageEventContent() {
       return;
     }
 
+    if (newTicket.comboEnabled && newTicket.comboType === "producto" && !newTicket.comboEventProductId) {
+      showError("Elegí qué producto incluye el combo.");
+      return;
+    }
+    if (newTicket.comboEnabled && newTicket.comboType === "credito" && (!newTicket.comboCredit || Number(newTicket.comboCredit) <= 0)) {
+      showError("Ingresá el crédito que incluye el combo.");
+      return;
+    }
+
     setCreatingTicket(true);
 
     const { error } = await supabase
@@ -1009,6 +1091,10 @@ function ManageEventContent() {
         capacity: Number(newTicket.capacity),
         status: newTicket.status,
         active: true,
+        combo_type: newTicket.comboEnabled ? newTicket.comboType : null,
+        combo_event_product_id: newTicket.comboEnabled && newTicket.comboType === "producto" ? newTicket.comboEventProductId : null,
+        combo_quantity: newTicket.comboEnabled && newTicket.comboType === "producto" ? Number(newTicket.comboQuantity) : null,
+        combo_credit_minor: newTicket.comboEnabled && newTicket.comboType === "credito" ? Number(newTicket.comboCredit) : null,
       });
 
     if (error) {
@@ -1029,6 +1115,11 @@ function ManageEventContent() {
       price: "",
       capacity: "",
       status: "upcoming",
+      comboEnabled: false,
+      comboType: "producto",
+      comboEventProductId: "",
+      comboQuantity: "1",
+      comboCredit: "",
     });
 
     showSuccess("Nueva tanda creada correctamente.");
@@ -1740,6 +1831,7 @@ function ManageEventContent() {
                   <TicketEditor
                     key={ticket.id}
                     ticket={ticket}
+                    eventProducts={eventProducts}
                     sold={sold}
                     hasSales={ticketHasSales}
                     saving={
@@ -1870,6 +1962,71 @@ function ManageEventContent() {
 
             </div>
 
+            <div className="md:col-span-2 border border-white/[0.09] bg-white/[0.02] p-4">
+              <label className="flex items-center gap-3 text-sm text-white/70">
+                <input
+                  type="checkbox"
+                  checked={newTicket.comboEnabled}
+                  onChange={(e) => setNewTicket({ ...newTicket, comboEnabled: e.target.checked })}
+                  className="h-4 w-4"
+                />
+                Esta entrada incluye consumición (combo)
+              </label>
+
+              {newTicket.comboEnabled && (
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm text-white/60">Tipo de combo</label>
+                    <select
+                      value={newTicket.comboType}
+                      onChange={(e) => setNewTicket({ ...newTicket, comboType: e.target.value as "producto" | "credito" })}
+                      className="h-12 w-full border border-white/[0.09] bg-[#0a0908] px-4 text-sm text-white outline-none focus:border-[#ff5a2a]/45"
+                    >
+                      <option value="producto">Producto específico</option>
+                      <option value="credito">Crédito en pesos</option>
+                    </select>
+                  </div>
+
+                  {newTicket.comboType === "producto" ? (
+                    <>
+                      <div>
+                        <label className="mb-2 block text-sm text-white/60">Producto incluido</label>
+                        {eventProducts.length === 0 ? (
+                          <p className="text-xs text-white/35">Cargá productos primero en Stock → Stock general.</p>
+                        ) : (
+                          <select
+                            value={newTicket.comboEventProductId}
+                            onChange={(e) => setNewTicket({ ...newTicket, comboEventProductId: e.target.value })}
+                            className="h-12 w-full border border-white/[0.09] bg-[#0a0908] px-4 text-sm text-white outline-none focus:border-[#ff5a2a]/45"
+                          >
+                            <option value="">Elegí un producto</option>
+                            {eventProducts.map((ep) => (
+                              <option key={ep.eventProductId} value={ep.eventProductId}>{ep.name}</option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                      <InputField
+                        label="Cantidad incluida"
+                        placeholder="1"
+                        type="number"
+                        value={newTicket.comboQuantity}
+                        onChange={(value) => setNewTicket({ ...newTicket, comboQuantity: value })}
+                      />
+                    </>
+                  ) : (
+                    <InputField
+                      label="Crédito incluido ($)"
+                      placeholder="5000"
+                      type="number"
+                      value={newTicket.comboCredit}
+                      onChange={(value) => setNewTicket({ ...newTicket, comboCredit: value })}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="flex items-end">
 
               <button
@@ -1888,6 +2045,19 @@ function ManageEventContent() {
 
           </form>
         </Section>
+
+        <PacksSection
+          eventId={event.id}
+          ticketTypes={ticketTypes}
+          packs={packs}
+          onSaved={loadData}
+          creating={creatingPack}
+          setCreating={setCreatingPack}
+          newPack={newPack}
+          setNewPack={setNewPack}
+          showError={showError}
+          showSuccess={showSuccess}
+        />
 
       </div>
     </main>
@@ -2389,6 +2559,134 @@ function Section({
   );
 }
 
+function PacksSection({
+  eventId,
+  ticketTypes,
+  packs,
+  onSaved,
+  creating,
+  setCreating,
+  newPack,
+  setNewPack,
+  showError,
+  showSuccess,
+}: {
+  eventId: string;
+  ticketTypes: TicketType[];
+  packs: TicketPack[];
+  onSaved: () => Promise<void>;
+  creating: boolean;
+  setCreating: (v: boolean) => void;
+  newPack: { name: string; ticketTypeId: string; quantityPerPack: string; price: string };
+  setNewPack: (v: { name: string; ticketTypeId: string; quantityPerPack: string; price: string }) => void;
+  showError: (text: string) => void;
+  showSuccess: (text: string) => void;
+}) {
+  async function createPack(formEvent: FormEvent<HTMLFormElement>) {
+    formEvent.preventDefault();
+    if (!newPack.name.trim() || !newPack.ticketTypeId) {
+      showError("Completá el nombre y la tanda del pack.");
+      return;
+    }
+    setCreating(true);
+    try {
+      const response = await fetch("/api/stock/packs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          eventId,
+          ticketTypeId: newPack.ticketTypeId,
+          name: newPack.name.trim(),
+          quantityPerPack: Number(newPack.quantityPerPack),
+          priceMinor: Number(newPack.price),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setNewPack({ name: "", ticketTypeId: "", quantityPerPack: "", price: "" });
+      showSuccess("Pack creado correctamente.");
+      await onSaved();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : "No se pudo crear el pack.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function togglePack(packId: string, active: boolean) {
+    try {
+      await fetch("/api/stock/packs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId, packId, active }),
+      });
+      await onSaved();
+    } catch {
+      showError("No se pudo actualizar el pack.");
+    }
+  }
+
+  const ticketTypeName = (id: string) => ticketTypes.find((t) => t.id === id)?.name ?? "Tanda";
+
+  return (
+    <Section title="Packs" description="Vendé varias entradas de una misma tanda juntas, a un precio con descuento. Se venden desde RRPP/puerta.">
+      {packs.length > 0 && (
+        <div className="mb-6 space-y-2">
+          {packs.map((pack) => (
+            <div key={pack.id} className="flex items-center justify-between border border-white/[0.08] bg-white/[0.02] px-4 py-3">
+              <div>
+                <p className="text-sm font-bold text-white/80">{pack.name}</p>
+                <p className="text-xs text-white/35">{pack.quantity_per_pack} × {ticketTypeName(pack.ticket_type_id)} · {money(pack.price_minor)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => togglePack(pack.id, !pack.active)}
+                className={`h-9 rounded-full border px-3 text-[10px] font-black uppercase tracking-wide ${pack.active ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300" : "border-white/15 bg-white/[0.03] text-white/40"}`}
+              >
+                {pack.active ? "Activo" : "Oculto"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {ticketTypes.length === 0 ? (
+        <p className="text-sm text-white/35">Creá al menos una tanda primero.</p>
+      ) : (
+        <form onSubmit={createPack} className="grid gap-4 md:grid-cols-2">
+          <InputField label="Nombre del pack" placeholder="Ej: Pack x4 General" value={newPack.name} onChange={(v) => setNewPack({ ...newPack, name: v })} />
+          <div>
+            <label className="mb-2 block text-sm text-white/60">Tanda</label>
+            <select
+              value={newPack.ticketTypeId}
+              onChange={(e) => setNewPack({ ...newPack, ticketTypeId: e.target.value })}
+              className="h-12 w-full border border-white/[0.09] bg-[#0a0908] px-4 text-sm text-white outline-none focus:border-[#ff5a2a]/45"
+            >
+              <option value="">Elegí una tanda</option>
+              {ticketTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <InputField label="Cantidad de entradas por pack" placeholder="4" type="number" value={newPack.quantityPerPack} onChange={(v) => setNewPack({ ...newPack, quantityPerPack: v })} />
+          <InputField label="Precio del pack ($)" placeholder="18000" type="number" value={newPack.price} onChange={(v) => setNewPack({ ...newPack, price: v })} />
+          <div className="md:col-span-2">
+            <button
+              type="submit"
+              disabled={creating}
+              className="h-12 w-full bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] text-[9px] font-black uppercase tracking-[0.14em] text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {creating ? "Creando..." : "+ Crear pack"}
+            </button>
+          </div>
+        </form>
+      )}
+    </Section>
+  );
+}
+
+function money(value: number) {
+  return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
+}
+
 function StatusButton({
   label,
   selected,
@@ -2539,6 +2837,7 @@ function InputField({
 
 function TicketEditor({
   ticket,
+  eventProducts,
   sold,
   hasSales,
   saving,
@@ -2548,6 +2847,7 @@ function TicketEditor({
   onDelete,
 }: {
   ticket: TicketType;
+  eventProducts: EventProductOption[];
   sold: number;
   hasSales: boolean;
   saving: boolean;
@@ -2739,6 +3039,85 @@ function TicketEditor({
 
         </div>
 
+      </div>
+
+      <div className="mt-5 border border-white/[0.08] bg-white/[0.015] p-4">
+        <label className="flex items-center gap-3 text-sm text-white/70">
+          <input
+            type="checkbox"
+            checked={ticket.combo_type !== null}
+            onChange={(e) =>
+              onChange(
+                e.target.checked
+                  ? { ...ticket, combo_type: "producto", combo_quantity: 1, combo_event_product_id: eventProducts[0]?.eventProductId ?? "" }
+                  : { ...ticket, combo_type: null, combo_event_product_id: null, combo_quantity: null, combo_credit_minor: null }
+              )
+            }
+            className="h-4 w-4"
+          />
+          Esta entrada incluye consumición (combo)
+        </label>
+
+        {ticket.combo_type !== null && (
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <div>
+              <label className="mb-2 block text-xs text-white/30">Tipo de combo</label>
+              <select
+                value={ticket.combo_type}
+                onChange={(e) =>
+                  onChange(
+                    e.target.value === "producto"
+                      ? { ...ticket, combo_type: "producto", combo_quantity: 1, combo_credit_minor: null }
+                      : { ...ticket, combo_type: "credito", combo_event_product_id: null, combo_quantity: null, combo_credit_minor: ticket.combo_credit_minor ?? 0 }
+                  )
+                }
+                className="h-11 w-full border border-white/[0.08] bg-[#0a0908] px-3 text-sm outline-none focus:border-[#ff5a2a]/45"
+              >
+                <option value="producto">Producto específico</option>
+                <option value="credito">Crédito en pesos</option>
+              </select>
+            </div>
+
+            {ticket.combo_type === "producto" ? (
+              <>
+                <div>
+                  <label className="mb-2 block text-xs text-white/30">Producto incluido</label>
+                  <select
+                    value={ticket.combo_event_product_id ?? ""}
+                    onChange={(e) => onChange({ ...ticket, combo_event_product_id: e.target.value })}
+                    className="h-11 w-full border border-white/[0.08] bg-[#0a0908] px-3 text-sm outline-none focus:border-[#ff5a2a]/45"
+                  >
+                    <option value="">Elegí un producto</option>
+                    {eventProducts.map((ep) => (
+                      <option key={ep.eventProductId} value={ep.eventProductId}>{ep.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-2 block text-xs text-white/30">Cantidad incluida</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={ticket.combo_quantity ?? 1}
+                    onChange={(e) => onChange({ ...ticket, combo_quantity: Number(e.target.value) })}
+                    className="h-11 w-full border border-white/[0.08] bg-black/25 px-3 text-sm outline-none focus:border-[#ff5a2a]/45"
+                  />
+                </div>
+              </>
+            ) : (
+              <div>
+                <label className="mb-2 block text-xs text-white/30">Crédito incluido ($)</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={ticket.combo_credit_minor ?? 0}
+                  onChange={(e) => onChange({ ...ticket, combo_credit_minor: Number(e.target.value) })}
+                  className="h-11 w-full border border-white/[0.08] bg-black/25 px-3 text-sm outline-none focus:border-[#ff5a2a]/45"
+                />
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="mt-5 flex flex-col justify-end gap-3 sm:flex-row">

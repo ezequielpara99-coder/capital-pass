@@ -35,6 +35,15 @@ type TicketTypeRow = {
   active: boolean;
 };
 
+type PackRow = {
+  id: string;
+  name: string;
+  ticket_type_id: string;
+  quantity_per_pack: number;
+  price_minor: number;
+  active: boolean;
+};
+
 type SaleResult = {
   sale_id: string;
   buyer_id: string;
@@ -157,6 +166,9 @@ export default function NuevaVentaRRPPPage() {
   const [ticketTypeId, setTicketTypeId] =
     useState("");
 
+  const [packs, setPacks] = useState<PackRow[]>([]);
+  const [packId, setPackId] = useState("");
+
   const [quantity, setQuantity] =
     useState(1);
 
@@ -194,7 +206,12 @@ export default function NuevaVentaRRPPPage() {
       (item) => item.id === ticketTypeId
     ) ?? null;
 
-  const unitPrice = selectedTicketType
+  const selectedPack =
+    packs.find((p) => p.id === packId) ?? null;
+
+  const unitPrice = selectedPack
+    ? selectedPack.price_minor
+    : selectedTicketType
     ? Number(
         selectedTicketType.price_minor ??
           0
@@ -203,6 +220,10 @@ export default function NuevaVentaRRPPPage() {
 
   const total =
     unitPrice * quantity;
+
+  const ticketsToGenerate = selectedPack
+    ? selectedPack.quantity_per_pack * quantity
+    : quantity;
 
   // =====================================================
   // CARGAR EVENTO + TANDAS
@@ -386,6 +407,17 @@ export default function NuevaVentaRRPPPage() {
           setTicketTypeId(
             availableTicketTypes[0].id
           );
+        }
+
+        // PACKS -- best-effort, si falla la venta individual sigue andando.
+        try {
+          const packsResponse = await fetch(`/api/stock/packs?eventId=${selectedEvent.id}`, { cache: "no-store" });
+          if (packsResponse.ok) {
+            const packsResult = await packsResponse.json();
+            setPacks(((packsResult.packs ?? []) as PackRow[]).filter((p) => p.active));
+          }
+        } catch {
+          // silencioso
         }
       } catch (err) {
         console.error(err);
@@ -578,7 +610,7 @@ export default function NuevaVentaRRPPPage() {
             event.id,
 
           p_ticket_type_id:
-            ticketTypeId,
+            selectedPack ? selectedPack.ticket_type_id : ticketTypeId,
 
           p_quantity:
             quantity,
@@ -597,6 +629,9 @@ export default function NuevaVentaRRPPPage() {
 
           p_payment_method:
             paymentMethod,
+
+          p_pack_id:
+            selectedPack ? selectedPack.id : null,
         }
       );
 
@@ -768,6 +803,7 @@ export default function NuevaVentaRRPPPage() {
     setPaymentMethod("");
 
     setQuantity(1);
+    setPackId("");
 
     setSaleResult(null);
     setEntriesResult(null);
@@ -1213,13 +1249,16 @@ export default function NuevaVentaRRPPPage() {
               <Field label="Tipo de entrada">
                 <select
                   value={
-                    ticketTypeId
+                    packId ? `pack:${packId}` : ticketTypeId
                   }
                   onChange={(e) => {
-                    setTicketTypeId(
-                      e.target.value
-                    );
-
+                    const value = e.target.value;
+                    if (value.startsWith("pack:")) {
+                      setPackId(value.slice(5));
+                    } else {
+                      setPackId("");
+                      setTicketTypeId(value);
+                    }
                     setQuantity(1);
                   }}
                   className={
@@ -1249,10 +1288,21 @@ export default function NuevaVentaRRPPPage() {
                       </option>
                     )
                   )}
+                  {packs.map((pack) => (
+                    <option key={pack.id} value={`pack:${pack.id}`} className="bg-[#100817]">
+                      📦 {pack.name} · {money(pack.price_minor)}
+                    </option>
+                  ))}
                 </select>
               </Field>
 
-              {selectedTicketType?.description && (
+              {selectedPack && (
+                <p className="mt-2 text-xs text-[#ff9b82]">
+                  Cada pack genera {selectedPack.quantity_per_pack} entradas de {ticketTypes.find((t) => t.id === selectedPack.ticket_type_id)?.name ?? "la tanda"}.
+                </p>
+              )}
+
+              {selectedTicketType?.description && !selectedPack && (
                 <p className="mt-2 text-xs text-white/30">
                   {
                     selectedTicketType.description
@@ -1299,13 +1349,11 @@ export default function NuevaVentaRRPPPage() {
               <div className="mt-6 grid grid-cols-2 gap-3">
                 <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                   <p className="text-[10px] uppercase tracking-wider text-white/30">
-                    Precio
+                    {selectedPack ? "Entradas a generar" : "Precio"}
                   </p>
 
                   <p className="mt-2 text-lg font-semibold">
-                    {money(
-                      unitPrice
-                    )}
+                    {selectedPack ? ticketsToGenerate : money(unitPrice)}
                   </p>
                 </div>
 
