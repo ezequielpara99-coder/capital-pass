@@ -388,6 +388,8 @@ begin;
 -- ticket_types (que pudo cambiar) cuando el pago tarda en llegar.
 -- =============================================================
 
+drop function if exists public.create_online_sale(uuid, jsonb, text, text, text, text, text);
+
 create or replace function public.create_online_sale(
   p_event_id uuid,
   p_items jsonb,
