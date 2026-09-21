@@ -26,6 +26,7 @@ const fixOnlineSaleStaleCashMigration = readFileSync(new URL("../supabase/migrat
 const capPositiveStockAdjustmentMigration = readFileSync(new URL("../supabase/migrations/20260933_cap_positive_stock_adjustment.sql", import.meta.url), "utf8");
 const combosYPacksMigration = readFileSync(new URL("../supabase/migrations/20260934_combos_y_packs.sql", import.meta.url), "utf8");
 const tragoNoDescuentaStockMigration = readFileSync(new URL("../supabase/migrations/20260935_venta_trago_no_descuenta_stock.sql", import.meta.url), "utf8");
+const cuentasCortesiaMigration = readFileSync(new URL("../supabase/migrations/20260936_cuentas_cortesia.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -98,6 +99,7 @@ async function database() {
   await db.exec(capPositiveStockAdjustmentMigration);
   await db.exec(combosYPacksMigration);
   await db.exec(tragoNoDescuentaStockMigration);
+  await db.exec(cuentasCortesiaMigration);
   return db;
 }
 
@@ -787,6 +789,32 @@ test("combos (entrada + consumicion) y packs de entradas", async () => {
     () => db.query(`select redeem_combo_ticket('${otherBar}','PREMIUMCODE1','${eventProductFernet}',1)`),
     /No estas asignado a esta barra/
   );
+
+  await db.close();
+});
+
+test("cuenta de cortesia: servicio y stock completos sin pagar", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const orgFree = "d1111111-1111-4111-8111-111111111111";
+  const orgPaid = "d2222222-2222-4222-8222-222222222222";
+
+  await db.exec(`insert into organizations(id,name,slug) values ('${orgFree}','Cliente Estudio','cliente-estudio');
+    insert into organizations(id,name,slug) values ('${orgPaid}','Sin Pagar','sin-pagar');`);
+
+  assert.equal(await scalar(`select cp_org_has_service('${orgFree}')`), false, "sin marca y sin pago no hay servicio");
+
+  await db.exec(`update organizations set complimentary = true, complimentary_note = 'Cliente del estudio' where id = '${orgFree}'`);
+  assert.equal(await scalar(`select cp_org_has_service('${orgFree}')`), true, "la cuenta de cortesia tiene servicio sin pagar");
+  assert.equal(await scalar(`select cp_org_has_stock_access('${orgFree}')`), true, "y el pack completo, incluido stock");
+  assert.equal(await scalar(`select count(*)::int from stock_trial where organization_id = '${orgFree}'`), 0, "sin abrir una prueba de 7 dias");
+
+  assert.equal(await scalar(`select cp_org_has_service('${orgPaid}')`), false, "otra organizacion no se ve afectada");
+  assert.equal(await scalar(`select cp_org_has_stock_access('${orgPaid}')`), false);
+
+  await db.exec(`update organizations set active = false where id = '${orgFree}'`);
+  assert.equal(await scalar(`select cp_org_has_service('${orgFree}')`), false, "desactivar la organizacion corta el acceso aunque sea de cortesia");
 
   await db.close();
 });

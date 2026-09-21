@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import CrearCuenta from "./crear-cuenta";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -12,6 +13,7 @@ type OrganizationRow = {
   name: string;
   contact_email: string | null;
   active: boolean;
+  complimentary: boolean;
   created_at: string;
 };
 
@@ -67,7 +69,7 @@ export default async function AdminOrganizationsPage() {
     await Promise.all([
       admin
         .from("organizations")
-        .select("id, name, contact_email, active, created_at")
+        .select("id, name, contact_email, active, complimentary, created_at")
         .order("created_at", { ascending: false })
         .limit(1000),
       admin
@@ -80,7 +82,20 @@ export default async function AdminOrganizationsPage() {
         .eq("role", "organizer"),
     ]);
 
-  const organizations = (organizationsResult.data ?? []) as OrganizationRow[];
+  // Si todavia no se corrio la migracion de cuentas de cortesia, la columna
+  // no existe: mostramos la lista igual, sin esa marca.
+  let organizations = (organizationsResult.data ?? []) as OrganizationRow[];
+  if (organizationsResult.error) {
+    const { data: fallback } = await admin
+      .from("organizations")
+      .select("id, name, contact_email, active, created_at")
+      .order("created_at", { ascending: false })
+      .limit(1000);
+    organizations = ((fallback ?? []) as Omit<OrganizationRow, "complimentary">[]).map((item) => ({
+      ...item,
+      complimentary: false,
+    }));
+  }
   const subscriptions = (subscriptionsResult.data ?? []) as SubscriptionRow[];
   const events = (eventsResult.data ?? []) as EventRow[];
   const members = (membersResult.data ?? []) as MemberRow[];
@@ -140,13 +155,17 @@ export default async function AdminOrganizationsPage() {
             </h1>
           </div>
 
-          <div className="border border-[#ff5a2a]/15 bg-[#ff3b24]/[0.05] px-5 py-4">
-            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/28">
-              Total
-            </p>
-            <p className="mt-2 text-3xl font-black text-[#ffc0ad]">
-              {organizations.length}
-            </p>
+          <div className="flex flex-wrap items-end gap-4">
+            <CrearCuenta />
+
+            <div className="border border-[#ff5a2a]/15 bg-[#ff3b24]/[0.05] px-5 py-4">
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/28">
+                Total
+              </p>
+              <p className="mt-2 text-3xl font-black text-[#ffc0ad]">
+                {organizations.length}
+              </p>
+            </div>
           </div>
         </header>
 
@@ -200,11 +219,19 @@ export default async function AdminOrganizationsPage() {
                     <DataBlock label="Eventos activos" value={String(activeEvents)} />
                     <DataBlock
                       label="Suscripción"
-                      value={subscription?.status ?? "Sin suscripción"}
+                      value={
+                        organization.complimentary
+                          ? "Cortesía (gratis)"
+                          : subscription?.status ?? "Sin suscripción"
+                      }
                     />
                     <DataBlock
                       label="Vence"
-                      value={formatDate(subscription?.current_period_end ?? null)}
+                      value={
+                        organization.complimentary
+                          ? "Sin vencimiento"
+                          : formatDate(subscription?.current_period_end ?? null)
+                      }
                     />
                   </Link>
                 );

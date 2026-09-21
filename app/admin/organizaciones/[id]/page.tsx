@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import CortesiaToggle from "./cortesia-toggle";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -42,15 +43,36 @@ export default async function AdminOrganizationDetailPage({
     redirect("/admin");
   }
 
-  const { data: organization } = await admin
+  // Si todavia no se corrio la migracion de cuentas de cortesia, la columna
+  // no existe: la pagina sigue andando, sin esa seccion.
+  const withCourtesy = await admin
     .from("organizations")
-    .select("id, name, contact_email, contact_phone, active, created_at")
+    .select("id, name, contact_email, contact_phone, active, created_at, complimentary, complimentary_note")
     .eq("id", id)
     .maybeSingle();
+
+  const courtesyAvailable = !withCourtesy.error;
+
+  const organization = courtesyAvailable
+    ? withCourtesy.data
+    : (
+        await admin
+          .from("organizations")
+          .select("id, name, contact_email, contact_phone, active, created_at")
+          .eq("id", id)
+          .maybeSingle()
+      ).data;
 
   if (!organization) {
     notFound();
   }
+
+  const complimentary = courtesyAvailable
+    ? Boolean((organization as { complimentary?: boolean }).complimentary)
+    : false;
+  const complimentaryNote = courtesyAvailable
+    ? ((organization as { complimentary_note?: string | null }).complimentary_note ?? null)
+    : null;
 
   const [membersResult, eventsResult, subscriptionResult, signupResult, complaintsResult] =
     await Promise.all([
@@ -182,6 +204,14 @@ export default async function AdminOrganizationDetailPage({
                 ? `Todavía sin pago aprobado (solicitud de ${signupResult.data.first_name} ${signupResult.data.last_name} · ${signupResult.data.email}).`
                 : "Sin suscripción ni solicitud registrada."}
             </p>
+          )}
+
+          {courtesyAvailable && (
+            <CortesiaToggle
+              organizationId={organization.id}
+              initialComplimentary={complimentary}
+              initialNote={complimentaryNote}
+            />
           )}
         </section>
 
