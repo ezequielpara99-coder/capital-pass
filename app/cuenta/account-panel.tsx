@@ -100,10 +100,14 @@ export default function AccountPanel({ initial, plans, returning }: { initial: A
             </>}
         </section>
 
-        {!account.isAdmin && <div className="mt-6 border border-white/[0.08] bg-white/[0.02] p-6">
-          <button disabled={busy} onClick={() => void verify()} className="h-12 border border-white/20 px-5 text-[10px] font-black uppercase tracking-[0.2em] transition hover:border-white/40 disabled:opacity-50">{busy ? "Verificando..." : "Verificar mi pago"}</button>
-          <p className="mt-3 text-sm leading-6 text-white/45">Si ya pagaste, podés comprobarlo acá sin volver a comprar.</p>
-        </div>}
+        {!account.isAdmin && (account.active
+          ? <div className="mt-6 border border-emerald-400/25 bg-emerald-500/[0.06] p-6">
+              <span className="inline-flex h-12 items-center gap-2 border border-emerald-400/30 bg-emerald-500/10 px-5 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">✓ Pago verificado</span>
+            </div>
+          : <div className="mt-6 border border-white/[0.08] bg-white/[0.02] p-6">
+              <button disabled={busy} onClick={() => void verify()} className="h-12 border border-white/20 px-5 text-[10px] font-black uppercase tracking-[0.2em] transition hover:border-white/40 disabled:opacity-50">{busy ? "Verificando..." : "Verificar mi pago"}</button>
+              <p className="mt-3 text-sm leading-6 text-white/45">Si ya pagaste, podés comprobarlo acá sin volver a comprar.</p>
+            </div>)}
 
         {message && <p role="status" className="mt-5 text-sm text-white/70">{message}</p>}
         {error && <p role="alert" className="mt-5 border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-200">{error}</p>}
