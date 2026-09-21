@@ -1,9 +1,17 @@
 "use client";
 
-import { FormEvent, Suspense, useEffect, useState } from "react";
+import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "../../../lib/supabase/client";
 import { EventBar, type SwitcherEvent } from "../event-switcher";
+import TicketPoster, { PreviewQr } from "../../entrada/ticket-poster";
+import {
+  ACCENT_PRESETS,
+  TICKET_H,
+  TICKET_W,
+  buildTicketTemplateSvg,
+  normalizeAccent,
+} from "../../../lib/tickets/design";
 
 type EventData = {
   id: string;
@@ -117,6 +125,10 @@ function ManageEventContent() {
 
   const [event, setEvent] = useState<EventData | null>(null);
   const [allEvents, setAllEvents] = useState<SwitcherEvent[]>([]);
+  const [ticketAccent, setTicketAccent] = useState(normalizeAccent(null));
+  // null = todavia no sabemos; false = la base no tiene la columna del color.
+  const [accentSupported, setAccentSupported] = useState<boolean | null>(null);
+  const accentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
   const [tickets, setTickets] = useState<TicketRecord[]>([]);
   const [saleItems, setSaleItems] = useState<SaleItemRecord[]>([]);
@@ -241,6 +253,19 @@ function ManageEventContent() {
     if (requestedEventId) {
       document.cookie = `cp_event=${selectedEvent.id}; path=/; max-age=31536000; samesite=lax`;
     }
+
+    // El color de la entrada se pide aparte: si la base todavia no tiene la
+    // columna, el resto de la pantalla sigue funcionando igual.
+    const { data: accentRow, error: accentError } = await supabase
+      .from("events")
+      .select("ticket_accent_color")
+      .eq("id", selectedEvent.id)
+      .maybeSingle();
+
+    setAccentSupported(!accentError);
+    setTicketAccent(
+      normalizeAccent((accentRow as { ticket_accent_color?: string | null } | null)?.ticket_accent_color)
+    );
 
     setEvent({
       ...(selectedEvent as EventData),
@@ -781,75 +806,74 @@ function ManageEventContent() {
     setRequestingDesign(false);
   }
 
-  function downloadTicketTemplate() {
-    const template = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
-  <rect width="1080" height="1920" fill="#111111"/>
-  <rect x="60" y="60" width="960" height="1800" rx="12" fill="none" stroke="#ff5a2a" stroke-width="3" stroke-dasharray="14 10"/>
-  <text x="90" y="125" fill="#ffffff" font-family="Arial" font-size="38" font-weight="700">ZONA LIBRE DE DISEÑO</text>
-  <text x="90" y="168" fill="#ffffff" opacity=".58" font-family="Arial" font-size="20">Podés diseñar libremente todo el fondo.</text>
-
-  <rect x="60" y="1320" width="960" height="540" rx="34" fill="#ff3b241a" stroke="#ff5a2a" stroke-width="4"/>
-  <text x="90" y="1370" fill="#ff9a7d" font-family="Arial" font-size="26" font-weight="700">ZONA RESERVADA CAPITAL PASS</text>
-  <text x="90" y="1408" fill="#ffffff" opacity=".58" font-family="Arial" font-size="18">No colocar caras, logos, textos ni elementos importantes en esta zona.</text>
-
-  <rect x="90" y="1465" width="555" height="80" rx="16" fill="none" stroke="#ff5a2a" stroke-width="2"/>
-  <text x="110" y="1515" fill="#ff9a7d" font-family="Arial" font-size="22" font-weight="700">NOMBRE Y APELLIDO</text>
-
-  <rect x="90" y="1563" width="555" height="70" rx="16" fill="none" stroke="#ff5a2a" stroke-width="2"/>
-  <text x="110" y="1607" fill="#ff9a7d" font-family="Arial" font-size="22" font-weight="700">DNI</text>
-
-  <rect x="90" y="1651" width="555" height="70" rx="16" fill="none" stroke="#ff5a2a" stroke-width="2"/>
-  <text x="110" y="1695" fill="#ff9a7d" font-family="Arial" font-size="22" font-weight="700">TIPO DE ENTRADA</text>
-
-  <rect x="90" y="1762" width="555" height="98" rx="16" fill="none" stroke="#ff5a2a" stroke-width="2"/>
-  <text x="110" y="1822" fill="#ff9a7d" font-family="Arial" font-size="22" font-weight="700">CÓDIGO MANUAL</text>
-
-  <rect x="710" y="1470" width="310" height="310" rx="24" fill="#ffffff" stroke="#ff3b24" stroke-width="5"/>
-  <text x="778" y="1636" fill="#111111" font-family="Arial" font-size="30" font-weight="700">QR</text>
-  <text x="758" y="1820" fill="#ff8064" font-family="Arial" font-size="20" font-weight="700">QR DINÁMICO</text>
-
-  <text x="90" y="1890" fill="#ffffff" opacity=".45" font-family="Arial" font-size="16">Capital Pass · Plantilla técnica de entrada · 1080 × 1920 px</text>
-</svg>`;
-
-    const blob =
-      new Blob(
-        [
-          template,
-        ],
-        {
-          type:
-            "image/svg+xml;charset=utf-8",
-        }
-      );
-
-    const url =
-      URL.createObjectURL(
-        blob
-      );
-
-    const anchor =
-      document.createElement(
-        "a"
-      );
-
-    anchor.href =
-      url;
-
-    anchor.download =
-      "capital-pass-plantilla-entrada-1080x1920.svg";
-
-    document.body.appendChild(
-      anchor
-    );
-
+  function triggerDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
     anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  }
 
-    anchor.remove();
-
-    URL.revokeObjectURL(
-      url
+  function downloadTicketTemplateSvg() {
+    triggerDownload(
+      new Blob([buildTicketTemplateSvg(ticketAccent)], { type: "image/svg+xml;charset=utf-8" }),
+      "capital-pass-plantilla-entrada-1080x1920.svg"
     );
+  }
+
+  // PNG: se abre directo en Photoshop, Canva, Figma, etc.
+  function downloadTicketTemplatePng() {
+    const svgUrl =
+      "data:image/svg+xml;charset=utf-8," + encodeURIComponent(buildTicketTemplateSvg(ticketAccent));
+    const image = new Image();
+
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = TICKET_W;
+      canvas.height = TICKET_H;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        showError("No se pudo generar la plantilla PNG.");
+        return;
+      }
+      context.drawImage(image, 0, 0, TICKET_W, TICKET_H);
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          showError("No se pudo generar la plantilla PNG.");
+          return;
+        }
+        triggerDownload(blob, "capital-pass-plantilla-entrada-1080x1920.png");
+      }, "image/png");
+    };
+
+    image.onerror = () => showError("No se pudo generar la plantilla PNG.");
+    image.src = svgUrl;
+  }
+
+  // El color se guarda solo, un instante despues de dejar de moverlo.
+  function changeTicketAccent(value: string) {
+    if (!event) return;
+    const accent = normalizeAccent(value);
+    setTicketAccent(accent);
+
+    if (accentTimer.current) clearTimeout(accentTimer.current);
+    const eventId = event.id;
+
+    accentTimer.current = setTimeout(async () => {
+      const { error } = await createClient()
+        .from("events")
+        .update({ ticket_accent_color: accent })
+        .eq("id", eventId);
+
+      if (error) {
+        showError("No se pudo guardar el color de la entrada.");
+        return;
+      }
+      showSuccess("Color de la entrada guardado.");
+    }, 700);
   }
 
   // =======================================================
@@ -1395,13 +1419,23 @@ function ManageEventContent() {
 
               </div>
 
-              <button
-                type="button"
-                onClick={downloadTicketTemplate}
-                className="inline-flex h-11 items-center justify-center border border-[#ff5a2a]/25 bg-[#ff3b24]/[0.055] px-4 text-[9px] font-black uppercase tracking-[0.12em] text-[#ffab94] transition hover:border-[#ff5a2a]/45 hover:bg-[#ff3b24]/[0.09] hover:text-white"
-              >
-                ↓ Descargar plantilla para diseñador
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={downloadTicketTemplatePng}
+                  className="inline-flex h-11 items-center justify-center border border-[#ff5a2a]/25 bg-[#ff3b24]/[0.055] px-4 text-[9px] font-black uppercase tracking-[0.12em] text-[#ffab94] transition hover:border-[#ff5a2a]/45 hover:bg-[#ff3b24]/[0.09] hover:text-white"
+                >
+                  ↓ Plantilla para diseñador (PNG)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={downloadTicketTemplateSvg}
+                  className="inline-flex h-11 items-center justify-center border border-white/[0.12] bg-white/[0.03] px-4 text-[9px] font-black uppercase tracking-[0.12em] text-white/50 transition hover:border-white/25 hover:text-white"
+                >
+                  SVG
+                </button>
+              </div>
 
             </div>
 
@@ -1441,54 +1475,67 @@ function ManageEventContent() {
 
             </div>
 
-            {event.ticket_design_mode ===
-              "custom" && (
+            <div className="mt-5 grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
 
-              <div className="mt-5 grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
+              <div className="space-y-5">
 
-                <AssetUploadCard
-                  title="Arte de la entrada"
-                  description="Diseñá usando la plantilla. Capital Pass agregará la información del comprador en la zona reservada."
-                  recommendedSize="1080 × 1920 px"
-                  previewRatio="aspect-[9/16]"
-                  imageUrl={assetPublicUrl(
-                    event.ticket_background_path
-                  )}
-                  loading={
-                    uploadingAsset ===
-                    "ticket_background_path"
-                  }
-                  onUpload={(file) =>
-                    uploadEventAsset({
-                      file,
-                      field:
+                {event.ticket_design_mode ===
+                  "custom" && (
+
+                  <AssetUploadCard
+                    title="Arte de la entrada"
+                    description="Diseñá usando la plantilla. Tu arte queda de fondo: se ve nítido afuera de la tarjeta de vidrio y desenfocado a través de ella. Capital Pass coloca el QR y los datos."
+                    recommendedSize="1080 × 1920 px"
+                    previewRatio="aspect-[9/16]"
+                    imageUrl={assetPublicUrl(
+                      event.ticket_background_path
+                    )}
+                    loading={
+                      uploadingAsset ===
+                      "ticket_background_path"
+                    }
+                    onUpload={(file) =>
+                      uploadEventAsset({
+                        file,
+                        field:
+                          "ticket_background_path",
+                        kind:
+                          "ticket-background",
+                        label:
+                          "Diseño de entrada",
+                      })
+                    }
+                    onRemove={() =>
+                      removeEventAsset(
                         "ticket_background_path",
-                      kind:
-                        "ticket-background",
-                      label:
-                        "Diseño de entrada",
-                    })
-                  }
-                  onRemove={() =>
-                    removeEventAsset(
-                      "ticket_background_path",
-                      "Diseño de entrada"
-                    )
-                  }
-                />
+                        "Diseño de entrada"
+                      )
+                    }
+                  />
 
-                <TicketPreview
-                  imageUrl={assetPublicUrl(
-                    event.ticket_background_path
-                  )}
-                  eventName={
-                    event.name
-                  }
+                )}
+
+                <AccentPicker
+                  value={ticketAccent}
+                  supported={accentSupported}
+                  onChange={changeTicketAccent}
                 />
 
               </div>
 
-            )}
+              <TicketPreview
+                imageUrl={
+                  event.ticket_design_mode === "custom"
+                    ? assetPublicUrl(event.ticket_background_path)
+                    : null
+                }
+                eventName={
+                  event.name
+                }
+                accent={ticketAccent}
+              />
+
+            </div>
 
           </div>
 
@@ -2300,12 +2347,88 @@ function DesignModeCard({
   );
 }
 
+function AccentPicker({
+  value,
+  supported,
+  onChange,
+}: {
+  value: string;
+  supported: boolean | null;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="border border-white/[0.08] bg-[#080706]/80 p-5">
+
+      <p className="text-sm font-semibold">
+        Color de la entrada
+      </p>
+
+      <p className="mt-1 text-xs leading-5 text-white/30">
+        Cambia el color del diseño de vidrio de Capital Pass. Se guarda solo.
+      </p>
+
+      {supported === false ? (
+
+        <p className="mt-4 border border-[#ff5a2a]/20 bg-[#ff3b24]/[0.05] px-4 py-3 text-xs leading-5 text-[#ffab94]">
+          La personalización de color se habilita cuando se aplica la última actualización de la base de datos.
+        </p>
+
+      ) : (
+
+        <div className="mt-4 flex flex-wrap items-center gap-2.5">
+
+          {ACCENT_PRESETS.map((preset) => (
+
+            <button
+              key={preset.value}
+              type="button"
+              title={preset.name}
+              aria-label={preset.name}
+              onClick={() => onChange(preset.value)}
+              className={`h-9 w-9 rounded-full border-2 transition hover:scale-110 ${
+                value === preset.value
+                  ? "border-white shadow-[0_0_0_3px_rgba(255,255,255,.18)]"
+                  : "border-white/15"
+              }`}
+              style={{ backgroundColor: preset.value }}
+            />
+
+          ))}
+
+          <label className="relative ml-1 flex h-9 cursor-pointer items-center gap-2 border border-white/[0.12] bg-white/[0.03] px-3 text-[9px] font-black uppercase tracking-[0.12em] text-white/50 transition hover:text-white">
+
+            <span
+              className="h-4 w-4 rounded-full border border-white/30"
+              style={{ backgroundColor: value }}
+            />
+
+            Otro color
+
+            <input
+              type="color"
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            />
+
+          </label>
+
+        </div>
+
+      )}
+
+    </div>
+  );
+}
+
 function TicketPreview({
   imageUrl,
   eventName,
+  accent,
 }: {
   imageUrl: string | null;
   eventName: string;
+  accent: string;
 }) {
   return (
     <div className="border border-white/[0.08] bg-[#080706]/80 p-5">
@@ -2330,117 +2453,26 @@ function TicketPreview({
 
       </div>
 
-      <div className="mx-auto mt-5 max-w-[330px]">
+      <div className="mx-auto mt-5 max-w-[340px] overflow-hidden rounded-[22px] border border-white/[0.1] shadow-[0_25px_80px_rgba(0,0,0,.35)]">
 
-        <div className="relative aspect-[9/16] overflow-hidden border border-white/[0.1] bg-gradient-to-br from-[#160805] via-[#0b0908] to-black shadow-[0_25px_80px_rgba(0,0,0,.35)]">
-
-          {imageUrl ? (
-
-            <img
-              src={imageUrl}
-              alt="Preview de entrada"
-              className="absolute inset-0 h-full w-full object-cover"
-            />
-
-          ) : (
-
-            <div className="absolute inset-0 flex items-center justify-center p-8 text-center">
-
-              <div>
-
-                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-[#ff7958]/70">
-                  Capital Pass
-                </p>
-
-                <p className="mt-3 text-2xl font-black uppercase">
-                  {eventName}
-                </p>
-
-                <p className="mt-3 text-xs text-white/30">
-                  Subí el diseño para verlo aplicado acá.
-                </p>
-
-              </div>
-
-            </div>
-
-          )}
-
-          <div className="absolute inset-x-0 bottom-0 border-t border-white/10 bg-black/78 p-4 backdrop-blur-md">
-
-            <div className="grid grid-cols-[1fr_92px] gap-4">
-
-              <div>
-
-                <p className="text-[9px] uppercase tracking-[0.1em] text-white/35">
-                  Comprador
-                </p>
-
-                <p className="mt-1 text-sm font-bold">
-                  JUAN PÉREZ
-                </p>
-
-                <p className="mt-2 text-[10px] text-white/45">
-                  DNI 41.234.567
-                </p>
-
-                <p className="mt-1 text-[10px] font-semibold text-[#ff9b82]">
-                  ANTICIPADA
-                </p>
-
-                <p className="mt-3 font-mono text-[9px] text-white/45">
-                  0000021-TEST
-                </p>
-
-              </div>
-
-              <FakeQr />
-
-            </div>
-
-          </div>
-
-        </div>
+        <TicketPoster
+          accent={accent}
+          backgroundUrl={imageUrl}
+          eventName={eventName}
+          eventMeta="Sáb 20 sept · Tu ciudad · Tu lugar"
+          buyerName="Juan Pérez"
+          dni="41.234.567"
+          ticketTypeName="Anticipada"
+          manualCode="0000021-TEST"
+          number="0000021"
+          qr={<PreviewQr />}
+        />
 
       </div>
 
       <p className="mt-4 text-center text-[10px] leading-5 text-white/25">
-        La zona inferior se reserva automáticamente para que los datos siempre sean legibles y no tapen partes importantes del diseño.
+        Tu arte queda de fondo: se ve nítido afuera de la tarjeta y desenfocado a través del vidrio. El QR y los datos del comprador los coloca Capital Pass.
       </p>
-
-    </div>
-  );
-}
-
-function FakeQr() {
-  const pattern = [
-    1, 1, 1, 0, 1, 0, 1,
-    1, 0, 1, 1, 0, 1, 0,
-    1, 1, 1, 0, 1, 1, 1,
-    0, 1, 0, 1, 0, 1, 0,
-    1, 0, 1, 1, 1, 0, 1,
-    0, 1, 1, 0, 1, 1, 0,
-    1, 0, 1, 1, 0, 1, 1,
-  ];
-
-  return (
-    <div className="grid aspect-square grid-cols-7 gap-[2px] rounded-lg bg-white p-2">
-
-      {pattern.map(
-        (
-          cell,
-          index
-        ) => (
-          <span
-            key={index}
-            className={
-              cell
-                ? "bg-black"
-                : "bg-white"
-            }
-          />
-        )
-      )}
 
     </div>
   );

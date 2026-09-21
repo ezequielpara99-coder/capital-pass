@@ -27,6 +27,7 @@ const capPositiveStockAdjustmentMigration = readFileSync(new URL("../supabase/mi
 const combosYPacksMigration = readFileSync(new URL("../supabase/migrations/20260934_combos_y_packs.sql", import.meta.url), "utf8");
 const tragoNoDescuentaStockMigration = readFileSync(new URL("../supabase/migrations/20260935_venta_trago_no_descuenta_stock.sql", import.meta.url), "utf8");
 const cuentasCortesiaMigration = readFileSync(new URL("../supabase/migrations/20260936_cuentas_cortesia.sql", import.meta.url), "utf8");
+const colorEntradaMigration = readFileSync(new URL("../supabase/migrations/20260937_color_entrada.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -100,6 +101,7 @@ async function database() {
   await db.exec(combosYPacksMigration);
   await db.exec(tragoNoDescuentaStockMigration);
   await db.exec(cuentasCortesiaMigration);
+  await db.exec(colorEntradaMigration);
   return db;
 }
 
@@ -815,6 +817,31 @@ test("cuenta de cortesia: servicio y stock completos sin pagar", async () => {
 
   await db.exec(`update organizations set active = false where id = '${orgFree}'`);
   assert.equal(await scalar(`select cp_org_has_service('${orgFree}')`), false, "desactivar la organizacion corta el acceso aunque sea de cortesia");
+
+  await db.close();
+});
+
+test("color de la entrada: solo acepta un hexadecimal valido", async () => {
+  const db = await database();
+  const org = "d3333333-3333-4333-8333-333333333333";
+  const event = "d4444444-4444-4444-8444-444444444444";
+
+  await db.exec(`insert into organizations(id,name,slug) values ('${org}','Color Org','color-org');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');`);
+
+  await db.exec(`update events set ticket_accent_color = '#8b5cf6' where id = '${event}'`);
+  const saved = await db.query<{ ticket_accent_color: string }>(`select ticket_accent_color from events where id = '${event}'`);
+  assert.equal(saved.rows[0].ticket_accent_color, "#8b5cf6");
+
+  await db.exec(`update events set ticket_accent_color = null where id = '${event}'`);
+
+  for (const invalid of ["rojo", "#fff", "#gggggg", "ff3b24", "#ff3b24; drop table events"]) {
+    await assert.rejects(
+      () => db.query(`update events set ticket_accent_color = '${invalid}' where id = '${event}'`),
+      /events_ticket_accent_color_check|violates check constraint/,
+      `debe rechazar ${invalid}`
+    );
+  }
 
   await db.close();
 });
