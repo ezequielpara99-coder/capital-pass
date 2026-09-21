@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { pickSelectedEvent } from "../../../../lib/panel/selected-event";
 import CartaClient from "./carta-client";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +36,7 @@ export default async function CartaPage({
   ]);
 
   const eventList = events ?? [];
-  const currentEventId = params.eventId ?? eventList[0]?.id ?? null;
+  const currentEventId = (await pickSelectedEvent(eventList, params.eventId))?.id ?? null;
 
   if (!currentEventId) redirect("/panel/stock");
 

@@ -3,6 +3,7 @@
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "../../../lib/supabase/client";
+import { EventBar, type SwitcherEvent } from "../event-switcher";
 
 type EventData = {
   id: string;
@@ -115,6 +116,7 @@ function ManageEventContent() {
   const requestedEventId = searchParams.get("eventId");
 
   const [event, setEvent] = useState<EventData | null>(null);
+  const [allEvents, setAllEvents] = useState<SwitcherEvent[]>([]);
   const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
   const [tickets, setTickets] = useState<TicketRecord[]>([]);
   const [saleItems, setSaleItems] = useState<SaleItemRecord[]>([]);
@@ -197,20 +199,23 @@ function ManageEventContent() {
       design_service_requested_at
     `;
 
-    const eventQuery = supabase
-      .from("events")
-      .select(eventSelect);
+    const eventQuery = () =>
+      supabase
+        .from("events")
+        .select(eventSelect);
 
-    const {
-      data: events,
-      error: eventError,
-    } = requestedEventId
-      ? await eventQuery
-          .eq("id", requestedEventId)
-          .limit(1)
-      : await eventQuery
-          .order("starts_at", { ascending: false })
-          .limit(1);
+    const cookieEventId = document.cookie.match(/(?:^|; )cp_event=([^;]+)/)?.[1] ?? null;
+    const wantedEventId = requestedEventId ?? (cookieEventId ? decodeURIComponent(cookieEventId) : null);
+
+    let { data: events, error: eventError } = wantedEventId
+      ? await eventQuery().eq("id", wantedEventId).limit(1)
+      : await eventQuery().order("starts_at", { ascending: false }).limit(1);
+
+    if (!eventError && !events?.length && !requestedEventId) {
+      ({ data: events, error: eventError } = await eventQuery()
+        .order("starts_at", { ascending: false })
+        .limit(1));
+    }
 
     if (eventError) {
       showError("No se pudo cargar el evento.");
@@ -218,12 +223,23 @@ function ManageEventContent() {
       return;
     }
 
+    const { data: eventOptions } = await supabase
+      .from("events")
+      .select("id, name")
+      .order("starts_at", { ascending: false });
+
+    setAllEvents(eventOptions ?? []);
+
     const selectedEvent = events?.[0];
 
     if (!selectedEvent) {
       setEvent(null);
       setLoading(false);
       return;
+    }
+
+    if (requestedEventId) {
+      document.cookie = `cp_event=${selectedEvent.id}; path=/; max-age=31536000; samesite=lax`;
     }
 
     setEvent({
@@ -1214,6 +1230,8 @@ function ManageEventContent() {
           </button>
         </div>
       </header>
+
+      <EventBar events={allEvents} currentEventId={event.id} />
 
       {/* CONTENIDO */}
 

@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { pickSelectedEvent } from "../../../lib/panel/selected-event";
 
 import PuertaPanelClient from "./puerta-panel-client";
 
@@ -45,10 +46,9 @@ export default async function PuertaPanelPage() {
       door_sales_end_at
     `)
     .eq("organization_id", membership.organization_id)
-    .order("starts_at", { ascending: false })
-    .limit(1);
+    .order("starts_at", { ascending: false });
 
-  const event = events?.[0] ?? null;
+  const event = await pickSelectedEvent(events ?? []);
 
   if (!event) {
     return (
@@ -212,6 +212,7 @@ export default async function PuertaPanelPage() {
 
   return (
     <PuertaPanelClient
+      events={(events ?? []).map((item) => ({ id: item.id, name: item.name }))}
       event={{
         id: event.id,
         name: event.name,

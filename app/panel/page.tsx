@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "../../lib/supabase/server";
 import { createAdminClient } from "../../lib/supabase/admin";
+import { pickSelectedEvent } from "../../lib/panel/selected-event";
 import OrganizerPanelClient from "./organizer-panel-client";
 import IngresosPanel from "./ingresos-panel";
 import VentasPanel from "./ventas-panel";
@@ -121,46 +122,31 @@ export default async function OrganizerPanel({
     status
   `;
 
-  let event = null;
+  const { data: allEvents } =
+    await supabase
+      .from("events")
+      .select(eventSelect)
+      .eq(
+        "organization_id",
+        membership.organization_id
+      )
+      .order("starts_at", {
+        ascending: false,
+      });
 
-  if (requestedEventId) {
-    const { data: requestedEvents } =
-      await supabase
-        .from("events")
-        .select(eventSelect)
-        .eq(
-          "organization_id",
-          membership.organization_id
-        )
-        .eq(
-          "id",
-          requestedEventId
-        )
-        .limit(1);
+  const event =
+    await pickSelectedEvent(
+      allEvents ?? [],
+      requestedEventId
+    );
 
-    event =
-      requestedEvents?.[0] ??
-      null;
-  }
-
-  if (!event) {
-    const { data: latestEvents } =
-      await supabase
-        .from("events")
-        .select(eventSelect)
-        .eq(
-          "organization_id",
-          membership.organization_id
-        )
-        .order("starts_at", {
-          ascending: false,
-        })
-        .limit(1);
-
-    event =
-      latestEvents?.[0] ??
-      null;
-  }
+  const eventOptions =
+    (allEvents ?? []).map(
+      (item) => ({
+        id: item.id,
+        name: item.name,
+      })
+    );
 
   if (
     section === "ventas" &&
@@ -1408,6 +1394,7 @@ export default async function OrganizerPanel({
         organizationName={
           organizationName
         }
+        events={eventOptions}
         event={
           event
             ? {

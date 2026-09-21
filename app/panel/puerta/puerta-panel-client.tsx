@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 
+import { EventBar, type SwitcherEvent } from "../event-switcher";
+
 import {
   FormEvent,
   useState,
@@ -15,6 +17,8 @@ type Seller = {
 };
 
 type Props = {
+  events: SwitcherEvent[];
+
   event: {
     id: string;
     name: string;
@@ -29,6 +33,7 @@ type Props = {
 };
 
 export default function PuertaPanelClient({
+  events,
   event,
   organizationName,
   sellers,
@@ -199,6 +204,8 @@ export default function PuertaPanelClient({
           </button>
         </div>
       </header>
+
+      <EventBar events={events} currentEventId={event.id} />
 
       <div className="relative z-10 mx-auto max-w-[1480px] px-5 py-9 md:px-8 xl:px-10">
         <section className="mb-8 grid gap-7 border-b border-white/[0.07] pb-9 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)] lg:items-end xl:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">

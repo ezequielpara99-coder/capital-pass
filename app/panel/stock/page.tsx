@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { pickSelectedEvent } from "../../../lib/panel/selected-event";
 import StockPanelClient from "./stock-panel-client";
 import UpgradeScreen from "./upgrade-screen";
 
@@ -63,7 +64,7 @@ export default async function StockPage({
     .order("starts_at", { ascending: false });
 
   const eventList = events ?? [];
-  const currentEventId = params.eventId ?? eventList[0]?.id ?? null;
+  const currentEventId = (await pickSelectedEvent(eventList, params.eventId))?.id ?? null;
 
   if (!currentEventId) {
     return (

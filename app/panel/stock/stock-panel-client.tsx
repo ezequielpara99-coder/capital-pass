@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../../lib/supabase/client";
 import BarCoverageCard from "../bar-coverage-card";
+import EventSwitcher from "../event-switcher";
 
 type EventOption = { id: string; name: string };
 type Product = { id: string; name: string; category: string; brand: string | null; image_path: string | null; servings_per_bottle: number | null; organization_id: string | null };
@@ -65,7 +65,6 @@ export default function StockPanelClient({
   events: EventOption[];
   currentEventId: string;
 }) {
-  const router = useRouter();
   const [tab, setTab] = useState<Tab>("Stock general");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [catalog, setCatalog] = useState<Product[]>([]);
@@ -137,17 +136,7 @@ export default function StockPanelClient({
             </div>
           </div>
 
-          {events.length > 1 && (
-            <select
-              defaultValue={currentEventId}
-              onChange={(e) => router.push(`/panel/stock?eventId=${e.target.value}`)}
-              className="h-11 rounded-lg border border-white/15 bg-white/[0.04] px-3 text-sm"
-            >
-              {events.map((ev) => (
-                <option key={ev.id} value={ev.id} className="bg-black">{ev.name}</option>
-              ))}
-            </select>
-          )}
+          <EventSwitcher events={events} currentEventId={currentEventId} />
         </header>
 
         <div className="mt-6">

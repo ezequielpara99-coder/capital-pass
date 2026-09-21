@@ -3,7 +3,9 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { pickSelectedEvent } from "../../../lib/panel/selected-event";
 
+import EventSwitcher from "../event-switcher";
 import RefundActionButton from "./refund-action-button";
 import DeliveryResolveButton from "./delivery-resolve-button";
 
@@ -99,7 +101,12 @@ type ProfileRow = {
 // PAGE
 // ============================================================
 
-export default async function NotificationsPage() {
+export default async function NotificationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ eventId?: string }>;
+}) {
+  const { eventId: requestedEventId } = await searchParams;
   const supabase =
     await createClient();
 
@@ -228,12 +235,13 @@ export default async function NotificationsPage() {
       {
         ascending: false,
       }
-    )
-    .limit(1);
+    );
 
   const event =
-    events?.[0] ??
-    null;
+    await pickSelectedEvent(
+      events ?? [],
+      requestedEventId
+    );
 
   // ==========================================================
   // SIN EVENTO
@@ -1003,6 +1011,12 @@ export default async function NotificationsPage() {
             </div>
           </div>
         </header>
+
+        <EventSwitcher
+          events={(events ?? []).map((item) => ({ id: item.id, name: item.name }))}
+          currentEventId={event.id}
+          className="mt-5 max-w-[420px]"
+        />
 
         <section className="grid gap-10 py-12 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-end">
           <div>

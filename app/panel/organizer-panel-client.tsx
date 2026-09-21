@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import RRPPCoverageCard from "./rrpp-coverage-card";
+import EventSwitcher, { type SwitcherEvent } from "./event-switcher";
 
 type EventData = {
   id: string;
@@ -46,6 +47,7 @@ type Props = {
   organizerName: string;
   initials: string;
   organizationName: string;
+  events: SwitcherEvent[];
   event: EventData | null;
   metrics: Metrics;
   ticketCards: TicketCardData[];
@@ -58,6 +60,7 @@ export default function OrganizerPanelClient({
   organizerName,
   initials,
   organizationName,
+  events,
   event,
   metrics,
   ticketCards,
@@ -378,6 +381,12 @@ export default function OrganizerPanelClient({
                     {event?.name ??
                       "Sin eventos"}
                   </h2>
+
+                  <EventSwitcher
+                    events={events}
+                    currentEventId={eventId}
+                    className="mt-6 max-w-[420px]"
+                  />
 
                   {event && (
                     <div className="mt-7 flex flex-wrap gap-x-8 gap-y-3 border-t border-white/[0.07] pt-5 text-[10px] font-bold uppercase tracking-[0.12em] text-white/30">

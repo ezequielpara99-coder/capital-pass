@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { pickSelectedEvent } from "../../../lib/panel/selected-event";
 
 import RRPPsClient from "./rrpps-client";
 
@@ -9,7 +10,12 @@ import RRPPsClient from "./rrpps-client";
 // RRPPs - PANEL ORGANIZADOR
 // ============================================================
 
-export default async function RRPPsPage() {
+export default async function RRPPsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ eventId?: string }>;
+}) {
+  const { eventId: requestedEventId } = await searchParams;
   const supabase =
     await createClient();
 
@@ -95,11 +101,13 @@ export default async function RRPPsPage() {
       {
         ascending: false,
       }
-    )
-    .limit(1);
+    );
 
   const event =
-    events?.[0] ?? null;
+    await pickSelectedEvent(
+      events ?? [],
+      requestedEventId
+    );
 
   // ==========================================================
   // SIN EVENTOS
@@ -834,6 +842,12 @@ export default async function RRPPsPage() {
 
   return (
     <RRPPsClient
+      events={(events ?? []).map(
+        (item) => ({
+          id: item.id,
+          name: item.name,
+        })
+      )}
       event={{
         id:
           event.id,

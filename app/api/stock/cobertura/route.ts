@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { hasStockAccess, isPlatformAdmin } from "../../../../lib/stock/auth";
+import { pickSelectedEvent } from "../../../../lib/panel/selected-event";
 
 export async function GET() {
   try {
@@ -35,10 +36,9 @@ export async function GET() {
       .from("events")
       .select("id, name, starts_at")
       .eq("organization_id", membership.organization_id)
-      .order("starts_at", { ascending: false })
-      .limit(1);
+      .order("starts_at", { ascending: false });
 
-    const event = events?.[0] ?? null;
+    const event = await pickSelectedEvent(events ?? []);
 
     if (!event) {
       return NextResponse.json(emptyResponse(null));

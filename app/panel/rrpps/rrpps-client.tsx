@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 
+import { EventBar, type SwitcherEvent } from "../event-switcher";
+
 import {
   FormEvent,
   ReactNode,
@@ -80,6 +82,8 @@ type RRPP = {
 };
 
 type Props = {
+  events: SwitcherEvent[];
+
   event: {
     id: string;
     name: string;
@@ -144,6 +148,7 @@ const EMPTY_LOCATION: LocationSelection = {
 // =====================================================
 
 export default function RRPPsClient({
+  events,
   event,
   organizationName,
   rrpps,
@@ -899,6 +904,11 @@ export default function RRPPsClient({
 
             </div>
           </header>
+
+          <EventBar
+            events={events}
+            currentEventId={event.id}
+          />
 
           {/* =================================================
               BODY
