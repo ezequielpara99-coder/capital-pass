@@ -91,7 +91,13 @@ export default function RentalsClient({ inquiries }: { inquiries: Inquiry[] }) {
 
                 <div className="mt-4 flex items-center justify-between">
                   <p className="text-[10px] text-white/25">{formatDate(inquiry.created_at)}</p>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Link
+                      href={`/admin/presupuestos/nuevo?consulta=${inquiry.id}`}
+                      className="flex h-9 items-center rounded-lg bg-[#ff2a1a] px-3 text-[10px] font-black uppercase tracking-wide text-white hover:bg-[#ff4a2d]"
+                    >
+                      Crear presupuesto
+                    </Link>
                     {(["nuevo", "contactado", "cerrado"] as const)
                       .filter((s) => s !== inquiry.status)
                       .map((s) => (

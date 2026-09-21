@@ -28,6 +28,7 @@ const combosYPacksMigration = readFileSync(new URL("../supabase/migrations/20260
 const tragoNoDescuentaStockMigration = readFileSync(new URL("../supabase/migrations/20260935_venta_trago_no_descuenta_stock.sql", import.meta.url), "utf8");
 const cuentasCortesiaMigration = readFileSync(new URL("../supabase/migrations/20260936_cuentas_cortesia.sql", import.meta.url), "utf8");
 const colorEntradaMigration = readFileSync(new URL("../supabase/migrations/20260937_color_entrada.sql", import.meta.url), "utf8");
+const presupuestosMigration = readFileSync(new URL("../supabase/migrations/20260938_presupuestos.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -102,6 +103,7 @@ async function database() {
   await db.exec(tragoNoDescuentaStockMigration);
   await db.exec(cuentasCortesiaMigration);
   await db.exec(colorEntradaMigration);
+  await db.exec(presupuestosMigration);
   return db;
 }
 
@@ -841,6 +843,41 @@ test("color de la entrada: solo acepta un hexadecimal valido", async () => {
       /events_ticket_accent_color_check|violates check constraint/,
       `debe rechazar ${invalid}`
     );
+  }
+
+  await db.close();
+});
+
+test("presupuestos: numera en orden y valida tipo, estado y descuento", async () => {
+  const db = await database();
+
+  await db.exec(`insert into quotes(client_name, kind, items) values ('Cliente Uno', 'diseno', '[{"description":"Logo","quantity":1,"unit":"u","unit_price_minor":150000}]');
+    insert into quotes(client_name, kind) values ('Cliente Dos', 'rental');`);
+
+  const rows = await db.query<{ number: number; client_name: string; status: string }>(`select number, client_name, status from quotes order by number`);
+  assert.equal(rows.rows.length, 2);
+  assert.equal(rows.rows[1].number, rows.rows[0].number + 1, "el numero de presupuesto avanza de a uno");
+  assert.equal(rows.rows[0].status, "borrador");
+
+  await db.exec(`insert into quotes(client_name, kind, event_name, modality, price_mode, package_price_minor, discount_type, discount_value, discount_label)
+    values ('Primavera Estudiantil', 'diseno', 'Fiesta de la primavera', 'mensual', 'package', 200000, 'percent', 10, 'Cliente mensual')`);
+  const design = await db.query<{ price_mode: string; package_price_minor: string }>(`select price_mode, package_price_minor from quotes where event_name is not null`);
+  assert.equal(design.rows[0].price_mode, "package");
+  assert.equal(Number(design.rows[0].package_price_minor), 200000);
+
+  const invalids = [
+    `insert into quotes(client_name, kind) values ('X', 'otra-cosa')`,
+    `insert into quotes(client_name, status) values ('X', 'pagado')`,
+    `insert into quotes(client_name, discount_type) values ('X', 'mitad')`,
+    `insert into quotes(client_name, discount_value) values ('X', -5)`,
+    `insert into quotes(client_name, modality) values ('X', 'semanal')`,
+    `insert into quotes(client_name, price_mode) values ('X', 'regalo')`,
+    `insert into quotes(client_name, package_price_minor) values ('X', -1)`,
+    `insert into quotes(client_name, items) values ('X', '{"a":1}')`,
+    `insert into quote_catalog(description, unit_price_minor) values ('X', -1)`,
+  ];
+  for (const sql of invalids) {
+    await assert.rejects(() => db.query(sql), /violates check constraint|check/, `debe rechazar: ${sql}`);
   }
 
   await db.close();
