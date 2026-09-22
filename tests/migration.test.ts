@@ -33,6 +33,7 @@ const bloquearStockMigration = readFileSync(new URL("../supabase/migrations/2026
 const presenciaMigration = readFileSync(new URL("../supabase/migrations/20260940_presencia_organizadores.sql", import.meta.url), "utf8");
 const restaurarComboMigration = readFileSync(new URL("../supabase/migrations/20260941_restaurar_combo_al_cancelar.sql", import.meta.url), "utf8");
 const packsOnlineMigration = readFileSync(new URL("../supabase/migrations/20260942_packs_online.sql", import.meta.url), "utf8");
+const presupuestosClientesMigration = readFileSync(new URL("../supabase/migrations/20260943_presupuestos_clientes.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -112,6 +113,7 @@ async function database() {
   await db.exec(presenciaMigration);
   await db.exec(restaurarComboMigration);
   await db.exec(packsOnlineMigration);
+  await db.exec(presupuestosClientesMigration);
   return db;
 }
 
@@ -979,6 +981,24 @@ test("presupuestos: numera en orden y valida tipo, estado y descuento", async ()
   for (const sql of invalids) {
     await assert.rejects(() => db.query(sql), /violates check constraint|check/, `debe rechazar: ${sql}`);
   }
+
+  await db.close();
+});
+
+test("presupuestos: directorio de clientes reutilizable", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  await db.exec(`insert into quote_clients(name, contact, phone, email) values ('Bar Los Alamos', 'Maria Fernandez', '+54 9 11 5555-1234', 'maria@losalamos.com')`);
+  assert.equal(await scalar(`select count(*)::int from quote_clients`), 1);
+  assert.equal(await scalar(`select name from quote_clients`), "Bar Los Alamos");
+
+  const clientId = await scalar(`select id::text from quote_clients where name = 'Bar Los Alamos'`);
+  await db.exec(`update quote_clients set phone = '+54 9 11 9999-0000' where id = '${clientId}'`);
+  assert.equal(await scalar(`select phone from quote_clients where id = '${clientId}'`), "+54 9 11 9999-0000");
+
+  await db.exec(`delete from quote_clients where id = '${clientId}'`);
+  assert.equal(await scalar(`select count(*)::int from quote_clients`), 0);
 
   await db.close();
 });

@@ -127,12 +127,15 @@ export default function PresupuestosClient({ quotes, missingSql }: { quotes: Quo
           <h1 className="mt-3 text-[clamp(36px,5vw,64px)] font-black uppercase leading-[0.9] tracking-[-0.05em]">Presupuestos.</h1>
           <p className="mt-3 max-w-xl text-sm text-white/45">Cotizaciones de diseño y de alquiler de terminales, listas para mandar en PDF.</p>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Link href="/admin/presupuestos/nuevo?tipo=diseno" className="flex h-12 items-center justify-center bg-violet-600 px-5 text-[10px] font-black uppercase tracking-[0.16em] text-white transition hover:bg-violet-500">
               + Presupuesto de diseño
             </Link>
             <Link href="/admin/presupuestos/nuevo?tipo=rental" className="flex h-12 items-center justify-center bg-[#ff2a1a] px-5 text-[10px] font-black uppercase tracking-[0.16em] text-white transition hover:bg-[#ff4a2d]">
               + Presupuesto de rentals
+            </Link>
+            <Link href="/admin/presupuestos/clientes" className="flex h-12 items-center justify-center border border-white/[0.12] px-5 text-[10px] font-black uppercase tracking-[0.16em] text-white/60 transition hover:text-white">
+              Clientes
             </Link>
             <Link href="/admin/presupuestos/catalogo" className="flex h-12 items-center justify-center border border-white/[0.12] px-5 text-[10px] font-black uppercase tracking-[0.16em] text-white/60 transition hover:text-white">
               Catálogo de items

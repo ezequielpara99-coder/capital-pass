@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { QUOTE_FIELDS, requireAdminPage } from "../../../../lib/quotes/auth";
-import QuoteEditor, { CatalogItem, QuoteInit } from "../quote-editor";
+import QuoteEditor, { CatalogItem, QuoteClient, QuoteInit } from "../quote-editor";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -18,11 +18,10 @@ export default async function EditarPresupuestoPage({ params }: { params: Promis
   const { data: quote } = await admin.from("quotes").select(QUOTE_FIELDS).eq("id", id).maybeSingle();
   if (!quote) notFound();
 
-  const { data: catalog } = await admin
-    .from("quote_catalog")
-    .select("id, kind, description, unit, unit_price_minor")
-    .eq("active", true)
-    .order("description");
+  const [{ data: catalog }, { data: clients }] = await Promise.all([
+    admin.from("quote_catalog").select("id, kind, description, unit, unit_price_minor").eq("active", true).order("description"),
+    admin.from("quote_clients").select("id, name, contact, phone, email").order("name"),
+  ]);
 
   return (
     <QuoteEditor
@@ -32,6 +31,7 @@ export default async function EditarPresupuestoPage({ params }: { params: Promis
         discount_value: Number(quote.discount_value),
       }}
       catalog={(catalog ?? []) as CatalogItem[]}
+      clients={(clients ?? []) as QuoteClient[]}
     />
   );
 }

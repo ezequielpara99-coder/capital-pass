@@ -1,7 +1,7 @@
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { requireAdminPage } from "../../../../lib/quotes/auth";
 import { normalizeKind } from "../../../../lib/quotes/totals";
-import QuoteEditor, { CatalogItem, QuoteInit } from "../quote-editor";
+import QuoteEditor, { CatalogItem, QuoteClient, QuoteInit } from "../quote-editor";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -51,11 +51,10 @@ export default async function NuevoPresupuestoPage({
     }
   }
 
-  const { data: catalog } = await admin
-    .from("quote_catalog")
-    .select("id, kind, description, unit, unit_price_minor")
-    .eq("active", true)
-    .order("description");
+  const [{ data: catalog }, { data: clients }] = await Promise.all([
+    admin.from("quote_catalog").select("id, kind, description, unit, unit_price_minor").eq("active", true).order("description"),
+    admin.from("quote_clients").select("id, name, contact, phone, email").order("name"),
+  ]);
 
-  return <QuoteEditor init={init} catalog={(catalog ?? []) as CatalogItem[]} />;
+  return <QuoteEditor init={init} catalog={(catalog ?? []) as CatalogItem[]} clients={(clients ?? []) as QuoteClient[]} />;
 }

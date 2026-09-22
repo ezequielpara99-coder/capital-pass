@@ -26,6 +26,7 @@ import {
 } from "../../../lib/quotes/totals";
 
 export type CatalogItem = { id: string; kind: QuoteKind; description: string; unit: string; unit_price_minor: number };
+export type QuoteClient = { id: string; name: string; contact: string | null; phone: string | null; email: string | null };
 
 // Forma del presupuesto tal como viene de la base (o vacío para uno nuevo).
 export type QuoteInit = {
@@ -89,7 +90,7 @@ function initialDiscount(init: QuoteInit): { mode: DiscountMode; value: string }
   return { mode: "none", value: "" };
 }
 
-export default function QuoteEditor({ init, catalog }: { init: QuoteInit; catalog: CatalogItem[] }) {
+export default function QuoteEditor({ init, catalog, clients }: { init: QuoteInit; catalog: CatalogItem[]; clients: QuoteClient[] }) {
   const isNew = !init.id;
 
   const [id, setId] = useState(init.id ?? null);
@@ -120,9 +121,11 @@ export default function QuoteEditor({ init, catalog }: { init: QuoteInit; catalo
   const [notes, setNotes] = useState(init.notes ?? "");
   const [validDays, setValidDays] = useState(String(init.valid_days ?? 15));
 
-  const [busy, setBusy] = useState<"" | "save" | "pdf" | "share">("");
+  const [busy, setBusy] = useState<"" | "save" | "pdf" | "share" | "client">("");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
+  const [clientList, setClientList] = useState(clients);
+  const [selectedClientId, setSelectedClientId] = useState("");
 
   const isDesign = kind === "diseno";
   const showPrices = priceMode === "items";
@@ -187,6 +190,49 @@ export default function QuoteEditor({ init, catalog }: { init: QuoteInit; catalo
         price: entry.unit_price_minor ? String(entry.unit_price_minor) : "",
       },
     ]);
+  }
+
+  function applyClient(clientId: string) {
+    setSelectedClientId(clientId);
+    const found = clientList.find((c) => c.id === clientId);
+    if (!found) return;
+    setClientName(found.name);
+    setClientContact(found.contact ?? "");
+    setClientPhone(found.phone ?? "");
+    setClientEmail(found.email ?? "");
+  }
+
+  async function saveClientToDirectory() {
+    if (!clientName.trim() || busy) return;
+    setBusy("client");
+    setError("");
+    try {
+      const isUpdate = selectedClientId && clientList.some((c) => c.id === selectedClientId);
+      const response = await fetch("/api/admin/presupuestos/clientes", {
+        method: isUpdate ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(isUpdate ? { id: selectedClientId } : {}),
+          name: clientName,
+          contact: clientContact,
+          phone: clientPhone,
+          email: clientEmail,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo guardar el cliente.");
+
+      setClientList((prev) => {
+        const next = isUpdate ? prev.map((c) => (c.id === result.client.id ? result.client : c)) : [...prev, result.client];
+        return next.sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setSelectedClientId(result.client.id);
+      setSaved(isUpdate ? "Cliente actualizado ✓" : "Cliente guardado en el directorio ✓");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar el cliente.");
+    } finally {
+      setBusy("");
+    }
   }
 
   function payload() {
@@ -357,7 +403,27 @@ export default function QuoteEditor({ init, catalog }: { init: QuoteInit; catalo
 
         {/* Cliente */}
         <section className="mt-8">
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-white/60">Cliente</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-white/60">Cliente</h2>
+
+            {clientList.length > 0 && (
+              <select
+                value={selectedClientId}
+                onChange={(e) => applyClient(e.target.value)}
+                className="h-9 border border-white/[0.14] bg-transparent px-3 text-[10px] font-black uppercase tracking-[0.1em] text-white/60 outline-none"
+              >
+                <option value="" className="bg-[#0a0908]">
+                  + Del directorio…
+                </option>
+                {clientList.map((c) => (
+                  <option key={c.id} value={c.id} className="bg-[#0a0908]">
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
           <div className="mt-2 grid gap-x-4 gap-y-4 sm:grid-cols-2">
             <label className="block sm:col-span-2">
               <span className={LABEL}>{isDesign ? "Cliente (nombre del boliche / productora)" : "Negocio o cliente"} *</span>
@@ -410,6 +476,20 @@ export default function QuoteEditor({ init, catalog }: { init: QuoteInit; catalo
               <span className={LABEL}>Email</span>
               <input value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} inputMode="email" className={INPUT} />
             </label>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={saveClientToDirectory}
+              disabled={Boolean(busy) || !clientName.trim()}
+              className="h-10 border border-white/[0.16] px-4 text-[10px] font-black uppercase tracking-[0.12em] text-white/70 transition hover:border-white/40 hover:text-white disabled:opacity-40"
+            >
+              {busy === "client" ? "Guardando…" : selectedClientId ? "Actualizar en el directorio" : "+ Guardar en el directorio"}
+            </button>
+            <Link href="/admin/presupuestos/clientes" className="text-[10px] font-bold uppercase tracking-[0.1em] text-white/35 underline underline-offset-4 hover:text-white/60">
+              Ver directorio completo
+            </Link>
           </div>
         </section>
 

@@ -9,35 +9,60 @@ const INPUT =
   "mt-2 h-12 w-full border border-white/[0.12] bg-black/30 px-4 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-[#ff5a2a]/50";
 const LABEL = "block text-[9px] font-black uppercase tracking-[0.18em] text-white/40";
 
+function draftFrom(item?: CatalogItem) {
+  return {
+    description: item?.description ?? "",
+    unit: item?.unit ?? "u",
+    unitPrice: item?.unit_price_minor ? String(item.unit_price_minor) : "",
+  };
+}
+
 export default function CatalogClient({ items, missingSql }: { items: CatalogItem[]; missingSql: boolean }) {
   const [rows, setRows] = useState(items);
   const [kind, setKind] = useState<QuoteKind>("diseno");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState(draftFrom());
 
-  async function add(e: FormEvent<HTMLFormElement>) {
+  function startEdit(item: CatalogItem) {
+    setEditingId(item.id);
+    setKind(item.kind);
+    setDraft(draftFrom(item));
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setDraft(draftFrom());
+  }
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (busy) return;
-    const form = e.currentTarget;
-    const data = new FormData(form);
-
     setBusy(true);
     setError("");
     try {
       const response = await fetch("/api/admin/presupuestos/catalogo", {
-        method: "POST",
+        method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...(editingId ? { id: editingId } : {}),
           kind,
-          description: data.get("description"),
-          unit: data.get("unit"),
-          unitPrice: data.get("unitPrice"),
+          description: draft.description,
+          unit: draft.unit,
+          unitPrice: draft.unitPrice,
         }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo guardar.");
-      setRows((prev) => [...prev, result.item]);
-      form.reset();
+
+      if (editingId) {
+        setRows((prev) => prev.map((row) => (row.id === editingId ? result.item : row)));
+        setEditingId(null);
+      } else {
+        setRows((prev) => [...prev, result.item]);
+      }
+      setDraft(draftFrom());
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar.");
     } finally {
@@ -53,10 +78,13 @@ export default function CatalogClient({ items, missingSql }: { items: CatalogIte
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo borrar.");
       setRows((prev) => prev.filter((row) => row.id !== item.id));
+      if (editingId === item.id) cancelEdit();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo borrar.");
     }
   }
+
+  const editing = editingId !== null;
 
   return (
     <main className="relative min-h-screen bg-[#050505] text-[#f7f3ed]">
@@ -77,8 +105,10 @@ export default function CatalogClient({ items, missingSql }: { items: CatalogIte
         )}
         {error && <div className="mt-6 border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>}
 
-        <form onSubmit={add} className="mt-8 border border-white/[0.08] bg-white/[0.02] p-5">
-          <div className="grid grid-cols-3 gap-2">
+        <form onSubmit={submit} className="mt-8 border border-white/[0.08] bg-white/[0.02] p-5">
+          <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">{editing ? "Editando ítem" : "Nuevo ítem"}</p>
+
+          <div className="mt-3 grid grid-cols-3 gap-2">
             {QUOTE_KINDS.map((value) => (
               <button
                 key={value}
@@ -95,13 +125,19 @@ export default function CatalogClient({ items, missingSql }: { items: CatalogIte
 
           <label className="mt-3 block">
             <span className={LABEL}>Descripción</span>
-            <input name="description" required className={INPUT} placeholder="Flyer de preventa" />
+            <input
+              value={draft.description}
+              onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+              required
+              className={INPUT}
+              placeholder="Flyer de preventa"
+            />
           </label>
 
           <div className="grid grid-cols-2 gap-x-4">
             <label className="mt-1 block">
               <span className={LABEL}>Unidad</span>
-              <select name="unit" defaultValue="u" className={INPUT}>
+              <select value={draft.unit} onChange={(e) => setDraft((d) => ({ ...d, unit: e.target.value }))} className={INPUT}>
                 {UNITS.map((unit) => (
                   <option key={unit} value={unit} className="bg-[#0a0908]">
                     {unit}
@@ -111,13 +147,26 @@ export default function CatalogClient({ items, missingSql }: { items: CatalogIte
             </label>
             <label className="mt-1 block">
               <span className={LABEL}>Precio ($)</span>
-              <input name="unitPrice" inputMode="numeric" className={INPUT} placeholder="0" />
+              <input
+                value={draft.unitPrice}
+                onChange={(e) => setDraft((d) => ({ ...d, unitPrice: e.target.value }))}
+                inputMode="numeric"
+                className={INPUT}
+                placeholder="0"
+              />
             </label>
           </div>
 
-          <button type="submit" disabled={busy} className="mt-4 h-12 w-full bg-[#ff2a1a] text-[10px] font-black uppercase tracking-[0.16em] text-white transition hover:bg-[#ff4a2d] disabled:opacity-40">
-            {busy ? "Guardando…" : "+ Agregar al catálogo"}
-          </button>
+          <div className="mt-4 flex gap-2">
+            <button type="submit" disabled={busy} className="h-12 flex-1 bg-[#ff2a1a] text-[10px] font-black uppercase tracking-[0.16em] text-white transition hover:bg-[#ff4a2d] disabled:opacity-40">
+              {busy ? "Guardando…" : editing ? "Guardar cambios" : "+ Agregar al catálogo"}
+            </button>
+            {editing && (
+              <button type="button" onClick={cancelEdit} className="h-12 border border-white/[0.14] px-5 text-[10px] font-black uppercase tracking-[0.14em] text-white/60 hover:text-white">
+                Cancelar
+              </button>
+            )}
+          </div>
         </form>
 
         {rows.length === 0 ? (
@@ -133,6 +182,9 @@ export default function CatalogClient({ items, missingSql }: { items: CatalogIte
                   </p>
                 </div>
                 <p className="text-sm font-black">{item.unit_price_minor ? formatMoney(item.unit_price_minor) : "—"}</p>
+                <button type="button" onClick={() => startEdit(item)} className="h-9 border border-white/15 px-3 text-[10px] font-black uppercase tracking-wide text-white/60 hover:border-white/40 hover:text-white">
+                  Editar
+                </button>
                 <button type="button" onClick={() => remove(item)} className="h-9 border border-red-400/20 px-3 text-[10px] font-black uppercase tracking-wide text-red-300/70 hover:text-red-300">
                   Quitar
                 </button>
