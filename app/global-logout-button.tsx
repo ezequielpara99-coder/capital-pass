@@ -1,34 +1,45 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 
-// Aparece en TODA la app (organizador, RRPP, puerta, control, bartender,
-// admin, cuenta...) apenas hay una sesion activa. En paginas publicas sin
-// sesion (landing, login, entrada de un ticket sin estar logueado) no se
-// muestra nada.
+// Cada pantalla de trabajo (panel del organizador, puerta, control,
+// bartender, RRPP, cuenta) ya tiene su propia forma de cerrar sesion en el
+// header o en un menu. La unica seccion que no tenia ninguna es Admin, asi
+// que el boton flotante global se limita a esas rutas -- en cualquier otro
+// lado terminaba tapando algo (el avatar del organizador, la barra de
+// Presupuestos, los botones flotantes de soporte).
+function needsFloatingLogout(pathname: string | null) {
+  return Boolean(pathname && pathname.startsWith("/admin"));
+}
+
 export default function GlobalLogoutButton() {
-  const [visible, setVisible] = useState(false);
+  const pathname = usePathname();
+  const onAdmin = needsFloatingLogout(pathname);
+  const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
+    if (!onAdmin) return;
+
     let active = true;
     const supabase = createClient();
 
     supabase.auth.getUser().then(({ data }) => {
-      if (active) setVisible(Boolean(data.user));
+      if (active) setAuthed(Boolean(data.user));
     });
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (active) setVisible(Boolean(session?.user));
+      if (active) setAuthed(Boolean(session?.user));
     });
 
     return () => {
       active = false;
       subscription.subscription.unsubscribe();
     };
-  }, []);
+  }, [onAdmin]);
 
-  if (!visible) return null;
+  if (!onAdmin || !authed) return null;
 
   return (
     <a
