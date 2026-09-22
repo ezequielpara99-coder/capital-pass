@@ -1722,23 +1722,49 @@ function LocationPicker({
 
   // ===================================================
   // SINCRONIZAR
+  //
+  // Patron recomendado por React para "ajustar estado cuando cambia
+  // una prop": comparar y actualizar durante el render, no en un
+  // efecto aparte (evita un repintado extra).
   // ===================================================
 
-  useEffect(() => {
+  const [
+    syncedProvinceName,
+    setSyncedProvinceName,
+  ] = useState(
+    value.provinceName
+  );
+
+  if (
+    value.provinceName !==
+    syncedProvinceName
+  ) {
+    setSyncedProvinceName(
+      value.provinceName
+    );
     setProvinceQuery(
       value.provinceName
     );
-  }, [
-    value.provinceName,
-  ]);
+  }
 
-  useEffect(() => {
+  const [
+    syncedLocalityName,
+    setSyncedLocalityName,
+  ] = useState(
+    value.localityName
+  );
+
+  if (
+    value.localityName !==
+    syncedLocalityName
+  ) {
+    setSyncedLocalityName(
+      value.localityName
+    );
     setLocalityQuery(
       value.localityName
     );
-  }, [
-    value.localityName,
-  ]);
+  }
 
   // ===================================================
   // PROVINCIAS

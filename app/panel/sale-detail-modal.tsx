@@ -305,18 +305,19 @@ export default function SaleDetailModal({
       !open ||
       !saleId
     ) {
-      setDetail(null);
-      setError("");
-      setSuccess("");
-
-      setSelectedTicket(
-        null
-      );
-
       return;
     }
 
     loadDetail();
+
+    // Al cerrar el modal (o cambiar de venta), limpiamos lo que quedo
+    // cargado -- en el cleanup, no de una vez en el cuerpo del efecto.
+    return () => {
+      setDetail(null);
+      setError("");
+      setSuccess("");
+      setSelectedTicket(null);
+    };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
