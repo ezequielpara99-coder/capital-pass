@@ -6,9 +6,12 @@
 --    despues elige con un toque al armar un presupuesto nuevo.
 begin;
 
+-- La restricción vieja hay que sacarla ANTES de tocar los datos: mientras
+-- sigue activa no permite escribir "revision" en ninguna fila.
+alter table public.quotes drop constraint if exists quotes_status_check;
+
 update public.quotes set status = 'revision' where status = 'enviado';
 
-alter table public.quotes drop constraint if exists quotes_status_check;
 alter table public.quotes add constraint quotes_status_check
   check (status in ('borrador', 'revision', 'a_pagar', 'aceptado', 'rechazado'));
 
