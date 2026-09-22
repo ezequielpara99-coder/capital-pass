@@ -67,7 +67,7 @@ export default function ControlPage() {
   const fileInputRef =
     useRef<HTMLInputElement>(null);
 
-  const scannerRef = useRef<any>(null);
+  const scannerRef = useRef<import("html5-qrcode").Html5Qrcode | null>(null);
 
   const processingQRRef =
     useRef(false);

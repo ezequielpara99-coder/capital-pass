@@ -341,7 +341,15 @@ export default function Home() {
     setTheme,
   ] =
     useState<Theme>(
-      "dark"
+      () => {
+        if (typeof window === "undefined") return "dark";
+        try {
+          const saved = localStorage.getItem("capital-pass-theme");
+          return saved === "light" ? "light" : "dark";
+        } catch {
+          return "dark";
+        }
+      }
     );
 
   const [
@@ -357,24 +365,6 @@ export default function Home() {
     setPlansLoading,
   ] =
     useState(true);
-
-  /* =======================================================
-     THEME
-  ======================================================= */
-
-  useEffect(() => {
-    const saved =
-      localStorage.getItem(
-        "capital-pass-theme"
-      );
-
-    if (
-      saved === "dark" ||
-      saved === "light"
-    ) {
-      setTheme(saved);
-    }
-  }, []);
 
   function toggleTheme() {
     const next =
