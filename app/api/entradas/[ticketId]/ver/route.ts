@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "../../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { createTicketQRPayload } from "../../../../../lib/tickets/signature";
+import { verifyOrganizerForOrg } from "../../../../../lib/auth/organizer";
 
 type RouteContext = {
   params: Promise<{
@@ -59,49 +60,6 @@ export async function GET(
 
     const admin =
       createAdminClient();
-
-    // =========================================================
-    // ORGANIZADOR ACTIVO
-    // =========================================================
-
-    const {
-      data: membership,
-    } = await admin
-      .from(
-        "organization_members"
-      )
-      .select(`
-        id,
-        organization_id,
-        role,
-        status
-      `)
-      .eq(
-        "user_id",
-        user.id
-      )
-      .eq(
-        "role",
-        "organizer"
-      )
-      .eq(
-        "status",
-        "active"
-      )
-      .limit(1)
-      .maybeSingle();
-
-    if (!membership) {
-      return NextResponse.json(
-        {
-          error:
-            "No tenés permisos para ver esta entrada.",
-        },
-        {
-          status: 403,
-        }
-      );
-    }
 
     // =========================================================
     // ENTRADA
@@ -172,17 +130,20 @@ export async function GET(
       );
     }
 
-    if (
-      event.organization_id !==
-      membership.organization_id
-    ) {
+    const verification =
+      await verifyOrganizerForOrg(
+        event.organization_id
+      );
+
+    if (!verification.ok) {
       return NextResponse.json(
         {
           error:
-            "No tenés permisos para ver esta entrada.",
+            verification.error,
         },
         {
-          status: 403,
+          status:
+            verification.status,
         }
       );
     }

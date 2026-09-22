@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createClient } from "../../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
+import { verifyOrganizerForOrg } from "../../../../../lib/auth/organizer";
 
 // ============================================================
 // PATCH
@@ -60,48 +61,11 @@ export async function PATCH(
       createAdminClient();
 
     // ========================================================
-    // ORGANIZADOR
-    // ========================================================
-
-    const {
-      data: membership,
-    } = await admin
-      .from("organization_members")
-      .select(`
-        id,
-        organization_id,
-        role,
-        status
-      `)
-      .eq(
-        "user_id",
-        user.id
-      )
-      .eq(
-        "role",
-        "organizer"
-      )
-      .eq(
-        "status",
-        "active"
-      )
-      .limit(1)
-      .maybeSingle();
-
-    if (!membership) {
-      return NextResponse.json(
-        {
-          error:
-            "No tenés permisos de organizador.",
-        },
-        {
-          status: 403,
-        }
-      );
-    }
-
-    // ========================================================
     // ALERTA
+    // Resolvemos primero el recurso (sin filtrar por
+    // organización) y recién después verificamos la membresía
+    // sobre la organización DUEÑA de esta alerta puntual -- un
+    // organizador puede administrar más de una organización.
     // ========================================================
 
     const {
@@ -124,10 +88,6 @@ export async function PATCH(
         "id",
         attemptId
       )
-      .eq(
-        "organization_id",
-        membership.organization_id
-      )
       .maybeSingle();
 
     if (
@@ -146,6 +106,28 @@ export async function PATCH(
         },
         {
           status: 404,
+        }
+      );
+    }
+
+    // ========================================================
+    // ORGANIZADOR
+    // ========================================================
+
+    const verification =
+      await verifyOrganizerForOrg(
+        attempt.organization_id
+      );
+
+    if (!verification.ok) {
+      return NextResponse.json(
+        {
+          error:
+            verification.error,
+        },
+        {
+          status:
+            verification.status,
         }
       );
     }
@@ -206,7 +188,7 @@ export async function PATCH(
       )
       .eq(
         "organization_id",
-        membership.organization_id
+        attempt.organization_id
       )
       .select(`
         id,

@@ -27,13 +27,29 @@ export async function POST(request: NextRequest) {
     const verification = await verifyOrganizerForEvent(eventId);
     if (!verification.ok) return NextResponse.json({ error: verification.error }, { status: verification.status });
 
+    const admin = createAdminClient();
+
+    // El producto tiene que ser del catalogo global (organization_id null)
+    // o del catalogo propio de esta organizacion -- si no, cualquiera que
+    // conozca el UUID de un producto privado de otra organizacion podria
+    // asociarlo a su propio evento y filtrar su nombre/marca/imagen via
+    // GET /api/stock/overview.
+    const { data: product } = await admin
+      .from("products")
+      .select("id, organization_id")
+      .eq("id", productId)
+      .maybeSingle();
+
+    if (!product || (product.organization_id && product.organization_id !== verification.organizationId)) {
+      return NextResponse.json({ error: "El producto no existe en tu catálogo." }, { status: 404 });
+    }
+
     const costPriceMinor = Math.max(0, Math.round(Number(body.costPriceMinor ?? 0)));
     const salePriceMinor = Math.max(0, Math.round(Number(body.salePriceMinor ?? 0)));
     const profitMarginPercent = Math.max(0, Number(body.profitMarginPercent ?? 0));
     const totalStock = Math.max(0, Math.round(Number(body.totalStock ?? 0)));
     const lowStockThreshold = Math.max(0, Math.round(Number(body.lowStockThreshold ?? 5)));
 
-    const admin = createAdminClient();
     const { data: eventProduct, error } = await admin
       .from("event_products")
       .upsert(

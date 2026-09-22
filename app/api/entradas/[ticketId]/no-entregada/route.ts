@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createClient } from "../../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
+import { verifyOrganizerForOrg } from "../../../../../lib/auth/organizer";
 
 // ============================================================
 // POST
@@ -74,47 +75,6 @@ export async function POST(
       createAdminClient();
 
     // ========================================================
-    // ORGANIZADOR
-    // ========================================================
-
-    const {
-      data: membership,
-    } = await admin
-      .from("organization_members")
-      .select(`
-        id,
-        organization_id,
-        role,
-        status
-      `)
-      .eq(
-        "user_id",
-        user.id
-      )
-      .eq(
-        "role",
-        "organizer"
-      )
-      .eq(
-        "status",
-        "active"
-      )
-      .limit(1)
-      .maybeSingle();
-
-    if (!membership) {
-      return NextResponse.json(
-        {
-          error:
-            "No tenés permisos de organizador.",
-        },
-        {
-          status: 403,
-        }
-      );
-    }
-
-    // ========================================================
     // TICKET
     // ========================================================
 
@@ -156,7 +116,11 @@ export async function POST(
     }
 
     // ========================================================
-    // EVENTO
+    // EVENTO Y ORGANIZADOR
+    // Resolvemos primero la organización dueña del evento y
+    // recién después verificamos la membresía sobre ESA
+    // organización puntual (un organizador puede administrar
+    // más de una organización).
     // ========================================================
 
     const {
@@ -172,10 +136,6 @@ export async function POST(
         "id",
         ticket.event_id
       )
-      .eq(
-        "organization_id",
-        membership.organization_id
-      )
       .maybeSingle();
 
     if (
@@ -189,6 +149,24 @@ export async function POST(
         },
         {
           status: 403,
+        }
+      );
+    }
+
+    const verification =
+      await verifyOrganizerForOrg(
+        event.organization_id
+      );
+
+    if (!verification.ok) {
+      return NextResponse.json(
+        {
+          error:
+            verification.error,
+        },
+        {
+          status:
+            verification.status,
         }
       );
     }
@@ -308,7 +286,7 @@ export async function POST(
       )
       .insert({
         organization_id:
-          membership.organization_id,
+          event.organization_id,
 
         event_id:
           ticket.event_id,
@@ -357,6 +335,23 @@ export async function POST(
       insertError ||
       !deliveryAttempt
     ) {
+      // Colisión del índice único (dos clics casi simultáneos): ya
+      // quedó una alerta activa para esta entrada, no es un error real.
+      if (
+        insertError?.code ===
+        "23505"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Esta entrada ya está marcada como no entregada.",
+          },
+          {
+            status: 409,
+          }
+        );
+      }
+
       console.error(
         "No entregada - insert:",
         insertError

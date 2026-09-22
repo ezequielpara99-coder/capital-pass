@@ -2663,7 +2663,11 @@ function PacksSection({
     }
   }
 
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
   async function togglePack(packId: string, active: boolean) {
+    if (togglingId) return;
+    setTogglingId(packId);
     try {
       await fetch("/api/stock/packs", {
         method: "PATCH",
@@ -2673,6 +2677,8 @@ function PacksSection({
       await onSaved();
     } catch {
       showError("No se pudo actualizar el pack.");
+    } finally {
+      setTogglingId(null);
     }
   }
 
@@ -2690,10 +2696,11 @@ function PacksSection({
               </div>
               <button
                 type="button"
+                disabled={togglingId === pack.id}
                 onClick={() => togglePack(pack.id, !pack.active)}
-                className={`h-9 rounded-full border px-3 text-[10px] font-black uppercase tracking-wide ${pack.active ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300" : "border-white/15 bg-white/[0.03] text-white/40"}`}
+                className={`h-9 rounded-full border px-3 text-[10px] font-black uppercase tracking-wide disabled:opacity-40 ${pack.active ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300" : "border-white/15 bg-white/[0.03] text-white/40"}`}
               >
-                {pack.active ? "Activo" : "Oculto"}
+                {togglingId === pack.id ? "..." : pack.active ? "Activo" : "Oculto"}
               </button>
             </div>
           ))}

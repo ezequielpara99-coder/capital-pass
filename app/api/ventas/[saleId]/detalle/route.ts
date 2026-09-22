@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createClient } from "../../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
+import { verifyOrganizerForOrg } from "../../../../../lib/auth/organizer";
 
 // ============================================================
 // GET
@@ -64,51 +65,11 @@ export async function GET(
       createAdminClient();
 
     // ========================================================
-    // ORGANIZADOR
-    // ========================================================
-
-    const {
-      data: membership,
-    } = await admin
-      .from(
-        "organization_members"
-      )
-      .select(`
-        id,
-        organization_id,
-        user_id,
-        role,
-        status
-      `)
-      .eq(
-        "user_id",
-        user.id
-      )
-      .eq(
-        "role",
-        "organizer"
-      )
-      .eq(
-        "status",
-        "active"
-      )
-      .limit(1)
-      .maybeSingle();
-
-    if (!membership) {
-      return NextResponse.json(
-        {
-          error:
-            "No tenés permisos de organizador.",
-        },
-        {
-          status: 403,
-        }
-      );
-    }
-
-    // ========================================================
     // VENTA
+    // Resolvemos primero el recurso (sin filtrar por
+    // organización) y recién después verificamos la membresía
+    // sobre la organización DUEÑA de esta venta puntual -- un
+    // organizador puede administrar más de una organización.
     // ========================================================
 
     const {
@@ -133,10 +94,6 @@ export async function GET(
         "id",
         saleId
       )
-      .eq(
-        "organization_id",
-        membership.organization_id
-      )
       .maybeSingle();
 
     if (
@@ -155,6 +112,28 @@ export async function GET(
         },
         {
           status: 404,
+        }
+      );
+    }
+
+    // ========================================================
+    // ORGANIZADOR
+    // ========================================================
+
+    const verification =
+      await verifyOrganizerForOrg(
+        sale.organization_id
+      );
+
+    if (!verification.ok) {
+      return NextResponse.json(
+        {
+          error:
+            verification.error,
+        },
+        {
+          status:
+            verification.status,
         }
       );
     }
@@ -181,7 +160,7 @@ export async function GET(
       )
       .eq(
         "organization_id",
-        membership.organization_id
+        sale.organization_id
       )
       .maybeSingle();
 
@@ -522,7 +501,7 @@ export async function GET(
         )
         .eq(
           "organization_id",
-          membership.organization_id
+          sale.organization_id
         )
         .maybeSingle();
 
