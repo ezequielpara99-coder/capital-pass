@@ -29,6 +29,7 @@ const tragoNoDescuentaStockMigration = readFileSync(new URL("../supabase/migrati
 const cuentasCortesiaMigration = readFileSync(new URL("../supabase/migrations/20260936_cuentas_cortesia.sql", import.meta.url), "utf8");
 const colorEntradaMigration = readFileSync(new URL("../supabase/migrations/20260937_color_entrada.sql", import.meta.url), "utf8");
 const presupuestosMigration = readFileSync(new URL("../supabase/migrations/20260938_presupuestos.sql", import.meta.url), "utf8");
+const bloquearStockMigration = readFileSync(new URL("../supabase/migrations/20260939_bloquear_stock.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -104,6 +105,7 @@ async function database() {
   await db.exec(cuentasCortesiaMigration);
   await db.exec(colorEntradaMigration);
   await db.exec(presupuestosMigration);
+  await db.exec(bloquearStockMigration);
   return db;
 }
 
@@ -812,6 +814,13 @@ test("cuenta de cortesia: servicio y stock completos sin pagar", async () => {
   await db.exec(`update organizations set complimentary = true, complimentary_note = 'Cliente del estudio' where id = '${orgFree}'`);
   assert.equal(await scalar(`select cp_org_has_service('${orgFree}')`), true, "la cuenta de cortesia tiene servicio sin pagar");
   assert.equal(await scalar(`select cp_org_has_stock_access('${orgFree}')`), true, "y el pack completo, incluido stock");
+
+  await db.exec(`update organizations set stock_access_blocked = true where id = '${orgFree}'`);
+  assert.equal(await scalar(`select cp_org_has_stock_access('${orgFree}')`), false, "el admin puede bloquear stock sin tocar la cortesia");
+  assert.equal(await scalar(`select cp_org_has_service('${orgFree}')`), true, "el resto del servicio sigue activo");
+
+  await db.exec(`update organizations set stock_access_blocked = false where id = '${orgFree}'`);
+  assert.equal(await scalar(`select cp_org_has_stock_access('${orgFree}')`), true, "se puede desbloquear de nuevo");
   assert.equal(await scalar(`select count(*)::int from stock_trial where organization_id = '${orgFree}'`), 0, "sin abrir una prueba de 7 dias");
 
   assert.equal(await scalar(`select cp_org_has_service('${orgPaid}')`), false, "otra organizacion no se ve afectada");

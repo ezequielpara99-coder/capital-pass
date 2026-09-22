@@ -108,12 +108,24 @@ export async function PATCH(request: NextRequest) {
     const organizationId = String(body.organizationId ?? "").trim();
     if (!organizationId) return NextResponse.json({ error: "Falta la organización." }, { status: 400 });
 
-    const complimentary = Boolean(body.complimentary);
-    const note = body.note !== undefined ? String(body.note).trim() || null : undefined;
+    // Cada campo se toca solo si vino en el pedido -- asi el toggle de
+    // bloqueo de stock no pisa la cortesia (y viceversa).
+    const updates: Record<string, unknown> = {};
 
-    const updates: Record<string, unknown> = { complimentary };
-    if (note !== undefined) updates.complimentary_note = note;
-    if (!complimentary) updates.complimentary_note = null;
+    if (body.complimentary !== undefined) {
+      const complimentary = Boolean(body.complimentary);
+      updates.complimentary = complimentary;
+      if (!complimentary) updates.complimentary_note = null;
+      else if (body.note !== undefined) updates.complimentary_note = String(body.note).trim() || null;
+    }
+
+    if (body.stockBlocked !== undefined) {
+      updates.stock_access_blocked = Boolean(body.stockBlocked);
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "No hay nada para actualizar." }, { status: 400 });
+    }
 
     const admin = createAdminClient();
     const { data, error } = await admin
@@ -124,12 +136,18 @@ export async function PATCH(request: NextRequest) {
       .maybeSingle();
 
     if (error) {
+      if ("stock_access_blocked" in updates && /stock_access_blocked/i.test(error.message ?? "")) {
+        return NextResponse.json({ error: "Falta aplicar la actualización de bloqueo de stock (20260939)." }, { status: 503 });
+      }
       console.error("ADMIN CUENTAS PATCH:", error);
       return NextResponse.json({ error: "No se pudo actualizar la organización." }, { status: 500 });
     }
     if (!data) return NextResponse.json({ error: "No se encontró la organización." }, { status: 404 });
 
-    return NextResponse.json({ ok: true, organization: data });
+    return NextResponse.json({
+      ok: true,
+      organization: { ...data, stock_access_blocked: "stock_access_blocked" in updates ? updates.stock_access_blocked : undefined },
+    });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }

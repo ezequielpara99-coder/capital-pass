@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import CortesiaToggle from "./cortesia-toggle";
+import StockAccessToggle from "./stock-access-toggle";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -73,6 +74,14 @@ export default async function AdminOrganizationDetailPage({
   const complimentaryNote = courtesyAvailable
     ? ((organization as { complimentary_note?: string | null }).complimentary_note ?? null)
     : null;
+
+  // Tolerante: si todavia no se corrio la migracion de bloqueo de stock, no
+  // se muestra el toggle en vez de romper la pagina.
+  const stockBlockResult = await admin.from("organizations").select("stock_access_blocked").eq("id", id).maybeSingle();
+  const stockBlockAvailable = !stockBlockResult.error;
+  const stockAccessBlocked = stockBlockAvailable
+    ? Boolean((stockBlockResult.data as { stock_access_blocked?: boolean } | null)?.stock_access_blocked)
+    : false;
 
   const [membersResult, eventsResult, subscriptionResult, signupResult, complaintsResult] =
     await Promise.all([
@@ -212,6 +221,10 @@ export default async function AdminOrganizationDetailPage({
               initialComplimentary={complimentary}
               initialNote={complimentaryNote}
             />
+          )}
+
+          {stockBlockAvailable && (
+            <StockAccessToggle organizationId={organization.id} initialBlocked={stockAccessBlocked} />
           )}
         </section>
 

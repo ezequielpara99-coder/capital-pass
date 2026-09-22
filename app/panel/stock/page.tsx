@@ -47,6 +47,17 @@ export default async function StockPage({
   }
 
   if (!isPlatformAdmin && !hasStockAccess) {
+    // Tolerante: si no se corrio la migracion de bloqueo de stock, la
+    // columna no existe y esto simplemente no bloquea nada extra.
+    const { data: orgBlock } = await admin
+      .from("organizations")
+      .select("stock_access_blocked")
+      .eq("id", membership.organization_id)
+      .maybeSingle();
+    const blocked = Boolean((orgBlock as { stock_access_blocked?: boolean } | null)?.stock_access_blocked);
+
+    if (blocked) return <UpgradeScreen plan={null} blocked />;
+
     const { data: avanzadaPlan } = await admin
       .from("subscription_plans")
       .select("id, name, price_minor, currency")
