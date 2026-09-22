@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import RegisterServiceWorker from "./register-sw";
 import GlobalLogoutButton from "./global-logout-button";
+import PresenceHeartbeat from "./presence-heartbeat";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -45,6 +46,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <RegisterServiceWorker />
         {children}
         <GlobalLogoutButton />
+        <PresenceHeartbeat />
       </body>
     </html>
   );

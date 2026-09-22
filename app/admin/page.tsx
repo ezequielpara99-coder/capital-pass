@@ -39,6 +39,12 @@ type SaleRow = {
   created_at: string | null;
 };
 
+// Fuera del componente: el linter marca "Date.now()" como impuro si se
+// llama directo dentro de un componente/pagina.
+function onlineCutoffMs() {
+  return Date.now() - 5 * 60 * 1000;
+}
+
 export default async function AdminPage() {
   const supabase = await createClient();
 
@@ -85,6 +91,7 @@ export default async function AdminPage() {
     eventsResult,
     membersResult,
     salesResult,
+    allOrganizationsResult,
   ] = await Promise.all([
     admin
       .from("organizations")
@@ -109,6 +116,10 @@ export default async function AdminPage() {
       .eq("status", "confirmed")
       .order("created_at", { ascending: false })
       .limit(500),
+
+    // Para "conectados ahora" necesitamos TODAS las organizaciones (arriba
+    // solo se traen las 8 mas recientes para la lista).
+    admin.from("organizations").select("id, name"),
   ]);
 
   const organizations =
@@ -146,6 +157,43 @@ export default async function AdminPage() {
     (total, sale) => total + Number(sale.total_minor ?? 0),
     0
   );
+
+  const allOrganizations = (allOrganizationsResult.data ?? []) as { id: string; name: string }[];
+  const allOrgNameById = new Map(allOrganizations.map((o) => [o.id, o.name]));
+
+  // "Conectados ahora": organizadores activos cuyo ultimo heartbeat
+  // (profiles.last_active_at) fue hace 5 minutos o menos. Tolerante: si
+  // todavia no se corrio la migracion de presencia, esto queda vacio.
+  const activeOrganizerMembers = members.filter((m) => m.role === "organizer" && m.status === "active");
+  const organizerUserIds = [...new Set(activeOrganizerMembers.map((m) => m.user_id))];
+
+  let onlineOrganizers: { name: string; organizationName: string }[] = [];
+  if (organizerUserIds.length > 0) {
+    const { data: presenceProfiles, error: presenceError } = await admin
+      .from("profiles")
+      .select("id, first_name, last_name, last_active_at")
+      .in("id", organizerUserIds);
+
+    if (!presenceError) {
+      const cutoff = onlineCutoffMs();
+      const onlineUserIds = new Set(
+        (presenceProfiles ?? [])
+          .filter((p) => p.last_active_at && new Date(p.last_active_at).getTime() >= cutoff)
+          .map((p) => p.id)
+      );
+      const profileById = new Map((presenceProfiles ?? []).map((p) => [p.id, p]));
+
+      onlineOrganizers = activeOrganizerMembers
+        .filter((m) => onlineUserIds.has(m.user_id))
+        .map((m) => {
+          const profile = profileById.get(m.user_id);
+          return {
+            name: profile ? `${profile.first_name} ${profile.last_name}`.trim() : "Organizador",
+            organizationName: allOrgNameById.get(m.organization_id) ?? "Organización",
+          };
+        });
+    }
+  }
 
   const recentOrganizations = organizations.map((organization) => {
     const orgMembers = members.filter(
@@ -205,7 +253,7 @@ export default async function AdminPage() {
           </div>
         </header>
 
-        <section className="mt-7 grid gap-[1px] overflow-hidden border border-white/[0.08] bg-white/[0.08] sm:grid-cols-2 xl:grid-cols-5">
+        <section className="mt-7 grid gap-[1px] overflow-hidden border border-white/[0.08] bg-white/[0.08] sm:grid-cols-2 xl:grid-cols-6">
           <Metric
             number="01"
             label="Organizaciones"
@@ -238,7 +286,35 @@ export default async function AdminPage() {
             detail="ventas confirmadas"
             accent
           />
+          <Metric
+            number="06"
+            label="Conectados"
+            value={String(onlineOrganizers.length)}
+            detail="organizadores ahora"
+            live={onlineOrganizers.length > 0}
+          />
         </section>
+
+        {onlineOrganizers.length > 0 && (
+          <section className="mt-5 border border-emerald-400/20 bg-emerald-400/[0.04] p-5 md:p-6">
+            <div className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]" />
+              <p className="text-[9px] font-black uppercase tracking-[0.22em] text-emerald-300/80">
+                Organizadores conectados ahora
+              </p>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {onlineOrganizers.map((o, i) => (
+                <span
+                  key={`${o.name}-${i}`}
+                  className="border border-emerald-400/25 bg-emerald-400/[0.06] px-3 py-1.5 text-xs font-bold text-emerald-100"
+                >
+                  {o.name} <span className="text-emerald-300/50">· {o.organizationName}</span>
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="mt-5 grid gap-5 xl:grid-cols-[1.1fr_.9fr]">
           <PanelCard eyebrow="Accounts" title="Organizaciones recientes">
@@ -374,12 +450,14 @@ function Metric({
   value,
   detail,
   accent = false,
+  live = false,
 }: {
   number: string;
   label: string;
   value: string;
   detail: string;
   accent?: boolean;
+  live?: boolean;
 }) {
   return (
     <article className={`relative min-h-[160px] overflow-hidden p-5 ${accent ? "bg-[#100806]" : "bg-[#090807]"}`}>
@@ -387,9 +465,16 @@ function Metric({
         <p className="text-[8px] font-black uppercase tracking-[0.18em] text-white/27">
           {label}
         </p>
-        <span className="font-mono text-[8px] text-[#ff6040]/45">
-          {number}
-        </span>
+        {live ? (
+          <span className="flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]" />
+            <span className="font-mono text-[8px] text-emerald-400/70">{number}</span>
+          </span>
+        ) : (
+          <span className="font-mono text-[8px] text-[#ff6040]/45">
+            {number}
+          </span>
+        )}
       </div>
 
       <p className="mt-8 text-[32px] font-black tracking-[-0.055em] text-[#fff4ee]">

@@ -30,6 +30,7 @@ const cuentasCortesiaMigration = readFileSync(new URL("../supabase/migrations/20
 const colorEntradaMigration = readFileSync(new URL("../supabase/migrations/20260937_color_entrada.sql", import.meta.url), "utf8");
 const presupuestosMigration = readFileSync(new URL("../supabase/migrations/20260938_presupuestos.sql", import.meta.url), "utf8");
 const bloquearStockMigration = readFileSync(new URL("../supabase/migrations/20260939_bloquear_stock.sql", import.meta.url), "utf8");
+const presenciaMigration = readFileSync(new URL("../supabase/migrations/20260940_presencia_organizadores.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -106,6 +107,7 @@ async function database() {
   await db.exec(colorEntradaMigration);
   await db.exec(presupuestosMigration);
   await db.exec(bloquearStockMigration);
+  await db.exec(presenciaMigration);
   return db;
 }
 
@@ -853,6 +855,28 @@ test("color de la entrada: solo acepta un hexadecimal valido", async () => {
       `debe rechazar ${invalid}`
     );
   }
+
+  await db.close();
+});
+
+test("presencia: cp_touch_presence marca last_active_at del usuario logueado", async () => {
+  const db = await database();
+  const user = "e5555555-5555-4555-8555-555555555555";
+  const other = "e6666666-6666-4666-8666-666666666666";
+
+  await db.exec(`insert into auth.users values ('${user}','presencia@example.test',now(),'{}');
+    insert into auth.users values ('${other}','otro@example.test',now(),'{}');
+    insert into profiles(id, first_name, last_name) values ('${user}','Presencia','Test'), ('${other}','Otro','Test');`);
+
+  await db.exec(`select set_config('request.jwt.claim.sub','${user}',false); set role authenticated;`);
+  await db.exec(`select cp_touch_presence()`);
+  await db.exec(`reset role;`);
+
+  const rows = await db.query<{ id: string; last_active_at: string | null }>(`select id, last_active_at from profiles order by id`);
+  const mine = rows.rows.find((r) => r.id === user);
+  const others = rows.rows.find((r) => r.id === other);
+  assert.ok(mine?.last_active_at, "se marco la presencia del usuario logueado");
+  assert.equal(others?.last_active_at ?? null, null, "no toca la presencia de otro usuario");
 
   await db.close();
 });

@@ -517,6 +517,26 @@ export default function QuoteEditor({ init, catalog }: { init: QuoteInit; catalo
                     {formatMoney(itemTotal({ quantity: toNumber(item.quantity) || 1, unit_price_minor: toNumber(item.price) }))}
                   </p>
                 )}
+
+                {index === items.length - 1 && (
+                  <div className="mt-4 flex flex-wrap gap-2 border-t border-white/[0.06] pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setItems((prev) => [...prev, emptyItem(kind)])}
+                      className="h-10 flex-1 min-w-[140px] border border-white/[0.16] text-[10px] font-black uppercase tracking-[0.12em] text-white/75 transition hover:border-white/40 hover:text-white"
+                    >
+                      + Agregar ítem
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onSave}
+                      disabled={Boolean(busy)}
+                      className="h-10 flex-1 min-w-[140px] border border-emerald-400/30 bg-emerald-400/10 text-[10px] font-black uppercase tracking-[0.12em] text-emerald-300 transition hover:bg-emerald-400/20 disabled:opacity-40"
+                    >
+                      {busy === "save" ? "Guardando…" : "Guardar ítem"}
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

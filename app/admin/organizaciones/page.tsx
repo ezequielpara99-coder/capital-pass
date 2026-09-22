@@ -14,6 +14,7 @@ type OrganizationRow = {
   contact_email: string | null;
   active: boolean;
   complimentary: boolean;
+  stock_access_blocked?: boolean;
   created_at: string;
 };
 
@@ -69,7 +70,7 @@ export default async function AdminOrganizationsPage() {
     await Promise.all([
       admin
         .from("organizations")
-        .select("id, name, contact_email, active, complimentary, created_at")
+        .select("id, name, contact_email, active, complimentary, stock_access_blocked, created_at")
         .order("created_at", { ascending: false })
         .limit(1000),
       admin
@@ -82,19 +83,31 @@ export default async function AdminOrganizationsPage() {
         .eq("role", "organizer"),
     ]);
 
-  // Si todavia no se corrio la migracion de cuentas de cortesia, la columna
-  // no existe: mostramos la lista igual, sin esa marca.
+  // Tolerante en capas: si falta la migracion de bloqueo de stock y/o la de
+  // cortesia, esas columnas no existen todavia -- la lista se muestra igual,
+  // sin esas marcas puntuales.
   let organizations = (organizationsResult.data ?? []) as OrganizationRow[];
   if (organizationsResult.error) {
-    const { data: fallback } = await admin
+    const withCourtesy = await admin
       .from("organizations")
-      .select("id, name, contact_email, active, created_at")
+      .select("id, name, contact_email, active, complimentary, created_at")
       .order("created_at", { ascending: false })
       .limit(1000);
-    organizations = ((fallback ?? []) as Omit<OrganizationRow, "complimentary">[]).map((item) => ({
-      ...item,
-      complimentary: false,
-    }));
+
+    if (!withCourtesy.error) {
+      organizations = (withCourtesy.data ?? []).map((item) => ({ ...item, stock_access_blocked: false }));
+    } else {
+      const { data: fallback } = await admin
+        .from("organizations")
+        .select("id, name, contact_email, active, created_at")
+        .order("created_at", { ascending: false })
+        .limit(1000);
+      organizations = ((fallback ?? []) as Omit<OrganizationRow, "complimentary" | "stock_access_blocked">[]).map((item) => ({
+        ...item,
+        complimentary: false,
+        stock_access_blocked: false,
+      }));
+    }
   }
   const subscriptions = (subscriptionsResult.data ?? []) as SubscriptionRow[];
   const events = (eventsResult.data ?? []) as EventRow[];
@@ -197,13 +210,18 @@ export default async function AdminOrganizationsPage() {
                     className="grid gap-5 px-5 py-5 transition hover:bg-white/[0.015] lg:grid-cols-[1.2fr_.8fr_.7fr_.8fr_.8fr] lg:items-center md:px-6"
                   >
                     <div className="min-w-0">
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
                         <span className="font-mono text-[8px] text-[#ff6040]/45">
                           {String(index + 1).padStart(2, "0")}
                         </span>
                         <p className="truncate text-base font-black text-white/82">
                           {organization.name}
                         </p>
+                        {organization.stock_access_blocked && (
+                          <span className="border border-red-400/30 bg-red-500/10 px-2 py-0.5 text-[8px] font-black uppercase tracking-wide text-red-300">
+                            🔒 Stock bloqueado
+                          </span>
+                        )}
                       </div>
                       <p className="mt-2 pl-7 text-xs text-white/30">
                         {organizerProfile
