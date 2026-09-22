@@ -472,8 +472,8 @@ export default function QuoteEditor({ init, catalog }: { init: QuoteInit; catalo
                   </button>
                 </div>
 
-                <div className={`mt-3 grid gap-3 pl-8 ${showPrices ? "grid-cols-3" : "grid-cols-1 sm:grid-cols-3"}`}>
-                  <label className="block">
+                <div className={`mt-3 grid gap-3 pl-8 ${showPrices ? "grid-cols-3" : ""}`}>
+                  <label className={`block ${showPrices ? "" : "max-w-[160px]"}`}>
                     <span className={LABEL}>Cantidad</span>
                     <input
                       value={item.quantity}
