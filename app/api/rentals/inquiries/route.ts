@@ -26,13 +26,15 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    const businessName = String(body.businessName ?? "").trim();
-    const contactName = String(body.contactName ?? "").trim();
-    const phone = String(body.phone ?? "").trim();
-    const email = body.email ? String(body.email).trim() : null;
-    const city = body.city ? String(body.city).trim() : null;
-    const terminalQuantity = body.terminalQuantity ? String(body.terminalQuantity).trim() : null;
-    const message = body.message ? String(body.message).trim() : null;
+    // Formulario publico sin login: limitamos el largo de cada campo para
+    // no dejar que alguien mande un payload gigante (DB y el mail de aviso).
+    const businessName = String(body.businessName ?? "").trim().slice(0, 200);
+    const contactName = String(body.contactName ?? "").trim().slice(0, 200);
+    const phone = String(body.phone ?? "").trim().slice(0, 60);
+    const email = body.email ? String(body.email).trim().slice(0, 200) : null;
+    const city = body.city ? String(body.city).trim().slice(0, 120) : null;
+    const terminalQuantity = body.terminalQuantity ? String(body.terminalQuantity).trim().slice(0, 60) : null;
+    const message = body.message ? String(body.message).trim().slice(0, 2000) : null;
 
     if (!businessName) return NextResponse.json({ error: "Falta el nombre del negocio." }, { status: 400 });
     if (!contactName) return NextResponse.json({ error: "Falta el nombre de contacto." }, { status: 400 });

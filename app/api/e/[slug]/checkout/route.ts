@@ -31,6 +31,12 @@ export async function POST(
       }
     }
 
+    const buyerFirstName = String(body.firstName ?? "").trim().slice(0, 100);
+    const buyerLastName = String(body.lastName ?? "").trim().slice(0, 100);
+    const buyerDni = String(body.dni ?? "").trim().slice(0, 30);
+    const buyerPhone = String(body.phone ?? "").trim().slice(0, 40);
+    const buyerEmail = body.email ? String(body.email).trim().slice(0, 200) : null;
+
     const admin = createAdminClient();
 
     const { data: event } = await admin.from("events").select("id, name, organization_id").eq("slug", slug).maybeSingle();
@@ -47,11 +53,11 @@ export async function POST(
     const created = await admin.rpc("create_online_sale", {
       p_event_id: event.id,
       p_items: items.map((item) => ({ ticket_type_id: item.ticketTypeId, quantity: item.quantity, pack_id: item.packId ?? null })),
-      p_buyer_first_name: String(body.firstName ?? "").trim(),
-      p_buyer_last_name: String(body.lastName ?? "").trim(),
-      p_buyer_dni: String(body.dni ?? "").trim(),
-      p_buyer_phone: String(body.phone ?? "").trim(),
-      p_buyer_email: body.email ? String(body.email).trim() : null,
+      p_buyer_first_name: buyerFirstName,
+      p_buyer_last_name: buyerLastName,
+      p_buyer_dni: buyerDni,
+      p_buyer_phone: buyerPhone,
+      p_buyer_email: buyerEmail,
     });
 
     if (created.error) {
@@ -104,7 +110,7 @@ export async function POST(
     const preference = await mp.preference.create({
       body: {
         items: preferenceItems,
-        payer: { name: String(body.firstName ?? "").trim(), surname: String(body.lastName ?? "").trim(), email: body.email ? String(body.email).trim() : undefined },
+        payer: { name: buyerFirstName, surname: buyerLastName, email: buyerEmail ?? undefined },
         external_reference: `capitalpass_sale:${sale.sale_id}`,
         notification_url: `${getAppBaseUrl()}/api/mercadopago/webhook-ventas`,
         back_urls: {
