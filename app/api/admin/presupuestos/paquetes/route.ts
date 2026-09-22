@@ -4,7 +4,11 @@ import { isMissingTable, verifyAdmin } from "../../../../../lib/quotes/auth";
 import { normalizeKind, normalizeMoney, normalizePriceMode, sanitizeItems } from "../../../../../lib/quotes/totals";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FIELDS = "id, kind, name, items, price_mode, package_price_minor, active";
+const FIELDS = "id, kind, name, items, price_mode, package_price_minor, notes, active";
+
+function optionalText(value: unknown, max: number) {
+  return String(value ?? "").trim().slice(0, max) || null;
+}
 
 // POST: crea un paquete predeterminado (una plantilla de contenido + precio).
 export async function POST(request: NextRequest) {
@@ -25,6 +29,7 @@ export async function POST(request: NextRequest) {
         items: sanitizeItems(body.items),
         price_mode: normalizePriceMode(body.priceMode),
         package_price_minor: normalizeMoney(body.packagePrice),
+        notes: optionalText(body.notes, 20000),
       })
       .select(FIELDS)
       .single();
@@ -61,6 +66,7 @@ export async function PATCH(request: NextRequest) {
     if (body.items !== undefined) updates.items = sanitizeItems(body.items);
     if (body.priceMode !== undefined) updates.price_mode = normalizePriceMode(body.priceMode);
     if (body.packagePrice !== undefined) updates.package_price_minor = normalizeMoney(body.packagePrice);
+    if (body.notes !== undefined) updates.notes = optionalText(body.notes, 20000);
     if (body.active !== undefined) updates.active = Boolean(body.active);
 
     const admin = createAdminClient();

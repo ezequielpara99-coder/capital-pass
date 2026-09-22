@@ -11,6 +11,7 @@ export type QuotePackage = {
   items: QuoteItem[];
   price_mode: PriceMode;
   package_price_minor: number;
+  notes: string | null;
   active: boolean;
 };
 
@@ -45,6 +46,7 @@ function draftFrom(pkg?: QuotePackage) {
     priceMode: pkg?.price_mode ?? ("package" as PriceMode),
     packagePrice: pkg?.package_price_minor ? String(pkg.package_price_minor) : "",
     items: itemsToEditor(pkg?.items ?? []),
+    notes: pkg?.notes ?? "",
   };
 }
 
@@ -99,6 +101,7 @@ export default function PaquetesClient({ packages, missingSql }: { packages: Quo
           priceMode: draft.priceMode,
           packagePrice: Math.round(toNumber(draft.packagePrice)),
           items,
+          notes: draft.notes,
         }),
       });
       const result = await response.json();
@@ -242,6 +245,17 @@ export default function PaquetesClient({ packages, missingSql }: { packages: Quo
           >
             + Agregar ítem
           </button>
+
+          <label className="mt-4 block">
+            <span className={LABEL}>Notas por defecto (detalle del servicio, condiciones especiales…)</span>
+            <textarea
+              value={draft.notes}
+              onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+              rows={6}
+              className="mt-2 w-full border border-white/[0.12] bg-black/30 px-4 py-3 text-sm leading-6 text-white outline-none transition placeholder:text-white/20 focus:border-[#ff5a2a]/50"
+              placeholder="Se copia al presupuesto cuando elegís este paquete. Podés editarlo ahí sin afectar la plantilla."
+            />
+          </label>
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] pt-4">
             <p className="text-sm text-white/50">

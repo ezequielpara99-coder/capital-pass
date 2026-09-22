@@ -42,7 +42,7 @@ export async function PATCH(request: NextRequest, context: Context) {
     if (body.clientPhone !== undefined) updates.client_phone = optionalText(body.clientPhone, 60);
     if (body.clientEmail !== undefined) updates.client_email = optionalText(body.clientEmail, 200);
     if (body.title !== undefined) updates.title = optionalText(body.title, 200);
-    if (body.notes !== undefined) updates.notes = optionalText(body.notes, 3000);
+    if (body.notes !== undefined) updates.notes = optionalText(body.notes, 20000);
     if (body.items !== undefined) updates.items = sanitizeItems(body.items);
     if (body.eventName !== undefined) updates.event_name = optionalText(body.eventName, 200);
     if (body.modality !== undefined) updates.modality = normalizeModality(body.modality);

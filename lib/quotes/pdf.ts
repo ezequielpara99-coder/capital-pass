@@ -473,11 +473,17 @@ export async function buildQuotePdf(quote: QuoteForPdf) {
     });
   }
 
-  // Notas y condiciones (fuera de la tarjeta)
-  const conditions = `Presupuesto válido por ${quote.valid_days} días (hasta el ${formatDate(validUntil)}). Precios en pesos argentinos.`;
+  // Notas y condiciones (fuera de la tarjeta). Todo presupuesto de diseño
+  // lleva siempre la condicion de pago y los datos de pago fijos -- no
+  // dependen de lo que se haya escrito en "notas" de ese presupuesto puntual.
+  const paymentTerms = isDesign
+    ? "Se solicita la totalidad del pago para iniciar el proyecto (en el caso de ser trabajo mensual, la seña será del 35% y el resto en una fecha acordada con el cliente). "
+    : "";
+  const conditions = `${paymentTerms}Presupuesto válido por ${quote.valid_days} días (hasta el ${formatDate(validUntil)}). Precios en pesos argentinos.`;
   const noteBlocks = [
     ...(quote.notes ? [{ title: "NOTAS", body: quote.notes }] : []),
     { title: "CONDICIONES", body: conditions },
+    ...(isDesign ? [{ title: "DATOS DE PAGO", body: "Alias: capitaldesing\nCBU: 1430001713001164190015" }] : []),
   ];
 
   blocks.push({ h: 16, draw: () => {} });

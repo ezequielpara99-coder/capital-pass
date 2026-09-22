@@ -54,7 +54,7 @@ export default async function NuevoPresupuestoPage({
   const [{ data: catalog }, { data: clients }, { data: packages }] = await Promise.all([
     admin.from("quote_catalog").select("id, kind, description, unit, unit_price_minor").eq("active", true).order("description"),
     admin.from("quote_clients").select("id, name, contact, phone, email").order("name"),
-    admin.from("quote_packages").select("id, kind, name, items, price_mode, package_price_minor").eq("active", true).order("name"),
+    admin.from("quote_packages").select("id, kind, name, items, price_mode, package_price_minor, notes").eq("active", true).order("name"),
   ]);
 
   return (

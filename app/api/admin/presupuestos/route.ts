@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
       discount_type: discount.type,
       discount_value: discount.value,
       discount_label: discount.type === "none" ? null : String(body.discountLabel ?? "").trim().slice(0, 80) || null,
-      notes: String(body.notes ?? "").trim().slice(0, 3000) || null,
+      notes: String(body.notes ?? "").trim().slice(0, 20000) || null,
       valid_days: Number.isFinite(validDays) ? Math.min(Math.max(Math.round(validDays), 0), 365) : 15,
       rental_inquiry_id: inquiryId || null,
       created_by: verification.userId,

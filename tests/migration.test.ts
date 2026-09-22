@@ -35,6 +35,7 @@ const restaurarComboMigration = readFileSync(new URL("../supabase/migrations/202
 const packsOnlineMigration = readFileSync(new URL("../supabase/migrations/20260942_packs_online.sql", import.meta.url), "utf8");
 const presupuestosClientesMigration = readFileSync(new URL("../supabase/migrations/20260943_presupuestos_clientes.sql", import.meta.url), "utf8");
 const estadosYPaquetesMigration = readFileSync(new URL("../supabase/migrations/20260944_estados_y_paquetes.sql", import.meta.url), "utf8");
+const notasEnPaquetesMigration = readFileSync(new URL("../supabase/migrations/20260945_notas_en_paquetes.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -116,6 +117,7 @@ async function database() {
   await db.exec(packsOnlineMigration);
   await db.exec(presupuestosClientesMigration);
   await db.exec(estadosYPaquetesMigration);
+  await db.exec(notasEnPaquetesMigration);
   return db;
 }
 
@@ -902,6 +904,11 @@ test("presupuestos: estados revision/a_pagar y paquetes predeterminados", async 
     () => db.query(`insert into quote_packages(name, items) values ('X', '{"a":1}')`),
     /violates check constraint|check/
   );
+
+  // Las notas por defecto de un paquete (texto largo del servicio) se
+  // pueden guardar y editar sin limite fijado por la base.
+  await db.exec(`update quote_packages set notes = 'Detalle largo del servicio...' where id = '${packageId}'`);
+  assert.equal(await scalar(`select notes from quote_packages where id = '${packageId}'`), "Detalle largo del servicio...");
 
   await db.close();
 });

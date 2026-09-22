@@ -11,7 +11,7 @@ export default async function PaquetesPresupuestosPage() {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("quote_packages")
-    .select("id, kind, name, items, price_mode, package_price_minor, active")
+    .select("id, kind, name, items, price_mode, package_price_minor, notes, active")
     .order("kind")
     .order("name");
 

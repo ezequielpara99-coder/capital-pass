@@ -27,7 +27,15 @@ import {
 
 export type CatalogItem = { id: string; kind: QuoteKind; description: string; unit: string; unit_price_minor: number };
 export type QuoteClient = { id: string; name: string; contact: string | null; phone: string | null; email: string | null };
-export type QuotePackageOption = { id: string; kind: QuoteKind; name: string; items: QuoteItem[]; price_mode: PriceMode; package_price_minor: number };
+export type QuotePackageOption = {
+  id: string;
+  kind: QuoteKind;
+  name: string;
+  items: QuoteItem[];
+  price_mode: PriceMode;
+  package_price_minor: number;
+  notes: string | null;
+};
 
 // Forma del presupuesto tal como viene de la base (o vacío para uno nuevo).
 export type QuoteInit = {
@@ -250,11 +258,12 @@ export default function QuoteEditor({
     const pkg = packages.find((p) => p.id === packageId);
     if (!pkg) return;
 
-    const hasContent = items.some((item) => item.description.trim());
-    if (hasContent && !window.confirm(`Esto reemplaza el contenido actual por el del paquete "${pkg.name}". ¿Seguir?`)) return;
+    const hasContent = items.some((item) => item.description.trim()) || notes.trim();
+    if (hasContent && !window.confirm(`Esto reemplaza el contenido y las notas actuales por los del paquete "${pkg.name}". ¿Seguir?`)) return;
 
     setPriceMode(pkg.price_mode);
     setPackagePrice(pkg.package_price_minor ? String(pkg.package_price_minor) : "");
+    if (pkg.notes) setNotes(pkg.notes);
     setItems(
       pkg.items.length > 0
         ? pkg.items.map((item) => ({
