@@ -208,32 +208,38 @@ export default function PaquetesClient({ packages, missingSql }: { packages: Quo
 
           <div className="mt-3 space-y-2">
             {draft.items.map((item, index) => (
-              <div key={item.key} className="flex items-start gap-2">
-                <span className="mt-3 w-4 text-xs font-black text-white/25">{index + 1}</span>
-                <input
-                  value={item.description}
-                  onChange={(e) => updateItem(item.key, { description: e.target.value })}
-                  placeholder="Ej: Flyer semanal"
-                  className="h-11 flex-1 border border-white/[0.12] bg-black/30 px-3 text-sm text-white outline-none placeholder:text-white/20 focus:border-[#ff5a2a]/50"
-                />
-                <input
-                  value={item.quantity}
-                  onChange={(e) => updateItem(item.key, { quantity: e.target.value })}
-                  inputMode="decimal"
-                  className="h-11 w-16 border border-white/[0.12] bg-black/30 px-2 text-center text-sm text-white outline-none focus:border-[#ff5a2a]/50"
-                />
-                {showPrices && (
+              <div key={item.key} className="border border-white/[0.08] bg-white/[0.02] p-2.5">
+                <div className="flex items-start gap-2">
+                  <span className="mt-3 w-4 shrink-0 text-xs font-black text-white/25">{index + 1}</span>
                   <input
-                    value={item.price}
-                    onChange={(e) => updateItem(item.key, { price: e.target.value })}
-                    inputMode="numeric"
-                    placeholder="$"
-                    className="h-11 w-24 border border-white/[0.12] bg-black/30 px-2 text-sm text-white outline-none placeholder:text-white/20 focus:border-[#ff5a2a]/50"
+                    value={item.description}
+                    onChange={(e) => updateItem(item.key, { description: e.target.value })}
+                    placeholder="Ej: Flyer semanal"
+                    className="h-11 min-w-0 flex-1 border border-white/[0.12] bg-black/30 px-3 text-sm text-white outline-none placeholder:text-white/20 focus:border-[#ff5a2a]/50"
                   />
-                )}
-                <button type="button" onClick={() => removeItem(item.key)} className="h-11 w-11 shrink-0 border border-white/[0.10] text-lg text-white/40 hover:text-red-300">
-                  ×
-                </button>
+                  <button type="button" onClick={() => removeItem(item.key)} className="h-11 w-11 shrink-0 border border-white/[0.10] text-lg text-white/40 hover:text-red-300">
+                    ×
+                  </button>
+                </div>
+                <div className="mt-2 flex gap-2 pl-6">
+                  <input
+                    value={item.quantity}
+                    onChange={(e) => updateItem(item.key, { quantity: e.target.value })}
+                    inputMode="decimal"
+                    aria-label="Cantidad"
+                    className="h-11 w-20 shrink-0 border border-white/[0.12] bg-black/30 px-2 text-center text-sm text-white outline-none focus:border-[#ff5a2a]/50"
+                  />
+                  {showPrices && (
+                    <input
+                      value={item.price}
+                      onChange={(e) => updateItem(item.key, { price: e.target.value })}
+                      inputMode="numeric"
+                      placeholder="Precio ($)"
+                      aria-label="Precio"
+                      className="h-11 min-w-0 flex-1 border border-white/[0.12] bg-black/30 px-2 text-sm text-white outline-none placeholder:text-white/20 focus:border-[#ff5a2a]/50"
+                    />
+                  )}
+                </div>
               </div>
             ))}
           </div>
