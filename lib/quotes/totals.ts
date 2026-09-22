@@ -4,7 +4,7 @@
 export const QUOTE_KINDS = ["diseno", "rental", "otro"] as const;
 export type QuoteKind = (typeof QUOTE_KINDS)[number];
 
-export const QUOTE_STATUSES = ["borrador", "enviado", "aceptado", "rechazado"] as const;
+export const QUOTE_STATUSES = ["borrador", "revision", "a_pagar", "aceptado", "rechazado"] as const;
 export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
 
 export const DISCOUNT_TYPES = ["none", "percent", "amount"] as const;
@@ -18,7 +18,8 @@ export const KIND_LABEL: Record<QuoteKind, string> = {
 
 export const STATUS_LABEL: Record<QuoteStatus, string> = {
   borrador: "Borrador",
-  enviado: "Enviado",
+  revision: "En revisión",
+  a_pagar: "A pagar",
   aceptado: "Aceptado",
   rechazado: "Rechazado",
 };

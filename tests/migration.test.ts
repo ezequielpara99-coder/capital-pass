@@ -34,6 +34,7 @@ const presenciaMigration = readFileSync(new URL("../supabase/migrations/20260940
 const restaurarComboMigration = readFileSync(new URL("../supabase/migrations/20260941_restaurar_combo_al_cancelar.sql", import.meta.url), "utf8");
 const packsOnlineMigration = readFileSync(new URL("../supabase/migrations/20260942_packs_online.sql", import.meta.url), "utf8");
 const presupuestosClientesMigration = readFileSync(new URL("../supabase/migrations/20260943_presupuestos_clientes.sql", import.meta.url), "utf8");
+const estadosYPaquetesMigration = readFileSync(new URL("../supabase/migrations/20260944_estados_y_paquetes.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -114,6 +115,7 @@ async function database() {
   await db.exec(restaurarComboMigration);
   await db.exec(packsOnlineMigration);
   await db.exec(presupuestosClientesMigration);
+  await db.exec(estadosYPaquetesMigration);
   return db;
 }
 
@@ -866,6 +868,40 @@ test("combos (entrada + consumicion) y packs de entradas", async () => {
     `select * from redeem_combo_ticket('${bar}','VIPCODE1','${eventProductFernet}',2)`
   );
   assert.equal(redeemAfterCancel.rows[0].remaining_quantity, 0, "se pueden volver a canjear los 2 Fernet completos");
+
+  await db.close();
+});
+
+test("presupuestos: estados revision/a_pagar y paquetes predeterminados", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  // "enviado" ya no es un estado valido: los presupuestos viejos con ese
+  // valor se migran solos a "revision".
+  await assert.rejects(
+    () => db.query(`insert into quotes(client_name, status) values ('X', 'enviado')`),
+    /violates check constraint|check/
+  );
+
+  await db.exec(`insert into quotes(client_name, status) values ('Y', 'revision');
+    insert into quotes(client_name, status) values ('Z', 'a_pagar');`);
+  assert.equal(await scalar(`select status from quotes where client_name = 'Y'`), "revision");
+  assert.equal(await scalar(`select status from quotes where client_name = 'Z'`), "a_pagar");
+
+  // Paquete predeterminado: nombre propio, contenido y precio fijo.
+  await db.exec(`insert into quote_packages(kind, name, items, price_mode, package_price_minor)
+    values ('diseno', 'Paquete Emprendedores', '[{"description":"Flyer semanal","quantity":4,"unit":"u","unit_price_minor":0}]', 'package', 60000)`);
+  assert.equal(await scalar(`select count(*)::int from quote_packages`), 1);
+  assert.equal(await scalar(`select name from quote_packages`), "Paquete Emprendedores");
+
+  const packageId = await scalar(`select id::text from quote_packages where name = 'Paquete Emprendedores'`);
+  await db.exec(`update quote_packages set package_price_minor = 65000 where id = '${packageId}'`);
+  assert.equal(Number(await scalar(`select package_price_minor from quote_packages where id = '${packageId}'`)), 65000, "se puede editar el paquete si cambia algo");
+
+  await assert.rejects(
+    () => db.query(`insert into quote_packages(name, items) values ('X', '{"a":1}')`),
+    /violates check constraint|check/
+  );
 
   await db.close();
 });

@@ -27,6 +27,7 @@ import {
 
 export type CatalogItem = { id: string; kind: QuoteKind; description: string; unit: string; unit_price_minor: number };
 export type QuoteClient = { id: string; name: string; contact: string | null; phone: string | null; email: string | null };
+export type QuotePackageOption = { id: string; kind: QuoteKind; name: string; items: QuoteItem[]; price_mode: PriceMode; package_price_minor: number };
 
 // Forma del presupuesto tal como viene de la base (o vacío para uno nuevo).
 export type QuoteInit = {
@@ -90,7 +91,17 @@ function initialDiscount(init: QuoteInit): { mode: DiscountMode; value: string }
   return { mode: "none", value: "" };
 }
 
-export default function QuoteEditor({ init, catalog, clients }: { init: QuoteInit; catalog: CatalogItem[]; clients: QuoteClient[] }) {
+export default function QuoteEditor({
+  init,
+  catalog,
+  clients,
+  packages,
+}: {
+  init: QuoteInit;
+  catalog: CatalogItem[];
+  clients: QuoteClient[];
+  packages: QuotePackageOption[];
+}) {
   const isNew = !init.id;
 
   const [id, setId] = useState(init.id ?? null);
@@ -235,6 +246,28 @@ export default function QuoteEditor({ init, catalog, clients }: { init: QuoteIni
     }
   }
 
+  function applyPackage(packageId: string) {
+    const pkg = packages.find((p) => p.id === packageId);
+    if (!pkg) return;
+
+    const hasContent = items.some((item) => item.description.trim());
+    if (hasContent && !window.confirm(`Esto reemplaza el contenido actual por el del paquete "${pkg.name}". ¿Seguir?`)) return;
+
+    setPriceMode(pkg.price_mode);
+    setPackagePrice(pkg.package_price_minor ? String(pkg.package_price_minor) : "");
+    setItems(
+      pkg.items.length > 0
+        ? pkg.items.map((item) => ({
+            key: nextKey(),
+            description: item.description,
+            quantity: String(item.quantity),
+            unit: item.unit,
+            price: item.unit_price_minor ? String(item.unit_price_minor) : "",
+          }))
+        : [emptyItem(kind)]
+    );
+  }
+
   function payload() {
     return {
       kind,
@@ -364,6 +397,7 @@ export default function QuoteEditor({ init, catalog, clients }: { init: QuoteIni
   }
 
   const catalogForKind = catalog.filter((item) => item.kind === kind || item.kind === "otro" || kind === "otro");
+  const packagesForKind = packages.filter((pkg) => pkg.kind === kind || pkg.kind === "otro" || kind === "otro");
 
   return (
     <main className="relative min-h-screen bg-[#050505] pb-44 text-[#f7f3ed] sm:pb-32">
@@ -502,6 +536,23 @@ export default function QuoteEditor({ init, catalog, clients }: { init: QuoteIni
                 <p className="mt-1 text-xs text-white/40">{formatQuantity(pieces)} {pieces === 1 ? "pieza" : "piezas"} de contenido</p>
               )}
             </div>
+
+            {packagesForKind.length > 0 && (
+              <select
+                value=""
+                onChange={(e) => applyPackage(e.target.value)}
+                className="h-9 border border-white/[0.14] bg-transparent px-3 text-[10px] font-black uppercase tracking-[0.1em] text-white/60 outline-none"
+              >
+                <option value="" className="bg-[#0a0908]">
+                  + Paquete predeterminado…
+                </option>
+                {packagesForKind.map((pkg) => (
+                  <option key={pkg.id} value={pkg.id} className="bg-[#0a0908]">
+                    {pkg.name}
+                  </option>
+                ))}
+              </select>
+            )}
 
             <div className="grid grid-cols-2 gap-1 border border-white/[0.12] p-1 text-[9px] font-black uppercase tracking-[0.1em]">
               {(["package", "items"] as const).map((mode) => (
