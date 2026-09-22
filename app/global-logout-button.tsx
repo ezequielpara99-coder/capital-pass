@@ -33,7 +33,7 @@ export default function GlobalLogoutButton() {
   return (
     <a
       href="/logout"
-      className="fixed bottom-4 left-4 z-[500] flex h-9 items-center gap-2 border border-white/[0.12] bg-black/70 px-3 text-[9px] font-black uppercase tracking-[0.14em] text-white/50 backdrop-blur-md transition hover:border-red-400/30 hover:text-red-300"
+      className="fixed right-3 top-3 z-[500] flex h-8 items-center gap-2 border border-white/[0.12] bg-black/70 px-2.5 text-[9px] font-black uppercase tracking-[0.14em] text-white/50 backdrop-blur-md transition hover:border-red-400/30 hover:text-red-300"
     >
       Cerrar sesión
     </a>
