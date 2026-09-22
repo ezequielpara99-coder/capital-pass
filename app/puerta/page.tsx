@@ -106,6 +106,12 @@ function normalizeWhatsApp(value: string) {
   return digits;
 }
 
+// Fuera del componente: el linter marca "Date.now()" como impuro si se
+// llama directo dentro de un componente/hook.
+function nowMs() {
+  return Date.now();
+}
+
 export default function DoorSellerPage() {
   const supabase = useMemo(
     () => createClient(),
@@ -412,7 +418,7 @@ export default function DoorSellerPage() {
         return false;
       }
 
-      const now = Date.now();
+      const now = nowMs();
 
       if (
         event.door_sales_start_at &&

@@ -4,7 +4,6 @@ import Link from "next/link";
 
 import {
   CSSProperties,
-  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -159,7 +158,15 @@ export default function InformesClient({
   reports,
 }: Props) {
   const [theme, setTheme] =
-    useState<Theme>("dark");
+    useState<Theme>(() => {
+      if (typeof window === "undefined") return "dark";
+      try {
+        const saved = localStorage.getItem("capital-pass-theme");
+        return saved === "light" ? "light" : "dark";
+      } catch {
+        return "dark";
+      }
+    });
 
   const [view, setView] =
     useState<View>("calendar");
@@ -201,23 +208,6 @@ export default function InformesClient({
   const [search, setSearch] =
     useState("");
 
-  // =====================================================
-  // TEMA
-  // =====================================================
-
-  useEffect(() => {
-    const saved =
-      localStorage.getItem(
-        "capital-pass-theme"
-      );
-
-    if (
-      saved === "dark" ||
-      saved === "light"
-    ) {
-      setTheme(saved);
-    }
-  }, []);
 
   function toggleTheme() {
     const next =

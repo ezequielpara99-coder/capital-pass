@@ -3,7 +3,6 @@
 import Link from "next/link";
 import {
   CSSProperties,
-  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -48,18 +47,18 @@ export default function VentasPanel({
   metrics,
   sales,
 }: Props) {
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window === "undefined") return "dark";
+    try {
+      const saved = localStorage.getItem("capital-pass-theme");
+      return saved === "light" ? "light" : "dark";
+    } catch {
+      return "dark";
+    }
+  });
   const [search, setSearch] = useState("");
   const [channel, setChannel] = useState("all");
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("capital-pass-theme");
-
-    if (saved === "dark" || saved === "light") {
-      setTheme(saved);
-    }
-  }, []);
 
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";

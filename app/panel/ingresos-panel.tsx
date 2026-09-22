@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   CSSProperties,
   FormEvent,
-  useEffect,
   useState,
 } from "react";
 
@@ -58,7 +57,15 @@ export default function IngresosPanel({
   recentEntries,
 }: Props) {
   const [theme, setTheme] =
-    useState<Theme>("dark");
+    useState<Theme>(() => {
+      if (typeof window === "undefined") return "dark";
+      try {
+        const saved = localStorage.getItem("capital-pass-theme");
+        return saved === "light" ? "light" : "dark";
+      } catch {
+        return "dark";
+      }
+    });
 
   const [modalOpen, setModalOpen] =
     useState(false);
@@ -86,24 +93,6 @@ export default function IngresosPanel({
 
   const [password, setPassword] =
     useState("");
-
-  // =====================================================
-  // TEMA
-  // =====================================================
-
-  useEffect(() => {
-    const saved =
-      localStorage.getItem(
-        "capital-pass-theme"
-      );
-
-    if (
-      saved === "light" ||
-      saved === "dark"
-    ) {
-      setTheme(saved);
-    }
-  }, []);
 
   function toggleTheme() {
     const next =
