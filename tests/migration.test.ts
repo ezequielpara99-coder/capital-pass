@@ -36,6 +36,7 @@ const packsOnlineMigration = readFileSync(new URL("../supabase/migrations/202609
 const presupuestosClientesMigration = readFileSync(new URL("../supabase/migrations/20260943_presupuestos_clientes.sql", import.meta.url), "utf8");
 const estadosYPaquetesMigration = readFileSync(new URL("../supabase/migrations/20260944_estados_y_paquetes.sql", import.meta.url), "utf8");
 const notasEnPaquetesMigration = readFileSync(new URL("../supabase/migrations/20260945_notas_en_paquetes.sql", import.meta.url), "utf8");
+const correccionesRevisionMigration = readFileSync(new URL("../supabase/migrations/20260946_correcciones_revision.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -118,6 +119,7 @@ async function database() {
   await db.exec(presupuestosClientesMigration);
   await db.exec(estadosYPaquetesMigration);
   await db.exec(notasEnPaquetesMigration);
+  await db.exec(correccionesRevisionMigration);
   return db;
 }
 
@@ -308,6 +310,28 @@ test("ventas online: carrito, confirmacion, cupo y limpieza de pendientes", asyn
     /pack no existe o no esta disponible/
   );
 
+  // Un reembolso/contracargo sobre una venta YA confirmada anula las
+  // entradas emitidas (no deben poder usarse en la puerta) y libera el
+  // cupo -- antes quedaba "confirmed" para siempre sin importar reembolsos
+  // posteriores del comprador. Tanda aparte para no alterar los conteos
+  // acumulados que ya verificaron los pasos anteriores.
+  const refundTicketType = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  await db.exec(`insert into ticket_types(id,event_id,name,price_minor,capacity,active,status)
+    values ('${refundTicketType}','${event}','Reembolso test',5000,2,true,'available');`);
+  const refundCart = `'[{"ticket_type_id":"${refundTicketType}","quantity":2}]'::jsonb`;
+  const refundSale = await scalar(`select sale_id::text from create_online_sale('${event}', ${refundCart}, ${buyer("999999")})`);
+  await db.query("select confirm_online_sale($1,'approved')", [refundSale]);
+  assert.equal(await scalar(`select status from ticket_types where id='${refundTicketType}'`), "sold_out", "se agoto con las 2 entradas confirmadas");
+
+  await db.query("select confirm_online_sale($1,'refunded')", [refundSale]);
+  assert.equal(await scalar(`select status from sales where id='${refundSale}'`), "refunded");
+  assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${refundSale}' and status='cancelled'`), 2, "las entradas ya emitidas se anulan");
+  assert.equal(await scalar(`select status from ticket_types where id='${refundTicketType}'`), "available", "el cupo liberado reactiva la tanda agotada");
+
+  // Idempotente: un reintento del mismo aviso de reembolso no debe romper nada.
+  await db.query("select confirm_online_sale($1,'refunded')", [refundSale]);
+  assert.equal(await scalar(`select status from sales where id='${refundSale}'`), "refunded");
+
   await db.close();
 });
 
@@ -455,6 +479,19 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
   // Se revierte para no alterar los conteos que verifican los pasos siguientes.
   await db.query(`select adjust_bar_stock('${bar}','${eventProduct}',-1,'ajuste','Revertir prueba de tope')`);
   assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 7);
+
+  // El producto de un ajuste tiene que pertenecer al MISMO evento que la
+  // barra -- antes no se validaba, permitiendo ajustar/inflar stock de un
+  // producto de otro evento u organizacion via adjust_bar_stock.
+  const otherEvent = "33333333-3333-4333-8333-333333333399";
+  const otherEventProduct = "88888888-8888-4888-8888-888888888802";
+  await db.exec(`insert into events(id,organization_id,status) values ('${otherEvent}','${org}','active');
+    insert into event_products(id,event_id,product_id,cost_price_minor,sale_price_minor,profit_margin_percent,total_stock,low_stock_threshold)
+      values ('${otherEventProduct}','${otherEvent}','${productId}',10000,2000,50,10,3);`);
+  await assert.rejects(
+    () => db.query(`select adjust_bar_stock('${bar}','${otherEventProduct}',1,'ajuste','Producto de otro evento')`),
+    /no pertenece a este evento/
+  );
 
   // El bartender tambien puede vender sin atarse a una mesa (cliente en el mostrador).
   await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
@@ -622,6 +659,24 @@ test("upgrade de plan basica -> avanzada: cobra solo la diferencia prorrateada",
   // Reintento del webhook (mismo pago aplicado dos veces) es un no-op seguro.
   await db.query(`select cp_apply_upgrade_payment('${charge.id}','mp-payment-upgrade-1','approved',${charge.amount_minor},'ARS', now())`);
   assert.equal(await scalar(`select count(*)::int from plan_upgrade_charges where id = '${charge.id}' and status = 'approved'`), 1);
+
+  // Reembolso/contracargo sobre el MISMO pago ya aprobado: debe revertir el
+  // acceso (antes quedaba 'approved' para siempre sin importar reembolsos).
+  await db.query(`select cp_apply_upgrade_payment('${charge.id}','mp-payment-upgrade-1','refunded',${charge.amount_minor},'ARS', now())`);
+  assert.equal(await scalar(`select status from plan_upgrade_charges where id = '${charge.id}'`), "rejected");
+  // cp_org_has_stock_access recalcula en vivo contra este status, asi que
+  // ya no cuenta este cargo como aprobado (una prueba de 7 dias no
+  // estrenada puede seguir dando acceso por otro lado, eso es correcto).
+  assert.equal(
+    await scalar(`select exists(select 1 from plan_upgrade_charges where organization_id = '${org}' and status = 'approved')`),
+    false, "el reembolso debe quitar el cargo aprobado que daba acceso"
+  );
+
+  // Un aviso de reembolso de OTRO pago (distinto payment_id) no debe poder
+  // revertir un cargo ajeno.
+  await db.query(`update plan_upgrade_charges set status='approved', mercadopago_payment_id='mp-payment-upgrade-1' where id='${charge.id}'`);
+  await db.query(`select cp_apply_upgrade_payment('${charge.id}','otro-payment-id','refunded',${charge.amount_minor},'ARS', now())`);
+  assert.equal(await scalar(`select status from plan_upgrade_charges where id = '${charge.id}'`), "approved", "un pago distinto no debe poder revertir el acceso ya otorgado");
 
   await db.close();
 });
