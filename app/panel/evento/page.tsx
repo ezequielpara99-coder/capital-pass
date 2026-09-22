@@ -2679,7 +2679,7 @@ function PacksSection({
   const ticketTypeName = (id: string) => ticketTypes.find((t) => t.id === id)?.name ?? "Tanda";
 
   return (
-    <Section title="Packs" description="Vendé varias entradas de una misma tanda juntas, a un precio con descuento. Se venden desde RRPP/puerta.">
+    <Section title="Packs" description="Vendé varias entradas de una misma tanda juntas, a un precio con descuento. Se venden desde RRPP/puerta y también online, en la página del evento.">
       {packs.length > 0 && (
         <div className="mb-6 space-y-2">
           {packs.map((pack) => (

@@ -7,7 +7,7 @@ import { safeCheckoutUrl } from "../../../../../lib/billing/rules";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type CartItem = { ticketTypeId: string; quantity: number };
+type CartItem = { ticketTypeId: string; quantity: number; packId?: string };
 
 export async function POST(
   request: NextRequest,
@@ -24,6 +24,9 @@ export async function POST(
     }
     for (const item of items) {
       if (typeof item.ticketTypeId !== "string" || !Number.isInteger(item.quantity) || item.quantity <= 0 || item.quantity > 20) {
+        return NextResponse.json({ ok: false, error: "El carrito tiene datos inválidos." }, { status: 400 });
+      }
+      if (item.packId !== undefined && typeof item.packId !== "string") {
         return NextResponse.json({ ok: false, error: "El carrito tiene datos inválidos." }, { status: 400 });
       }
     }
@@ -43,7 +46,7 @@ export async function POST(
 
     const created = await admin.rpc("create_online_sale", {
       p_event_id: event.id,
-      p_items: items.map((item) => ({ ticket_type_id: item.ticketTypeId, quantity: item.quantity })),
+      p_items: items.map((item) => ({ ticket_type_id: item.ticketTypeId, quantity: item.quantity, pack_id: item.packId ?? null })),
       p_buyer_first_name: String(body.firstName ?? "").trim(),
       p_buyer_last_name: String(body.lastName ?? "").trim(),
       p_buyer_dni: String(body.dni ?? "").trim(),
@@ -55,7 +58,7 @@ export async function POST(
       return NextResponse.json({ ok: false, error: created.error.message.replace(/^[A-Z0-9]{5}:\s*/, "") || "No pudimos registrar la compra." }, { status: 400 });
     }
 
-    type SaleItem = { ticket_type_id: string; name: string; quantity: number; unit_price_minor: number };
+    type SaleItem = { ticket_type_id: string; name: string; quantity: number; unit_price_minor: number; line_total_minor: number; pack_id: string | null };
     const sale = created.data?.[0] as { sale_id: string; total_minor: number; items: SaleItem[] } | undefined;
     if (!sale) throw new Error("La compra no devolvió un identificador.");
 
@@ -65,12 +68,15 @@ export async function POST(
     // Los items de la preference salen siempre de lo que create_online_sale
     // valido y reservo (mismo lock que valida el cupo) -- nunca de una
     // lectura aparte, para que el monto que ve el comprador y el que
-    // despues verifica el webhook nunca puedan desincronizarse.
+    // despues verifica el webhook nunca puedan desincronizarse. Un pack
+    // usa quantity=1 con el TOTAL de la linea (line_total_minor): el precio
+    // prorrateado por entrada puede no ser exactamente divisible, y así el
+    // cobro real nunca se desvía del total ya validado en la base.
     const preferenceItems = sale.items.map((item) => ({
       id: item.ticket_type_id,
       title: `${event.name} - ${item.name}`,
-      quantity: item.quantity,
-      unit_price: Number(item.unit_price_minor),
+      quantity: item.pack_id ? 1 : item.quantity,
+      unit_price: item.pack_id ? Number(item.line_total_minor) : Number(item.unit_price_minor),
       currency_id: "ARS",
     }));
 

@@ -31,6 +31,8 @@ const colorEntradaMigration = readFileSync(new URL("../supabase/migrations/20260
 const presupuestosMigration = readFileSync(new URL("../supabase/migrations/20260938_presupuestos.sql", import.meta.url), "utf8");
 const bloquearStockMigration = readFileSync(new URL("../supabase/migrations/20260939_bloquear_stock.sql", import.meta.url), "utf8");
 const presenciaMigration = readFileSync(new URL("../supabase/migrations/20260940_presencia_organizadores.sql", import.meta.url), "utf8");
+const restaurarComboMigration = readFileSync(new URL("../supabase/migrations/20260941_restaurar_combo_al_cancelar.sql", import.meta.url), "utf8");
+const packsOnlineMigration = readFileSync(new URL("../supabase/migrations/20260942_packs_online.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -108,6 +110,8 @@ async function database() {
   await db.exec(presupuestosMigration);
   await db.exec(bloquearStockMigration);
   await db.exec(presenciaMigration);
+  await db.exec(restaurarComboMigration);
+  await db.exec(packsOnlineMigration);
   return db;
 }
 
@@ -200,9 +204,12 @@ test("ventas online: carrito, confirmacion, cupo y limpieza de pendientes", asyn
     `select sale_id, items from create_online_sale('${event}', ${cart(2)}, ${buyer("222222")})`
   );
   const sale = created.rows[0].sale_id;
-  const returnedItems = created.rows[0].items as { ticket_type_id: string; name: string; quantity: number; unit_price_minor: number }[];
-  assert.deepEqual(returnedItems, [{ ticket_type_id: ticketType, name: "General", quantity: 2, unit_price_minor: 5000 }],
-    "el detalle de items debe salir de la misma lectura que valida el cupo, no de una lectura aparte del caller");
+  const returnedItems = created.rows[0].items as { ticket_type_id: string; name: string; quantity: number; unit_price_minor: number; line_total_minor: number; pack_id: string | null }[];
+  assert.deepEqual(
+    returnedItems,
+    [{ ticket_type_id: ticketType, name: "General", quantity: 2, unit_price_minor: 5000, line_total_minor: 10000, pack_id: null }],
+    "el detalle de items debe salir de la misma lectura que valida el cupo, no de una lectura aparte del caller"
+  );
   assert.equal(await scalar(`select status from sales where id='${sale}'`), "pending_approval");
   assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${sale}'`), 0, "no se emiten entradas hasta confirmar el pago");
 
@@ -261,6 +268,39 @@ test("ventas online: carrito, confirmacion, cupo y limpieza de pendientes", asyn
   await db.query("select confirm_online_sale($1,'approved')", [lateStaleSale]);
   assert.equal(await scalar(`select status from sales where id='${lateStaleSale}'`), "cancelled", "no debe revivir ni sobrevender si ya no hay cupo");
   assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${lateStaleSale}'`), 0);
+
+  // Pack online: 1 "pack" en el carrito genera todas las entradas del pack
+  // (quantity_per_pack), cobra el precio del pack (no N x precio de lista),
+  // y devuelve line_total_minor exacto para que el checkout arme el cobro
+  // de Mercado Pago sin ningun riesgo de redondeo.
+  const packTicketType = "88888888-8888-4888-8888-888888888888";
+  const pack = "99999999-9999-4999-8999-999999999999";
+  await db.exec(`insert into ticket_types(id,event_id,name,price_minor,capacity,active,status)
+      values ('${packTicketType}','${event}','Pack General',5000,20,true,'available');
+    insert into ticket_packs(id,event_id,ticket_type_id,name,quantity_per_pack,price_minor)
+      values ('${pack}','${event}','${packTicketType}','Pack x3',3,13000);`);
+
+  const packCart = `'[{"ticket_type_id":"${packTicketType}","pack_id":"${pack}","quantity":2}]'::jsonb`;
+  const packSale = await db.query<{ sale_id: string; total_minor: string; items: unknown }>(
+    `select sale_id, total_minor, items from create_online_sale('${event}', ${packCart}, ${buyer("777777")})`
+  );
+  const packItems = packSale.rows[0].items as { name: string; quantity: number; unit_price_minor: number; line_total_minor: number; pack_id: string }[];
+  assert.equal(Number(packSale.rows[0].total_minor), 26000, "2 packs de $13000 = $26000, no 6 x 5000");
+  assert.equal(packItems[0].quantity, 6, "2 packs x 3 entradas = 6");
+  assert.equal(packItems[0].name, "Pack x3", "el nombre que ve el comprador es el del pack, no el de la tanda");
+  assert.equal(packItems[0].line_total_minor, 26000);
+  assert.equal(packItems[0].pack_id, pack);
+
+  await db.query("select confirm_online_sale($1,'approved')", [packSale.rows[0].sale_id]);
+  assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${packSale.rows[0].sale_id}'`), 6, "confirmar la venta emite las 6 entradas del pack");
+  assert.equal(await scalar(`select pack_id::text from sale_items where sale_id='${packSale.rows[0].sale_id}'`), pack);
+
+  // Un pack inactivo o de otro evento no se puede comprar online.
+  await db.exec(`update ticket_packs set active = false where id = '${pack}'`);
+  await assert.rejects(
+    () => db.query(`select * from create_online_sale('${event}', ${packCart}, ${buyer("888888")})`),
+    /pack no existe o no esta disponible/
+  );
 
   await db.close();
 });
@@ -797,6 +837,33 @@ test("combos (entrada + consumicion) y packs de entradas", async () => {
     () => db.query(`select redeem_combo_ticket('${otherBar}','PREMIUMCODE1','${eventProductFernet}',1)`),
     /No estas asignado a esta barra/
   );
+
+  // Cancelar un canje de combo tipo 'producto' devuelve el stock DE LA BARRA
+  // (ya se probaba antes) Y el saldo INCLUIDO EN LA ENTRADA (esto es lo nuevo).
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);`);
+  const vipRedeemSaleId = await scalar(`select id::text from bar_sales where ticket_id = '${vipTicketId}' and payment_method = 'combo'`);
+  await db.query(`select cancel_bar_sale('${vipRedeemSaleId}','Bartender se equivoco de producto')`);
+  assert.equal(await scalar(`select combo_remaining_quantity from tickets where id = '${vipTicketId}'`), 2, "vuelve a quedar el Fernet incluido sin canjear");
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProductFernet}'`), 9, "el stock de la barra tambien vuelve");
+
+  // Mismo caso para un combo tipo 'credito': cancelar devuelve el credito gastado.
+  const premiumCocaSaleId = await scalar(`select id::text from bar_sales where ticket_id = '${premiumTicketId}' and event_product_id = '${eventProductCoca}' and payment_method = 'combo'`);
+  assert.equal(await scalar(`select combo_remaining_credit_minor from tickets where id = '${premiumTicketId}'`), 2000);
+  await db.query(`select cancel_bar_sale('${premiumCocaSaleId}','Bartender se equivoco de producto')`);
+  assert.equal(await scalar(`select combo_remaining_credit_minor from tickets where id = '${premiumTicketId}'`), 3000, "los $1000 de la Coca cancelada vuelven al credito de la entrada");
+
+  // No se puede cancelar dos veces la misma venta.
+  await assert.rejects(
+    () => db.query(`select cancel_bar_sale('${vipRedeemSaleId}','De nuevo')`),
+    /ya estaba cancelada/
+  );
+
+  // Ahora que volvio a tener 2 Fernet incluidos, se puede volver a canjear.
+  await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
+  const redeemAfterCancel = await db.query<{ remaining_quantity: number }>(
+    `select * from redeem_combo_ticket('${bar}','VIPCODE1','${eventProductFernet}',2)`
+  );
+  assert.equal(redeemAfterCancel.rows[0].remaining_quantity, 0, "se pueden volver a canjear los 2 Fernet completos");
 
   await db.close();
 });

@@ -12,11 +12,27 @@ type TicketType = {
   active: boolean;
 };
 
+type Pack = {
+  id: string;
+  name: string;
+  quantityPerPack: number;
+  priceMinor: number;
+  ticketTypeId: string;
+  ticketTypeName: string;
+  available: boolean;
+};
+
 type Props = {
   slug: string;
   canBuyOnline: boolean;
   ticketTypes: TicketType[];
+  packs: Pack[];
 };
+
+// Clave de carrito: distingue una tanda suelta de un pack (viven en
+// espacios de id separados, pero por las dudas no se pisan nunca).
+const ticketKey = (id: string) => `ticket:${id}`;
+const packKey = (id: string) => `pack:${id}`;
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", {
@@ -34,7 +50,7 @@ function formatTicketStatus(status: string) {
   return status;
 }
 
-export default function EventCheckout({ slug, canBuyOnline, ticketTypes }: Props) {
+export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }: Props) {
   const searchParams = useSearchParams();
   const returningSaleId = searchParams.get("venta");
 
@@ -48,19 +64,26 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes }: Props
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const cartItems = useMemo(
+  const ticketCartItems = useMemo(
     () =>
       ticketTypes
-        .map((ticket) => ({ ticket, quantity: quantities[ticket.id] ?? 0 }))
+        .map((ticket) => ({ ticket, quantity: quantities[ticketKey(ticket.id)] ?? 0 }))
         .filter((item) => item.quantity > 0),
     [ticketTypes, quantities]
   );
 
-  const total = cartItems.reduce((sum, item) => sum + item.ticket.priceMinor * item.quantity, 0);
-  const hasItems = cartItems.length > 0;
+  const packCartItems = useMemo(
+    () => packs.map((pack) => ({ pack, quantity: quantities[packKey(pack.id)] ?? 0 })).filter((item) => item.quantity > 0),
+    [packs, quantities]
+  );
 
-  function setQuantity(ticketId: string, quantity: number) {
-    setQuantities((previous) => ({ ...previous, [ticketId]: Math.max(0, Math.min(20, quantity)) }));
+  const total =
+    ticketCartItems.reduce((sum, item) => sum + item.ticket.priceMinor * item.quantity, 0) +
+    packCartItems.reduce((sum, item) => sum + item.pack.priceMinor * item.quantity, 0);
+  const hasItems = ticketCartItems.length > 0 || packCartItems.length > 0;
+
+  function setQuantity(key: string, quantity: number) {
+    setQuantities((previous) => ({ ...previous, [key]: Math.max(0, Math.min(20, quantity)) }));
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -75,7 +98,10 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes }: Props
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items: cartItems.map((item) => ({ ticketTypeId: item.ticket.id, quantity: item.quantity })),
+          items: [
+            ...ticketCartItems.map((item) => ({ ticketTypeId: item.ticket.id, quantity: item.quantity })),
+            ...packCartItems.map((item) => ({ ticketTypeId: item.pack.ticketTypeId, packId: item.pack.id, quantity: item.quantity })),
+          ],
           firstName,
           lastName,
           dni,
@@ -112,7 +138,7 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes }: Props
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         {ticketTypes.map((ticket) => {
           const available = ticket.status === "available" && ticket.active;
-          const quantity = quantities[ticket.id] ?? 0;
+          const quantity = quantities[ticketKey(ticket.id)] ?? 0;
 
           return (
             <article
@@ -149,7 +175,7 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes }: Props
                   <div className="mt-5 flex h-12 w-fit items-center rounded-xl border border-white/10 bg-black/20">
                     <button
                       type="button"
-                      onClick={() => setQuantity(ticket.id, quantity - 1)}
+                      onClick={() => setQuantity(ticketKey(ticket.id), quantity - 1)}
                       className="h-full w-11 text-lg text-white/70"
                       aria-label={`Restar ${ticket.name}`}
                     >
@@ -158,7 +184,7 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes }: Props
                     <div className="w-10 text-center text-base font-bold">{quantity}</div>
                     <button
                       type="button"
-                      onClick={() => setQuantity(ticket.id, quantity + 1)}
+                      onClick={() => setQuantity(ticketKey(ticket.id), quantity + 1)}
                       className="h-full w-11 text-lg text-white/70"
                       aria-label={`Sumar ${ticket.name}`}
                     >
@@ -172,9 +198,74 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes }: Props
         })}
       </div>
 
-      {ticketTypes.length === 0 && (
+      {ticketTypes.length === 0 && packs.length === 0 && (
         <div className="mt-5 rounded-[24px] border border-white/[0.08] bg-white/[0.025] p-7 text-sm text-white/35">
           No hay entradas disponibles para mostrar actualmente.
+        </div>
+      )}
+
+      {packs.length > 0 && (
+        <div className="mt-8">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#ff6f4d]">Packs</p>
+          <h3 className="mt-2 text-xl font-semibold">Varias entradas, un solo precio</h3>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            {packs.map((pack) => {
+              const quantity = quantities[packKey(pack.id)] ?? 0;
+
+              return (
+                <article
+                  key={pack.id}
+                  className="group relative overflow-hidden rounded-[26px] border border-emerald-400/[0.18] bg-gradient-to-br from-emerald-400/[0.06] via-white/[0.02] to-emerald-500/[0.02] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,.035)] transition duration-200 hover:-translate-y-0.5"
+                >
+                  <div className="relative">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-xl font-bold">{pack.name}</h3>
+                        <p className="mt-2 text-sm leading-6 text-white/35">
+                          {pack.quantityPerPack} entradas {pack.ticketTypeName ? `de ${pack.ticketTypeName}` : ""}
+                        </p>
+                      </div>
+
+                      <span
+                        className={`shrink-0 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${
+                          pack.available
+                            ? "border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-200"
+                            : "border-[#ff5a2a]/20 bg-[#ff5a2a]/[0.07] text-[#ff9b82]"
+                        }`}
+                      >
+                        {pack.available ? "Disponible" : "No disponible"}
+                      </span>
+                    </div>
+
+                    <p className="mt-7 text-3xl font-black tracking-tight">{formatMoney(pack.priceMinor)}</p>
+
+                    {canBuyOnline && pack.available && (
+                      <div className="mt-5 flex h-12 w-fit items-center rounded-xl border border-white/10 bg-black/20">
+                        <button
+                          type="button"
+                          onClick={() => setQuantity(packKey(pack.id), quantity - 1)}
+                          className="h-full w-11 text-lg text-white/70"
+                          aria-label={`Restar ${pack.name}`}
+                        >
+                          −
+                        </button>
+                        <div className="w-10 text-center text-base font-bold">{quantity}</div>
+                        <button
+                          type="button"
+                          onClick={() => setQuantity(packKey(pack.id), quantity + 1)}
+                          className="h-full w-11 text-lg text-white/70"
+                          aria-label={`Sumar ${pack.name}`}
+                        >
+                          +
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
         </div>
       )}
 

@@ -57,6 +57,21 @@ export default async function PublicEventPage({
         ascending: true,
       });
 
+  const { data: packRows } = await admin
+    .from("ticket_packs")
+    .select(`
+      id,
+      name,
+      quantity_per_pack,
+      price_minor,
+      active,
+      ticket_type_id,
+      ticket_types ( name, status, active )
+    `)
+    .eq("event_id", event.id)
+    .eq("active", true)
+    .order("price_minor", { ascending: true });
+
   const { data: mpAccount } = await admin
     .from("organization_mercadopago_accounts")
     .select("organization_id")
@@ -385,6 +400,18 @@ export default async function PublicEventPage({
                 status: ticket.status,
                 active: ticket.active,
               }))}
+              packs={(packRows ?? []).map((pack) => {
+                const ticketType = Array.isArray(pack.ticket_types) ? pack.ticket_types[0] : pack.ticket_types;
+                return {
+                  id: pack.id,
+                  name: pack.name,
+                  quantityPerPack: pack.quantity_per_pack,
+                  priceMinor: Number(pack.price_minor),
+                  ticketTypeId: pack.ticket_type_id,
+                  ticketTypeName: ticketType?.name ?? "",
+                  available: Boolean(ticketType?.active && ticketType?.status === "available"),
+                };
+              })}
             />
 
           </section>
