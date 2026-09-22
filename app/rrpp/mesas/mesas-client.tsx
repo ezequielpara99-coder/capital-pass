@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "../../../lib/supabase/client";
 
@@ -131,13 +132,16 @@ export default function MesasClient({ eventId, eventName }: { eventId: string; e
       </div>
 
       <div className="relative z-10 mx-auto max-w-lg px-5 py-7 sm:px-7 sm:py-10">
-        <header className="mb-7 flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-[#ff9b82]">Capital Pass · RRPP</p>
+        <header className="mb-7 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <Link href="/rrpp" className="text-xs font-medium text-white/40 transition hover:text-white">
+              ← Volver
+            </Link>
+            <p className="mt-3 text-xs uppercase tracking-[0.2em] text-[#ff9b82]">Capital Pass · RRPP</p>
             <h1 className="mt-2 text-2xl font-bold">Vender mesa</h1>
             <p className="mt-1 text-sm text-white/35">{eventName}</p>
           </div>
-          <button type="button" onClick={logout} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-xs font-medium text-white/55">
+          <button type="button" onClick={logout} className="shrink-0 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-xs font-medium text-white/55">
             Salir
           </button>
         </header>
