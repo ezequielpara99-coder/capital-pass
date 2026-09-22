@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { createClient } from "../../../lib/supabase/server";
+import AdministrarButton from "./administrar-button";
 
 type EventRow = {
   id: string;
@@ -402,15 +403,17 @@ export default async function EventosPage() {
 
                       {/* ACCIONES */}
 
-                      <div className="mt-7 grid gap-2 sm:grid-cols-2">
+                      <div className="mt-7 grid gap-2 sm:grid-cols-3">
+
+                        <AdministrarButton eventId={event.id} />
 
                         <Link
                           href={`/panel/evento?eventId=${event.id}`}
-                          className="flex h-11 items-center justify-between bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] px-4 text-[9px] font-black uppercase tracking-[0.13em] text-white transition hover:brightness-110"
+                          className="flex h-11 items-center justify-between border border-white/[0.09] bg-white/[0.02] px-4 text-[9px] font-black uppercase tracking-[0.13em] text-white/45 transition hover:border-white/20 hover:bg-white/[0.04] hover:text-white"
                         >
 
                           <span>
-                            Administrar
+                            Configurar
                           </span>
 
                           <span className="text-sm">
