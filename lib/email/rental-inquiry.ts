@@ -78,11 +78,21 @@ export async function sendRentalInquiryNotification(input: RentalInquiryInput): 
     </div>
   `;
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from, to, subject, text, html }),
-  });
+  // Un error de red real (no solo un !response.ok) lanzaria una excepcion
+  // sin capturar -- el caller (POST /api/rentals/inquiries) ya guardo la
+  // consulta en la base antes de llegar aca, asi que dejar que esto tire
+  // haria que el visitante vea un error 500 pese a que su consulta si
+  // quedo registrada.
+  let response: Response;
+  try {
+    response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to, subject, text, html }),
+    });
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Error de red al contactar Resend." };
+  }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "No se pudo leer el error de Resend.");

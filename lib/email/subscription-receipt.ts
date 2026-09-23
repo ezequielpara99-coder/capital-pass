@@ -162,24 +162,32 @@ export async function sendSubscriptionReceipt(
     </div>
   `;
 
-  const response = await fetch(
-    "https://api.resend.com/emails",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        ...(input.paymentId ? { "Idempotency-Key": `subscription-receipt-${input.paymentId}` } : {}),
-      },
-      body: JSON.stringify({
-        from,
-        to: input.to,
-        subject,
-        text,
-        html,
-      }),
-    }
-  );
+  // Un error de red real (no solo un !response.ok) lanzaria una excepcion
+  // sin capturar hacia el caller (que ya registro el pago verificado
+  // antes de intentar el recibo).
+  let response: Response;
+  try {
+    response = await fetch(
+      "https://api.resend.com/emails",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          ...(input.paymentId ? { "Idempotency-Key": `subscription-receipt-${input.paymentId}` } : {}),
+        },
+        body: JSON.stringify({
+          from,
+          to: input.to,
+          subject,
+          text,
+          html,
+        }),
+      }
+    );
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Error de red al contactar Resend." };
+  }
 
   if (!response.ok) {
     const detail =

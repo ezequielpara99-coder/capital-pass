@@ -47,6 +47,14 @@ type Report = {
     organizerRefunded: number;
     organizerNetRevenue: number;
 
+    onlineRevenue: number;
+    onlineRefunded: number;
+    onlineNetRevenue: number;
+
+    mesaRevenue: number;
+    mesaRefunded: number;
+    mesaNetRevenue: number;
+
     rrppCommissionGenerated: number;
     rrppCommissionPaid: number;
     rrppCommissionPending: number;
@@ -54,6 +62,8 @@ type Report = {
     rrppSales: number;
     doorSales: number;
     organizerSales: number;
+    onlineSales: number;
+    mesaSales: number;
 
     usedTickets: number;
     pendingTickets: number;
@@ -1610,6 +1620,42 @@ function EventReport({
               metrics.doorNetRevenue
             }
           />
+
+          {metrics.onlineSales > 0 && (
+            <ChannelRow
+              name="Online"
+              sales={
+                metrics.onlineSales
+              }
+              revenue={
+                metrics.onlineRevenue
+              }
+              refunded={
+                metrics.onlineRefunded
+              }
+              netRevenue={
+                metrics.onlineNetRevenue
+              }
+            />
+          )}
+
+          {metrics.mesaSales > 0 && (
+            <ChannelRow
+              name="Mesas"
+              sales={
+                metrics.mesaSales
+              }
+              revenue={
+                metrics.mesaRevenue
+              }
+              refunded={
+                metrics.mesaRefunded
+              }
+              netRevenue={
+                metrics.mesaNetRevenue
+              }
+            />
+          )}
 
         </div>
 

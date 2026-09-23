@@ -536,7 +536,15 @@ export default function ControlPage() {
   ) {
     e.preventDefault();
 
-    if (!event) {
+    // Mismo guard sincronico que usa el escaneo por camara (processingQRRef):
+    // el disabled del boton depende de que React re-renderice, lo que no
+    // alcanza a frenar un doble "Enter" muy rapido (tipico de un lector de
+    // codigo de barras/QR por USB o Bluetooth que emula teclado y a veces
+    // "rebota", mandando el mismo codigo dos veces en milisegundos).
+    if (
+      !event ||
+      processingQRRef.current
+    ) {
       return;
     }
 
@@ -550,6 +558,8 @@ export default function ControlPage() {
 
       return;
     }
+
+    processingQRRef.current = true;
 
     setValidating(true);
     setError("");
@@ -601,6 +611,9 @@ export default function ControlPage() {
       );
     } finally {
       setValidating(false);
+
+      processingQRRef.current =
+        false;
     }
   }
 
@@ -777,7 +790,7 @@ export default function ControlPage() {
                     Comprador
                   </p>
 
-                  <p className="mt-2 text-xl font-bold">
+                  <p className="mt-2 break-words text-xl font-bold">
                     {
                       validation.buyer_name
                     }
@@ -819,7 +832,7 @@ export default function ControlPage() {
                     Código
                   </p>
 
-                  <p className="mt-2 font-mono font-semibold tracking-[0.08em]">
+                  <p className="mt-2 break-all font-mono font-semibold tracking-[0.08em]">
                     {
                       validation.manual_code
                     }
@@ -1080,10 +1093,12 @@ export default function ControlPage() {
           </div>
         )}
 
-        {/* CÓDIGO MANUAL */}
+        {/* CÓDIGO MANUAL — siempre visible, incluso con la cámara
+            abierta: si el QR no escanea (poca/mucha luz, pantalla del
+            asistente), esta es la unica alternativa real y tiene que
+            estar igual de accesible, sin obligar a cerrar la camara primero. */}
 
-        {!scannerOpen && (
-          <>
+        <>
             <div className="my-8 flex items-center gap-4">
               <div className="h-px flex-1 bg-white/10" />
 
@@ -1144,8 +1159,7 @@ export default function ControlPage() {
                 </button>
               </form>
             </section>
-          </>
-        )}
+        </>
 
         <p className="mt-auto pt-8 text-center text-[10px] uppercase tracking-[0.22em] text-white/15">
           Capital Pass · Access Control

@@ -618,6 +618,39 @@ export default async function InformesPage() {
           0
         );
 
+    // "Venta bruta"/"Venta neta" suman TODOS los canales (rrpp, puerta,
+    // organizador, online y mesa), pero el desglose de mas abajo solo
+    // mostraba rrpp/puerta/organizador -- la suma de esas filas nunca
+    // coincidia con la venta bruta, sin ninguna aclaracion. Se agregan
+    // online y mesa para que el desglose sea completo.
+    const onlineRevenue =
+      eventSales
+        .filter(
+          (sale) =>
+            sale.channel ===
+            "online"
+        )
+        .reduce(
+          (total, sale) =>
+            total +
+            Number(sale.total_minor),
+          0
+        );
+
+    const mesaRevenue =
+      eventSales
+        .filter(
+          (sale) =>
+            sale.channel ===
+            "mesa"
+        )
+        .reduce(
+          (total, sale) =>
+            total +
+            Number(sale.total_minor),
+          0
+        );
+
     const eventSaleMap =
       new Map(
         eventSales.map(
@@ -662,6 +695,16 @@ export default async function InformesPage() {
         "organizer"
       );
 
+    const onlineRefunded =
+      refundedByChannel(
+        "online"
+      );
+
+    const mesaRefunded =
+      refundedByChannel(
+        "mesa"
+      );
+
     const rrppNetRevenue =
       Math.max(
         0,
@@ -683,6 +726,20 @@ export default async function InformesPage() {
           organizerRefunded
       );
 
+    const onlineNetRevenue =
+      Math.max(
+        0,
+        onlineRevenue -
+          onlineRefunded
+      );
+
+    const mesaNetRevenue =
+      Math.max(
+        0,
+        mesaRevenue -
+          mesaRefunded
+      );
+
     const rrppSales =
       eventSales.filter(
         (sale) =>
@@ -700,6 +757,20 @@ export default async function InformesPage() {
         (sale) =>
           sale.channel ===
           "organizer"
+      ).length;
+
+    const onlineSales =
+      eventSales.filter(
+        (sale) =>
+          sale.channel ===
+          "online"
+      ).length;
+
+    const mesaSales =
+      eventSales.filter(
+        (sale) =>
+          sale.channel ===
+          "mesa"
       ).length;
 
     const buyerCount =
@@ -1023,12 +1094,42 @@ export default async function InformesPage() {
               ?.channel ??
             "organizer";
 
+          // La comision se calcula SOLO sobre las ventas de este vendedor
+          // que fueron por canal "rrpp" -- antes se decidia con el canal
+          // de la primera venta (sellerSales[0], sin orden garantizado),
+          // asi que un RRPP que tambien vendio una mesa podia perder toda
+          // su comision (si la mesa quedaba primera) o cobrar comision
+          // sobre plata de mesa/barra que no le corresponde (si quedaba
+          // despues). "rrppStaff" no depende del canal de ninguna venta:
+          // es la asignacion real de ese miembro como RRPP del evento.
+          const rrppSales =
+            sellerSales.filter(
+              (sale) =>
+                sale.channel ===
+                "rrpp"
+            );
+
+          const rrppSaleIds =
+            new Set(
+              rrppSales.map(
+                (sale) => sale.id
+              )
+            );
+
+          const rrppRevenue =
+            rrppSales.reduce(
+              (total, sale) =>
+                total +
+                Number(
+                  sale.total_minor
+                ),
+              0
+            );
+
           const rrppStaff =
-            channel === "rrpp"
-              ? rrppStaffByMember.get(
-                  sellerId
-                )
-              : undefined;
+            rrppStaffByMember.get(
+              sellerId
+            );
 
           const commissionPercentage =
             rrppStaff
@@ -1038,28 +1139,35 @@ export default async function InformesPage() {
                 )
               : 0;
 
-          const sellerReturnAmount =
-            sellerReturns.reduce(
-              (total, item) =>
-                total +
-                Number(
-                  item.refund_amount_minor ??
-                    0
-                ),
-              0
-            );
+          const rrppReturnAmount =
+            sellerReturns
+              .filter(
+                (item) =>
+                  rrppSaleIds.has(
+                    item.sale_id
+                  )
+              )
+              .reduce(
+                (total, item) =>
+                  total +
+                  Number(
+                    item.refund_amount_minor ??
+                      0
+                  ),
+                0
+              );
 
           const commissionBase =
-            channel === "rrpp"
+            rrppStaff
               ? Math.max(
                   0,
-                  revenue -
-                    sellerReturnAmount
+                  rrppRevenue -
+                    rrppReturnAmount
                 )
               : 0;
 
           const commissionGenerated =
-            channel === "rrpp"
+            rrppStaff
               ? Math.round(
                   (commissionBase *
                     commissionPercentage) /
@@ -1272,6 +1380,18 @@ export default async function InformesPage() {
 
         organizerNetRevenue,
 
+        onlineRevenue,
+
+        onlineRefunded,
+
+        onlineNetRevenue,
+
+        mesaRevenue,
+
+        mesaRefunded,
+
+        mesaNetRevenue,
+
         rrppCommissionGenerated,
 
         rrppCommissionPaid,
@@ -1283,6 +1403,10 @@ export default async function InformesPage() {
         doorSales,
 
         organizerSales,
+
+        onlineSales,
+
+        mesaSales,
 
         usedTickets:
           usedTickets.length,

@@ -106,17 +106,27 @@ export async function sendRenewalReminder(
     </div>
   `;
 
-  const response = await fetch(
-    "https://api.resend.com/emails",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ from, to: input.to, subject, text, html }),
-    }
-  );
+  // Este envio corre dentro de un loop del cron diario de recordatorios
+  // (uno por suscripcion por vencer): un error de red real (timeout,
+  // DNS, conexion cortada -- no solo un !response.ok) lanzaba una
+  // excepcion sin capturar que cortaba todo el resto del lote, dejando
+  // sin recordatorio a las demas organizaciones ese dia.
+  let response: Response;
+  try {
+    response = await fetch(
+      "https://api.resend.com/emails",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ from, to: input.to, subject, text, html }),
+      }
+    );
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Error de red al contactar Resend." };
+  }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "No se pudo leer el error de Resend.");

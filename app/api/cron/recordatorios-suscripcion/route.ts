@@ -36,59 +36,84 @@ export async function GET(request: NextRequest) {
     (s) => s.reminder_sent_for_period_end !== s.current_period_end
   );
 
+  // Traer todo lo que hace falta de una sola vez (en vez de 2-3 queries MAS
+  // por cada suscripcion pendiente dentro del loop) -- este cron corre una
+  // vez al dia y la cantidad de suscripciones por vencer crece con la base
+  // de clientes, asi que el N+1 se hace mas lento con el tiempo.
+  const signupIds = pending.map((s) => s.signup_id).filter((id): id is string => Boolean(id));
+  const { data: signupRows } = signupIds.length
+    ? await admin.from("subscription_signups").select("id, first_name, last_name, organization_id").in("id", signupIds)
+    : { data: [] };
+  const signupById = new Map((signupRows ?? []).map((s) => [s.id, s]));
+
+  const organizationIds = [...new Set((signupRows ?? []).map((s) => s.organization_id).filter((id): id is string => Boolean(id)))];
+  const { data: upgradeRows } = organizationIds.length
+    ? await admin
+        .from("plan_upgrade_charges")
+        .select("organization_id, to_plan_id, period_end_at_charge, created_at")
+        .in("organization_id", organizationIds)
+        .eq("status", "approved")
+        .order("created_at", { ascending: false })
+    : { data: [] };
+
+  const planIds = [...new Set((upgradeRows ?? []).map((u) => u.to_plan_id))];
+  const { data: planRows } = planIds.length
+    ? await admin.from("subscription_plans").select("id, name").in("id", planIds)
+    : { data: [] };
+  const planNameById = new Map((planRows ?? []).map((p) => [p.id, p.name]));
+
   let sent = 0;
 
+  // Si UNA suscripcion falla (excepcion real de red, no solo un error
+  // suave) no puede cortar el resto del lote -- antes una sola falla
+  // dejaba sin recordatorio a todas las que venian despues en el array
+  // hasta la corrida del dia siguiente.
   for (const subscription of pending) {
-    const { data: signup } = subscription.signup_id
-      ? await admin.from("subscription_signups").select("first_name, last_name, organization_id").eq("id", subscription.signup_id).maybeSingle()
-      : { data: null };
+    try {
+      const signup = subscription.signup_id ? signupById.get(subscription.signup_id) : undefined;
+      const customerName = signup ? `${signup.first_name} ${signup.last_name}`.trim() : subscription.organization_name;
 
-    const customerName = signup ? `${signup.first_name} ${signup.last_name}`.trim() : subscription.organization_name;
-
-    // Si pago un upgrade a Gestion avanzada vigente para este mismo
-    // periodo, avisar con ese nombre de plan en vez del original (que no
-    // se toca al hacer un upgrade, para no arriesgar pisarlo con un
-    // reintento del webhook de la basica).
-    let planName = subscription.plan_name;
-    if (signup?.organization_id) {
-      const { data: upgrade } = await admin
-        .from("plan_upgrade_charges")
-        .select("to_plan_id")
-        .eq("organization_id", signup.organization_id)
-        .eq("status", "approved")
-        .eq("period_end_at_charge", subscription.current_period_end)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (upgrade?.to_plan_id) {
-        const { data: upgradedPlan } = await admin.from("subscription_plans").select("name").eq("id", upgrade.to_plan_id).maybeSingle();
-        if (upgradedPlan?.name) planName = upgradedPlan.name;
+      // Si pago un upgrade a Gestion avanzada vigente para este mismo
+      // periodo, avisar con ese nombre de plan en vez del original (que no
+      // se toca al hacer un upgrade, para no arriesgar pisarlo con un
+      // reintento del webhook de la basica).
+      let planName = subscription.plan_name;
+      if (signup?.organization_id) {
+        const upgrade = (upgradeRows ?? []).find(
+          (u) => u.organization_id === signup.organization_id && u.period_end_at_charge === subscription.current_period_end
+        );
+        if (upgrade?.to_plan_id) {
+          const upgradedPlanName = planNameById.get(upgrade.to_plan_id);
+          if (upgradedPlanName) planName = upgradedPlanName;
+        }
       }
+
+      const result = await sendRenewalReminder({
+        to: subscription.payer_email,
+        customerName,
+        organizationName: subscription.organization_name,
+        planName,
+        periodEnd: subscription.current_period_end,
+        renewUrl: `${getAppBaseUrl()}/cuenta`,
+      });
+
+      if (!result.ok) {
+        console.error("CRON RECORDATORIOS: no se pudo enviar el recordatorio.", subscription.id, result.error);
+        continue;
+      }
+
+      const updated = await admin.from("organization_subscriptions")
+        .update({ reminder_sent_for_period_end: subscription.current_period_end })
+        .eq("id", subscription.id);
+
+      if (updated.error) {
+        console.error("CRON RECORDATORIOS: se envio el email pero no se pudo marcar como enviado.", subscription.id);
+      }
+
+      sent++;
+    } catch (error) {
+      console.error("CRON RECORDATORIOS: fallo procesando una suscripcion, sigue con el resto.", subscription.id, error);
     }
-
-    const result = await sendRenewalReminder({
-      to: subscription.payer_email,
-      customerName,
-      organizationName: subscription.organization_name,
-      planName,
-      periodEnd: subscription.current_period_end,
-      renewUrl: `${getAppBaseUrl()}/cuenta`,
-    });
-
-    if (!result.ok) {
-      console.error("CRON RECORDATORIOS: no se pudo enviar el recordatorio.", subscription.id, result.error);
-      continue;
-    }
-
-    const updated = await admin.from("organization_subscriptions")
-      .update({ reminder_sent_for_period_end: subscription.current_period_end })
-      .eq("id", subscription.id);
-
-    if (updated.error) {
-      console.error("CRON RECORDATORIOS: se envio el email pero no se pudo marcar como enviado.", subscription.id);
-    }
-
-    sent++;
   }
 
   return NextResponse.json({ ok: true, sent, total: pending.length });

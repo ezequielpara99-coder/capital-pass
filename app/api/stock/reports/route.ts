@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
       .select("total_minor, payment_method")
       .eq("event_id", eventId)
       .eq("channel", "mesa")
-      .neq("status", "cancelled"),
+      .eq("status", "confirmed"),
   ]);
 
   const queryError = barSalesResult.error || barsResult.error || eventProductsResult.error || mesaSalesResult.error;
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
     barRow.totalMinor += saleMoney;
     byBar.set(sale.bar_id, barRow);
 
-    byPaymentMethod.set(sale.payment_method, (byPaymentMethod.get(sale.payment_method) ?? 0) + sale.total_minor);
+    byPaymentMethod.set(sale.payment_method, (byPaymentMethod.get(sale.payment_method) ?? 0) + saleMoney);
     barTotalMinor += saleMoney;
     if (isCombo) comboValueMinor += sale.total_minor;
   }

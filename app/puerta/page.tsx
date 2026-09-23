@@ -166,6 +166,9 @@ export default function DoorSellerPage() {
   const [saleResult, setSaleResult] =
     useState<SaleResult | null>(null);
 
+  const [whatsAppBlocked, setWhatsAppBlocked] =
+    useState(false);
+
   // =====================================================
   // CARGAR VENDEDOR + EVENTO
   // =====================================================
@@ -581,6 +584,8 @@ export default function DoorSellerPage() {
         ticketData as SaleResult
       );
 
+      setWhatsAppBlocked(false);
+
       // Ya validamos el número antes de cobrar, así que apenas están
       // listas las entradas abrimos WhatsApp con todo cargado — el
       // vendedor solo tiene que apretar enviar, no buscar el botón.
@@ -621,6 +626,7 @@ export default function DoorSellerPage() {
     setQuantity(1);
     setError("");
     setPackId("");
+    setWhatsAppBlocked(false);
 
     if (ticketTypes.length > 0) {
       setTicketTypeId(
@@ -642,6 +648,7 @@ export default function DoorSellerPage() {
 
     if (!number) {
       waWindow?.close();
+      setWhatsAppBlocked(true);
       return;
     }
 
@@ -679,7 +686,14 @@ export default function DoorSellerPage() {
     } else {
       // El navegador ya bloqueo la pestaña vacia (o no soporta abrirla
       // sin gesto directo) -- probamos igual, sabiendo que puede fallar.
-      window.open(url, "_blank");
+      const fallback = window.open(url, "_blank");
+      if (!fallback) {
+        // window.open no lanza excepcion cuando el navegador bloquea el
+        // popup, simplemente devuelve null -- sin este aviso, la pantalla
+        // de "venta confirmada" seguia mostrando el cartel fijo "Ya te
+        // abrimos WhatsApp" aunque en realidad no se haya abierto nada.
+        setWhatsAppBlocked(true);
+      }
     }
   }
 
@@ -772,10 +786,18 @@ export default function DoorSellerPage() {
             </p>
           </div>
 
-          <div className="mt-6 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-center text-sm text-emerald-200">
-            📲 Ya te abrimos WhatsApp con la entrada cargada — solo
-            apretá enviar.
-          </div>
+          {whatsAppBlocked ? (
+            <div className="mt-6 rounded-2xl border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-center text-sm text-amber-200">
+              ⚠️ El navegador bloqueó la apertura automática de WhatsApp.
+              Usá el botón &quot;Enviar por WhatsApp&quot; de cada entrada
+              para mandarla a mano.
+            </div>
+          ) : (
+            <div className="mt-6 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-center text-sm text-emerald-200">
+              📲 Ya te abrimos WhatsApp con la entrada cargada — solo
+              apretá enviar.
+            </div>
+          )}
 
           <div className="mt-7 grid grid-cols-2 gap-3">
             <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">

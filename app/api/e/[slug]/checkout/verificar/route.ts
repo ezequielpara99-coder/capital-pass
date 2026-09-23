@@ -6,6 +6,13 @@ import { validResourceId } from "../../../../../../lib/billing/rules";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Debajo de este intervalo, un pedido repetido para la misma venta no
+// vuelve a golpear la API de Mercado Pago -- solo devuelve el ultimo
+// estado conocido. Sin esto, cualquiera con el UUID de una venta (visible
+// en la URL de vuelta) podia spamear este endpoint y agotar la cuota de
+// la cuenta de Mercado Pago de la plataforma.
+const RECONCILE_COOLDOWN_MS = 10_000;
+
 // Publico, sin sesion: el comprador solo tiene el UUID de su propia venta
 // (ya visible en la URL de vuelta de Mercado Pago). Si el webhook todavia
 // no proceso el pago -- por ejemplo, una notificacion que se perdio o
@@ -23,7 +30,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
 
     const admin = createAdminClient();
     const { data: sale } = await admin.from("sales")
-      .select("id, status, event_id")
+      .select("id, status, event_id, last_reconciled_at")
       .eq("id", saleId).eq("channel", "online").maybeSingle();
     if (!sale) {
       return NextResponse.json({ error: "No encontramos esa venta." }, { status: 404 });
@@ -34,7 +41,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
       return NextResponse.json({ error: "No encontramos esa venta." }, { status: 404 });
     }
 
-    if (sale.status === "pending_approval") {
+    const lastReconciledMs = sale.last_reconciled_at ? new Date(sale.last_reconciled_at).getTime() : 0;
+    const withinCooldown = Date.now() - lastReconciledMs < RECONCILE_COOLDOWN_MS;
+
+    if (sale.status === "pending_approval" && !withinCooldown) {
+      await admin.from("sales").update({ last_reconciled_at: new Date().toISOString() }).eq("id", saleId);
       try {
         await reconcileOnlineSale(saleId);
       } catch (err) {
