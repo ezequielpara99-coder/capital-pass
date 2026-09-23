@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { createClient } from "../../lib/supabase/client";
+import { friendlyErrorMessage } from "../../lib/errors/friendly-message";
 
 type Membership = {
   id: string;
@@ -236,9 +237,10 @@ export default function ControlPage() {
         );
 
         setError(
-          err instanceof Error
-            ? err.message
-            : "No se pudo cargar el control de ingreso."
+          friendlyErrorMessage(
+            err,
+            "No se pudo cargar el control de ingreso."
+          )
         );
       } finally {
         setLoading(false);
@@ -347,9 +349,10 @@ export default function ControlPage() {
       );
 
       setError(
-        err instanceof Error
-          ? err.message
-          : "No se pudo validar el QR."
+        friendlyErrorMessage(
+          err,
+          "No se pudo validar el QR."
+        )
       );
     } finally {
       setValidating(false);
@@ -605,9 +608,10 @@ export default function ControlPage() {
       );
 
       setError(
-        err instanceof Error
-          ? err.message
-          : "No se pudo validar la entrada."
+        friendlyErrorMessage(
+          err,
+          "No se pudo validar la entrada."
+        )
       );
     } finally {
       setValidating(false);

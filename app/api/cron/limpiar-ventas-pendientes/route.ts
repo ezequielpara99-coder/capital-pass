@@ -20,5 +20,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "No se pudo limpiar." }, { status: 500 });
   }
 
+  // De paso, limpia los buckets del limitador de tasa (ver migracion
+  // 20260950) mas viejos que la ventana mas larga que usamos (1 hora,
+  // Rentals) -- si no, la tabla crece sin limite con una fila por
+  // IP/endpoint que alguna vez hizo una request.
+  const { error: rateLimitError } = await admin
+    .from("rate_limit_buckets")
+    .delete()
+    .lt("window_start", new Date(Date.now() - 60 * 60 * 1000).toISOString());
+  if (rateLimitError) {
+    console.error("CRON LIMPIEZA: no se pudieron limpiar los buckets de rate limit.", rateLimitError);
+  }
+
   return NextResponse.json({ ok: true, cancelled: data ?? 0 });
 }

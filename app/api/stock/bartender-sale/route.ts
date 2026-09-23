@@ -11,6 +11,8 @@ export async function POST(request: NextRequest) {
     const eventProductId = String(body.eventProductId ?? "").trim();
     const quantity = Number(body.quantity);
     const paymentMethod = String(body.paymentMethod ?? "").trim();
+    const idempotencyKeyRaw = String(body.idempotencyKey ?? "").trim();
+    const idempotencyKey = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idempotencyKeyRaw) ? idempotencyKeyRaw : null;
 
     if (!barId || !eventProductId || !Number.isInteger(quantity) || quantity <= 0 || !paymentMethod) {
       return NextResponse.json({ error: "Completá bebida, cantidad y método de pago." }, { status: 400 });
@@ -26,6 +28,7 @@ export async function POST(request: NextRequest) {
       p_event_product_id: eventProductId,
       p_quantity: quantity,
       p_payment_method: paymentMethod,
+      p_idempotency_key: idempotencyKey,
     });
 
     if (error) {

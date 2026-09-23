@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { sendRentalInquiryNotification } from "../../../../lib/email/rental-inquiry";
+import { checkRateLimit, getClientIp } from "../../../../lib/http/rate-limit";
 
 const FALLBACK_ADMIN_EMAILS = ["ezequiel.para99@gmail.com"];
 
@@ -25,6 +26,23 @@ async function verifyAdmin() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+
+    // Honeypot: campo oculto por CSS que un visitante real nunca completa,
+    // pero que un bot que llena todos los inputs del formulario si. Si
+    // viene con algo, respondemos ok sin guardar nada ni gastar el envio
+    // de email -- no le damos ninguna pista al bot de que fue detectado.
+    if (String(body.website ?? "").trim()) {
+      return NextResponse.json({ ok: true });
+    }
+
+    // Formulario publico sin login, sin captcha: limitamos a pocos envios
+    // por IP por hora -- cada envio exitoso manda un email real (costo/
+    // cuota de Resend) ademas de guardar en la base.
+    const ip = getClientIp(request);
+    const allowed = await checkRateLimit(`rentals:${ip}`, 3, 3600);
+    if (!allowed) {
+      return NextResponse.json({ error: "Ya enviaste varias consultas. Esperá un rato o escribinos directamente." }, { status: 429 });
+    }
 
     // Formulario publico sin login: limitamos el largo de cada campo para
     // no dejar que alguien mande un payload gigante (DB y el mail de aviso).

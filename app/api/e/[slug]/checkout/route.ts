@@ -3,6 +3,7 @@ import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { accessTokenFor } from "../../../../../lib/mercadopago/oauth";
 import { getAppBaseUrl, getOrganizerMercadoPago } from "../../../../../lib/mercadopago/server";
 import { safeCheckoutUrl } from "../../../../../lib/billing/rules";
+import { checkRateLimit, getClientIp } from "../../../../../lib/http/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,16 @@ export async function POST(
   const { slug } = await context.params;
 
   try {
+    // Cada request exitosa toma un lock sobre la tanda (compite con
+    // compradores reales) y llama a la API de Mercado Pago -- sin
+    // limite, un script podia saturar el cupo de un evento popular o
+    // agotar la cuota de la cuenta de Mercado Pago de la plataforma.
+    const ip = getClientIp(request);
+    const allowed = await checkRateLimit(`checkout:${ip}`, 8, 60);
+    if (!allowed) {
+      return NextResponse.json({ ok: false, error: "Demasiados intentos. Esperá un minuto y volvé a intentar." }, { status: 429 });
+    }
+
     const body = await request.json();
     const items = body.items as CartItem[] | undefined;
 

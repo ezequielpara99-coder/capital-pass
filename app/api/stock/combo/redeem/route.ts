@@ -10,6 +10,8 @@ export async function POST(request: NextRequest) {
     const manualCode = String(body.manualCode ?? "").trim();
     const eventProductId = String(body.eventProductId ?? "").trim();
     const quantity = Number(body.quantity);
+    const idempotencyKeyRaw = String(body.idempotencyKey ?? "").trim();
+    const idempotencyKey = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idempotencyKeyRaw) ? idempotencyKeyRaw : null;
 
     if (!barId || !manualCode || !eventProductId || !Number.isInteger(quantity) || quantity <= 0) {
       return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
@@ -24,6 +26,7 @@ export async function POST(request: NextRequest) {
       p_manual_code: manualCode,
       p_event_product_id: eventProductId,
       p_quantity: quantity,
+      p_idempotency_key: idempotencyKey,
     });
 
     if (error) {

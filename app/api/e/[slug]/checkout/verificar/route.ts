@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../../../../lib/supabase/admin";
 import { reconcileOnlineSale } from "../../../../../../lib/billing/server";
 import { validResourceId } from "../../../../../../lib/billing/rules";
+import { checkRateLimit, getClientIp } from "../../../../../../lib/http/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,15 @@ const RECONCILE_COOLDOWN_MS = 10_000;
 export async function POST(request: NextRequest, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
   try {
+    // El cooldown por venta (mas abajo) ya cubre lo mas costoso, pero esto
+    // ademas frena a alguien que genere muchas ventas (via /checkout, que
+    // tiene su propio limite) y las verifique todas seguidas.
+    const ip = getClientIp(request);
+    const allowed = await checkRateLimit(`verificar:${ip}`, 20, 60);
+    if (!allowed) {
+      return NextResponse.json({ error: "Demasiados intentos. Esperá un minuto y volvé a intentar." }, { status: 429 });
+    }
+
     const body = await request.json().catch(() => ({}));
     const saleId = String(body.saleId ?? "").trim();
     if (!validResourceId(saleId)) {

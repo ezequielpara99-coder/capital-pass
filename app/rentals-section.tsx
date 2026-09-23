@@ -10,6 +10,10 @@ export default function RentalsSection() {
   const [city, setCity] = useState("");
   const [terminalQuantity, setTerminalQuantity] = useState("");
   const [message, setMessage] = useState("");
+  // Honeypot anti-bot: campo oculto que una persona real nunca ve ni
+  // completa, pero que un bot que llena todos los inputs del formulario
+  // si. Si llega con algo, el servidor descarta el envio en silencio.
+  const [website, setWebsite] = useState("");
 
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -35,6 +39,7 @@ export default function RentalsSection() {
           city: city || null,
           terminalQuantity: terminalQuantity || null,
           message: message || null,
+          website,
         }),
       });
       const result = await response.json();
@@ -93,6 +98,21 @@ export default function RentalsSection() {
               {error && (
                 <div className="rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>
               )}
+
+              {/* Honeypot: oculto para una persona real (visualmente y para
+                  lectores de pantalla), visible para un bot que completa
+                  todos los campos del formulario. */}
+              <div className="absolute left-[-9999px] top-auto h-px w-px overflow-hidden" aria-hidden="true">
+                <label htmlFor="rentals-website">Dejá este campo vacío</label>
+                <input
+                  id="rentals-website"
+                  type="text"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  value={website}
+                  onChange={(e) => setWebsite(e.target.value)}
+                />
+              </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Nombre del negocio" value={businessName} onChange={setBusinessName} required />

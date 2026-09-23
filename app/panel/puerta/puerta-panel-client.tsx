@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { EventBar, type SwitcherEvent } from "../event-switcher";
+import { friendlyErrorMessage } from "../../../lib/errors/friendly-message";
 
 import {
   FormEvent,
@@ -113,9 +114,10 @@ export default function PuertaPanelClient({
       window.location.reload();
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "No se pudo crear el vendedor."
+        friendlyErrorMessage(
+          err,
+          "No se pudo crear el vendedor."
+        )
       );
     } finally {
       setLoading(false);
@@ -166,9 +168,10 @@ export default function PuertaPanelClient({
       window.location.reload();
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "No se pudo actualizar el vendedor."
+        friendlyErrorMessage(
+          err,
+          "No se pudo actualizar el vendedor."
+        )
       );
     } finally {
       setChangingId(null);

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
+import { friendlyErrorMessage } from "../../lib/errors/friendly-message";
 
 type Table = { id: string; name: string; status: string };
 type Drink = { eventProductId: string; name: string; salePriceMinor: number; stock: number };
@@ -90,7 +91,7 @@ export default function BartenderPage() {
         setDrinks(result.drinks ?? []);
         if (result.drinks?.length > 0) setEventProductId(result.drinks[0].eventProductId);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "No pudimos cargar la barra.");
+        setError(friendlyErrorMessage(err, "No pudimos cargar la barra."));
       } finally {
         setLoading(false);
       }
@@ -102,6 +103,18 @@ export default function BartenderPage() {
   const selectedDrink = drinks.find((d) => d.eventProductId === eventProductId) ?? null;
   const total = selectedDrink ? selectedDrink.salePriceMinor * quantity : 0;
 
+  // Idempotency key: se genera una sola vez por combinacion de
+  // mesa+bebida+cantidad+pago, y se REUSA si el usuario reintenta la
+  // misma venta despues de un error (ej: se corto el wifi justo cuando ya
+  // habia cobrado). Si cambia cualquiera de estos valores, es una venta
+  // distinta y se genera una clave nueva. Sin esto, un reintento tras un
+  // corte de red podia registrar y descontar stock dos veces por un
+  // cobro que se hizo una sola vez.
+  const saleAttemptKeyRef = useRef<string>(crypto.randomUUID());
+  useEffect(() => {
+    saleAttemptKeyRef.current = crypto.randomUUID();
+  }, [tableId, eventProductId, quantity, paymentMethod]);
+
   async function confirmSale() {
     if (!tableId || !eventProductId || !paymentMethod) return;
     setSelling(true);
@@ -111,14 +124,21 @@ export default function BartenderPage() {
       const response = await fetch("/api/stock/bartender-sale", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ barId, tableId: tableId === "NONE" ? null : tableId, eventProductId, quantity, paymentMethod }),
+        body: JSON.stringify({
+          barId,
+          tableId: tableId === "NONE" ? null : tableId,
+          eventProductId,
+          quantity,
+          paymentMethod,
+          idempotencyKey: saleAttemptKeyRef.current,
+        }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo registrar la venta.");
 
       setReceipt(result.receipt as Receipt);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo registrar la venta.");
+      setError(friendlyErrorMessage(err, "No se pudo registrar la venta."));
     } finally {
       setSelling(false);
     }
@@ -129,6 +149,7 @@ export default function BartenderPage() {
     setQuantity(1);
     setPaymentMethod("");
     setError("");
+    saleAttemptKeyRef.current = crypto.randomUUID();
     // Recarga stock/mesas por si cambiaron.
     window.location.reload();
   }
@@ -147,11 +168,18 @@ export default function BartenderPage() {
       setComboProductId(ticket.comboType === "producto" ? ticket.comboEventProductId ?? "" : "");
       setComboQuantity(1);
     } catch (err) {
-      setComboError(err instanceof Error ? err.message : "No se pudo buscar la entrada.");
+      setComboError(friendlyErrorMessage(err, "No se pudo buscar la entrada."));
     } finally {
       setComboLookupLoading(false);
     }
   }
+
+  // Misma logica que saleAttemptKeyRef: se reusa en un reintento de la
+  // MISMA venta/canje, se renueva si cambia el producto o la cantidad.
+  const comboAttemptKeyRef = useRef<string>(crypto.randomUUID());
+  useEffect(() => {
+    comboAttemptKeyRef.current = crypto.randomUUID();
+  }, [comboProductId, comboQuantity]);
 
   async function confirmComboRedeem() {
     if (!comboTicket || !comboProductId) return;
@@ -161,13 +189,19 @@ export default function BartenderPage() {
       const response = await fetch("/api/stock/combo/redeem", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ barId, manualCode: comboCode.trim(), eventProductId: comboProductId, quantity: comboQuantity }),
+        body: JSON.stringify({
+          barId,
+          manualCode: comboCode.trim(),
+          eventProductId: comboProductId,
+          quantity: comboQuantity,
+          idempotencyKey: comboAttemptKeyRef.current,
+        }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo canjear el combo.");
       setComboReceipt(result.receipt as ComboReceipt);
     } catch (err) {
-      setComboError(err instanceof Error ? err.message : "No se pudo canjear el combo.");
+      setComboError(friendlyErrorMessage(err, "No se pudo canjear el combo."));
     } finally {
       setComboRedeeming(false);
     }
@@ -180,6 +214,7 @@ export default function BartenderPage() {
     setComboQuantity(1);
     setComboError("");
     setComboReceipt(null);
+    comboAttemptKeyRef.current = crypto.randomUUID();
   }
 
   async function logout() {

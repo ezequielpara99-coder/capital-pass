@@ -40,6 +40,10 @@ const correccionesRevisionMigration = readFileSync(new URL("../supabase/migratio
 // 20260947 no se aplica aca: ticket_delivery_attempts no existe en el
 // harness de tests (igual que otras tablas del esquema base no trackeado).
 const stockAccessMembresiaMigration = readFileSync(new URL("../supabase/migrations/20260948_cp_org_has_stock_access_membresia.sql", import.meta.url), "utf8");
+// 20260949 (cooldown de verificar) y 20260950 (rate limiting) no se
+// aplican aca: son endpoints HTTP publicos que no se prueban por RPC
+// directa, sin ninguna funcion de este harness que dependa de ellas.
+const idempotenciaBarraMigration = readFileSync(new URL("../supabase/migrations/20260951_idempotencia_venta_barra.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -126,6 +130,7 @@ async function database() {
   await db.exec(notasEnPaquetesMigration);
   await db.exec(correccionesRevisionMigration);
   await db.exec(stockAccessMembresiaMigration);
+  await db.exec(idempotenciaBarraMigration);
   return db;
 }
 
@@ -420,12 +425,25 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
   // (no hay forma de saber cuanto le queda realmente a una botella hasta
   // el conteo fisico del cierre de noche) -- solo se registra la venta.
   await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
+  const barSaleKey = "c0ffee00-0000-4000-8000-000000000001";
   const barSale = await db.query<{ bar_sale_id: string; total_minor: string }>(
-    `select bar_sale_id, total_minor from create_bartender_sale('${bar}','${table}','${eventProduct}',3,'transferencia')`
+    `select bar_sale_id, total_minor from create_bartender_sale('${bar}','${table}','${eventProduct}',3,'transferencia','${barSaleKey}')`
   );
   assert.equal(Number(barSale.rows[0].total_minor), 6000, "3 tragos a 2000 cada uno");
   assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 8, "vender tragos no descuenta el stock del sistema");
   assert.equal(await scalar(`select count(*)::int from stock_movements where type='venta'`), 1);
+
+  // Reintento con la MISMA idempotency key (ej: se corto el wifi justo
+  // despues de cobrar y el bartender aprieta "Confirmar venta" de nuevo):
+  // debe devolver la venta original, sin crear una fila nueva en
+  // bar_sales ni en stock_movements.
+  const retriedSale = await db.query<{ bar_sale_id: string; total_minor: string }>(
+    `select bar_sale_id, total_minor from create_bartender_sale('${bar}','${table}','${eventProduct}',3,'transferencia','${barSaleKey}')`
+  );
+  assert.equal(retriedSale.rows[0].bar_sale_id, barSale.rows[0].bar_sale_id, "el reintento devuelve la MISMA venta, no crea una nueva");
+  assert.equal(Number(retriedSale.rows[0].total_minor), 6000);
+  assert.equal(await scalar(`select count(*)::int from bar_sales where idempotency_key='${barSaleKey}'`), 1, "no se duplico la fila de venta");
+  assert.equal(await scalar(`select count(*)::int from stock_movements where type='venta'`), 1, "el reintento no genero un segundo movimiento de stock");
 
   // Vender mas tragos de los que "figuran" ya no se bloquea (el numero de
   // stock no baja con cada trago, asi que no hay contra que comparar).
@@ -865,12 +883,24 @@ test("combos (entrada + consumicion) y packs de entradas", async () => {
   await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
 
   // Canjear el combo VIP: 1 de los 2 Fernet incluidos.
+  const vipRedeemKey = "c0ffee00-0000-4000-8000-000000000002";
   const redeem1 = await db.query<{ ticket_id: string; product_name: string; quantity: number; remaining_quantity: number; remaining_credit_minor: string | null }>(
-    `select * from redeem_combo_ticket('${bar}','VIPCODE1','${eventProductFernet}',1)`
+    `select * from redeem_combo_ticket('${bar}','VIPCODE1','${eventProductFernet}',1,'${vipRedeemKey}')`
   );
   assert.equal(redeem1.rows[0].remaining_quantity, 1, "quedaba 1 Fernet incluido despues de canjear 1 de 2");
   assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProductFernet}'`), 9, "canjear un combo si descuenta stock de la barra (a diferencia de un trago suelto)");
   assert.equal(await scalar(`select count(*)::int from bar_sales where ticket_id = '${vipTicketId}' and payment_method = 'combo'`), 1);
+
+  // Reintento con la MISMA idempotency key (ej: bartender aprieta canjear
+  // dos veces por un corte de red): no debe descontar stock/saldo de
+  // nuevo ni crear una segunda fila en bar_sales.
+  const retriedRedeem = await db.query<{ ticket_id: string; remaining_quantity: number }>(
+    `select * from redeem_combo_ticket('${bar}','VIPCODE1','${eventProductFernet}',1,'${vipRedeemKey}')`
+  );
+  assert.equal(retriedRedeem.rows[0].ticket_id, vipTicketId);
+  assert.equal(retriedRedeem.rows[0].remaining_quantity, 1, "el reintento no descuenta el saldo de nuevo (sigue en 1, no en 0)");
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProductFernet}'`), 9, "el reintento no descuenta stock de nuevo");
+  assert.equal(await scalar(`select count(*)::int from bar_sales where ticket_id = '${vipTicketId}' and payment_method = 'combo'`), 1, "no se duplico la fila de canje");
 
   // No puede canjear un producto distinto al incluido en un combo tipo 'producto'.
   await assert.rejects(

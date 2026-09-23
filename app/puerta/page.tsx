@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import { createClient } from "../../lib/supabase/client";
+import { friendlyErrorMessage } from "../../lib/errors/friendly-message";
 
 type EventData = {
   id: string;
@@ -371,9 +372,10 @@ export default function DoorSellerPage() {
         );
 
         setError(
-          err instanceof Error
-            ? err.message
-            : "No se pudo cargar la venta en puerta."
+          friendlyErrorMessage(
+            err,
+            "No se pudo cargar la venta en puerta."
+          )
         );
       } finally {
         setLoading(false);
@@ -602,9 +604,10 @@ export default function DoorSellerPage() {
       waWindow?.close();
 
       setError(
-        err instanceof Error
-          ? err.message
-          : "No se pudo registrar la venta."
+        friendlyErrorMessage(
+          err,
+          "No se pudo registrar la venta."
+        )
       );
     } finally {
       setSelling(false);
