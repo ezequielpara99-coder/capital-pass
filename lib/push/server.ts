@@ -36,10 +36,20 @@ async function sendToSubscriptions(
         );
       } catch (error) {
         const statusCode = (error as { statusCode?: number })?.statusCode;
-        if (statusCode === 404 || statusCode === 410) {
+        // 404/410 = la suscripcion ya no existe (desinstalo la app). 400/403
+        // tambien son permanentes segun la Push API (suscripcion invalida o
+        // credenciales VAPID desincronizadas) -- si no los borramos tambien,
+        // esa suscripcion muerta se reintenta para siempre en cada aviso
+        // futuro. Cualquier otro codigo (5xx, timeout) puede ser transitorio,
+        // asi que ahi solo logueamos y la dejamos para el proximo intento.
+        if (statusCode === 404 || statusCode === 410 || statusCode === 400 || statusCode === 403) {
           await admin.from("push_subscriptions").delete().eq("id", sub.id);
         } else {
-          console.error("PUSH: no se pudo enviar la notificación.", error);
+          // Solo el codigo/mensaje: el objeto completo del error incluye el
+          // endpoint de la suscripcion, que funciona como identificador del
+          // dispositivo de una persona real -- no hace falta en los logs.
+          const message = error instanceof Error ? error.message : String(error);
+          console.error("PUSH: no se pudo enviar la notificación.", { statusCode, message });
         }
       }
     })

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { createAdminClient } from "../../../lib/supabase/admin";
 import EventCheckout from "./event-checkout";
+import FallbackImage from "./fallback-image";
 
 export default async function PublicEventPage({
   params,
@@ -207,7 +208,7 @@ export default async function PublicEventPage({
               {/* DESKTOP / TABLET */}
               {desktopHeroUrl && (
 
-                <img
+                <FallbackImage
                   src={
                     desktopHeroUrl
                   }
@@ -220,7 +221,7 @@ export default async function PublicEventPage({
               {/* MOBILE */}
               {mobileHeroUrl && (
 
-                <img
+                <FallbackImage
                   src={
                     mobileHeroUrl
                   }
@@ -327,7 +328,7 @@ export default async function PublicEventPage({
 
                 <div className="overflow-hidden rounded-[30px] border border-[#ff5a2a]/[0.15] bg-[#0b0806] shadow-[0_24px_90px_rgba(255,42,26,.10)]">
 
-                  <img
+                  <FallbackImage
                     src={
                       bannerSquareUrl
                     }

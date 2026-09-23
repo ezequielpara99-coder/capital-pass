@@ -150,6 +150,7 @@ function Field({
       <input
         type={type}
         value={value}
+        required={required}
         onChange={(e) => onChange(e.target.value)}
         className="mt-2 h-12 w-full rounded-xl border border-white/15 bg-white/[0.03] px-4 text-sm text-white outline-none focus:border-[#ff5a2a]/50"
       />

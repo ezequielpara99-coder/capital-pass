@@ -37,6 +37,9 @@ const presupuestosClientesMigration = readFileSync(new URL("../supabase/migratio
 const estadosYPaquetesMigration = readFileSync(new URL("../supabase/migrations/20260944_estados_y_paquetes.sql", import.meta.url), "utf8");
 const notasEnPaquetesMigration = readFileSync(new URL("../supabase/migrations/20260945_notas_en_paquetes.sql", import.meta.url), "utf8");
 const correccionesRevisionMigration = readFileSync(new URL("../supabase/migrations/20260946_correcciones_revision.sql", import.meta.url), "utf8");
+// 20260947 no se aplica aca: ticket_delivery_attempts no existe en el
+// harness de tests (igual que otras tablas del esquema base no trackeado).
+const stockAccessMembresiaMigration = readFileSync(new URL("../supabase/migrations/20260948_cp_org_has_stock_access_membresia.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -46,8 +49,10 @@ async function database() {
     create schema auth;
     create table auth.users(id uuid primary key, email text, email_confirmed_at timestamptz, raw_user_meta_data jsonb);
     create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+    create function auth.role() returns text language sql stable as $$ select nullif(current_setting('request.jwt.claim.role', true), '') $$;
     grant usage on schema auth, public to anon, authenticated, service_role;
-    grant execute on function auth.uid() to anon, authenticated, service_role;`);
+    grant execute on function auth.uid() to anon, authenticated, service_role;
+    grant execute on function auth.role() to anon, authenticated, service_role;`);
   for (const row of fixture.filter((r) => r.seccion === "tipos_enum")) {
     await db.exec(`create type public.${q(row.objeto)} as enum (${(row.detalle as string[]).map(str).join(",")})`);
   }
@@ -120,6 +125,7 @@ async function database() {
   await db.exec(estadosYPaquetesMigration);
   await db.exec(notasEnPaquetesMigration);
   await db.exec(correccionesRevisionMigration);
+  await db.exec(stockAccessMembresiaMigration);
   return db;
 }
 
@@ -600,6 +606,21 @@ test("plan gestion avanzada y prueba de 7 dias del modulo de stock", async () =>
   await db.query(`select cp_record_payment('${signupExpired}','pay-vencido-2','approved',10000,'ARS',now(),now() + interval '1 month')`);
   assert.equal(await scalar(`select count(*)::int from stock_trial where organization_id = '${orgExpired}'`), 1, "la prueba no se duplica ni se reinicia");
   assert.equal(await scalar(`select cp_org_has_stock_access('${orgExpired}')`), false, "sigue vencida tras renovar la basica");
+
+  // Un usuario autenticado (JWT real, no service_role) que NO es miembro de
+  // la organizacion no puede arrancarle la prueba de 7 dias aunque conozca
+  // su UUID -- antes cualquier usuario logueado podia llamar este RPC
+  // directo con el organization_id de otra organizacion.
+  const orgAjena = "b8888888-8888-4888-8888-888888888888";
+  const intruso = "b9999999-9999-4999-8999-999999999999";
+  await db.exec(`insert into organizations(id,name,slug) values ('${orgAjena}','Club Ajeno','club-ajeno');
+    insert into auth.users values ('${intruso}','intruso@example.test',now(),'{}');`);
+  await db.exec(`select set_config('request.jwt.claim.sub','${intruso}',false);
+    select set_config('request.jwt.claim.role','authenticated',false);`);
+  assert.equal(await scalar(`select cp_org_has_stock_access('${orgAjena}')`), false, "un usuario ajeno no puede consultar/arrancar la prueba de otra organizacion");
+  assert.equal(await scalar(`select count(*)::int from stock_trial where organization_id = '${orgAjena}'`), 0, "no se le crea una prueba a la organizacion ajena");
+  await db.exec(`select set_config('request.jwt.claim.sub','',false);
+    select set_config('request.jwt.claim.role','',false);`);
 
   await db.close();
 });

@@ -91,8 +91,12 @@ async function applyPayment(payment: ProviderPayment, signupId: string) {
   if (result.error) throw new Error("No se pudo registrar el cobro verificado.");
   const refreshed = await admin.rpc("cp_refresh_subscription", { p_signup_id: signupId });
   if (refreshed.error) throw new Error("No se pudo actualizar el acceso.");
-  // El envio de un recibo nunca determina si se habilita el acceso.
-  if (verified.status === "approved" && process.env.RESEND_API_KEY?.startsWith("re_") && process.env.RECEIPTS_FROM_EMAIL) {
+  // El envio de un recibo nunca determina si se habilita el acceso. El
+  // remitente puede venir de RECEIPTS_FROM_EMAIL o, si no esta seteada, de
+  // RESEND_FROM_EMAIL (asi lo resuelve sendSubscriptionReceipt) -- este
+  // guard tiene que aceptar la misma combinacion, si no un deploy que solo
+  // configuro RESEND_FROM_EMAIL nunca manda el recibo sin ningun aviso.
+  if (verified.status === "approved" && process.env.RESEND_API_KEY?.startsWith("re_") && (process.env.RECEIPTS_FROM_EMAIL || process.env.RESEND_FROM_EMAIL)) {
     try {
       const receipts = await admin.from("subscription_payments").select("payment_id, amount, currency, paid_at, period_end")
         .eq("signup_id", signupId).eq("status", "approved").is("receipt_sent_at", null).order("paid_at", { ascending: false }).limit(1);

@@ -299,7 +299,7 @@ export default async function EntradaPage({
           </div>
         )}
 
-        <p className="mt-6 text-center text-[10px] uppercase tracking-[0.25em] text-white/25">
+        <p className="mt-6 text-center text-[10px] uppercase tracking-[0.25em] text-white/60">
           Si el QR no puede escanearse, mostrale el código manual al personal de ingreso
         </p>
 
