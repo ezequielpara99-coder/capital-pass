@@ -79,8 +79,17 @@ export async function POST(
     const sale = created.data?.[0] as { sale_id: string; total_minor: number; items: SaleItem[] } | undefined;
     if (!sale) throw new Error("La compra no devolvió un identificador.");
 
+    // total_minor es bigint: PostgREST/el RPC lo devuelve como STRING, no
+    // como number. "total_minor + feeAmount" mas abajo usaba "+", que con
+    // un string CONCATENA en vez de sumar (ej. "1500" + 50 -> "150050"),
+    // corrompiendo el total que se guarda como "lo que se deberia haber
+    // cobrado" y que despues el webhook de Mercado Pago usa para verificar
+    // el pago real -- rompia la confirmacion automatica de compras online
+    // reales, no solo un caso de monto en cero.
+    const saleTotalMinor = Number(sale.total_minor);
+
     const feePercent = Number(account?.processing_fee_percent ?? 0);
-    const feeAmount = Math.round(sale.total_minor * (feePercent / 100));
+    const feeAmount = Math.round(saleTotalMinor * (feePercent / 100));
 
     // Los items de la preference salen siempre de lo que create_online_sale
     // valido y reservo (mismo lock que valida el cupo) -- nunca de una
@@ -107,7 +116,7 @@ export async function POST(
       });
     }
 
-    const totalCharged = sale.total_minor + feeAmount;
+    const totalCharged = saleTotalMinor + feeAmount;
     const chargedSaved = await admin.rpc("set_online_sale_charged_total", {
       p_sale_id: sale.sale_id,
       p_total_charged_minor: totalCharged,

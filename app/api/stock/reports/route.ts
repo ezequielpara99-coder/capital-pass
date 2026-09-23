@@ -54,11 +54,13 @@ export async function GET(request: NextRequest) {
   let comboValueMinor = 0;
 
   for (const sale of barSales ?? []) {
-    // Un canje de combo no es plata que entro a la barra -- ya se cobro
-    // cuando se vendio la entrada. Se cuenta la cantidad consumida (sigue
-    // siendo stock real que salio), pero no se suma a la plata recaudada.
+    // total_minor es bigint: PostgREST lo serializa como STRING, no como
+    // number. Sin el Number() de aca, "0 + string" en JS concatena texto
+    // en vez de sumar (0 + "1500" -> "01500") -- con 2+ ventas, todos los
+    // totales de este reporte (barTotalMinor, byProduct, byBar,
+    // byPaymentMethod) quedaban corrompidos desde la primera venta real.
     const isCombo = sale.payment_method === "combo";
-    const saleMoney = isCombo ? 0 : sale.total_minor;
+    const saleMoney = isCombo ? 0 : Number(sale.total_minor);
 
     const productName = productNameByEventProductId.get(sale.event_product_id) ?? "Producto";
     const productRow = byProduct.get(sale.event_product_id) ?? { name: productName, quantity: 0, totalMinor: 0 };
@@ -74,13 +76,14 @@ export async function GET(request: NextRequest) {
 
     byPaymentMethod.set(sale.payment_method, (byPaymentMethod.get(sale.payment_method) ?? 0) + saleMoney);
     barTotalMinor += saleMoney;
-    if (isCombo) comboValueMinor += sale.total_minor;
+    if (isCombo) comboValueMinor += Number(sale.total_minor);
   }
 
   let mesaTotalMinor = 0;
   for (const sale of mesaSales ?? []) {
-    byPaymentMethod.set(sale.payment_method, (byPaymentMethod.get(sale.payment_method) ?? 0) + sale.total_minor);
-    mesaTotalMinor += sale.total_minor;
+    const mesaMoney = Number(sale.total_minor);
+    byPaymentMethod.set(sale.payment_method, (byPaymentMethod.get(sale.payment_method) ?? 0) + mesaMoney);
+    mesaTotalMinor += mesaMoney;
   }
 
   return NextResponse.json({

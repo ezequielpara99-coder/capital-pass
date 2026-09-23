@@ -48,7 +48,12 @@ export async function GET(request: NextRequest) {
     .order("name");
 
   if (error) return NextResponse.json({ error: "No se pudieron cargar las mesas." }, { status: 500 });
-  return NextResponse.json({ ok: true, tables: tables ?? [] });
+
+  // price_minor es bigint: PostgREST lo devuelve como string -- sin
+  // normalizar, una mesa con precio exactamente 0 queda truthy en JS y
+  // el cliente (RRPP) muestra "$0" en vez de "Sin costo".
+  const normalizedTables = (tables ?? []).map((table) => ({ ...table, price_minor: table.price_minor === null ? null : Number(table.price_minor) }));
+  return NextResponse.json({ ok: true, tables: normalizedTables });
 }
 
 export async function POST(request: NextRequest) {
@@ -77,7 +82,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No se pudo crear la mesa." }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, table }, { status: 201 });
+    return NextResponse.json({ ok: true, table: { ...table, price_minor: table.price_minor === null ? null : Number(table.price_minor) } }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }

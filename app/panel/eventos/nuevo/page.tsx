@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import SubmitButton from "./submit-button";
 
 // ============================================================
 // CREAR EVENTO
@@ -88,10 +89,22 @@ async function createEvent(formData: FormData) {
   const startsAt =
     argentinaLocalToIso(startsAtRaw);
 
+  if (!startsAt) {
+    redirect(
+      "/panel/eventos/nuevo?error=La+fecha+de+inicio+no+es+valida"
+    );
+  }
+
   const endsAt =
     endsAtRaw
       ? argentinaLocalToIso(endsAtRaw)
       : null;
+
+  if (endsAtRaw && !endsAt) {
+    redirect(
+      "/panel/eventos/nuevo?error=La+fecha+de+finalizacion+no+es+valida"
+    );
+  }
 
   if (
     endsAt &&
@@ -225,6 +238,23 @@ export default async function NuevoEventoPage({
           params.error
         )
       : null;
+
+  // "min" del datetime-local: evita el accidente comun de dejar un evento
+  // con fecha de inicio en el pasado sin ningun aviso (no se bloquea del
+  // lado del servidor a proposito, por si hace falta cargar un evento
+  // viejo a mano).
+  const minStartsAt =
+    new Intl.DateTimeFormat("sv-SE", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    })
+      .format(new Date())
+      .replace(" ", "T");
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#050505] text-[#f7f3ed]">
@@ -396,6 +426,7 @@ export default async function NuevoEventoPage({
                     name="starts_at"
                     type="datetime-local"
                     required
+                    min={minStartsAt}
                     className={inputClass}
                   />
                 </Field>
@@ -421,17 +452,7 @@ export default async function NuevoEventoPage({
                 Cancelar
               </Link>
 
-              <button
-                type="submit"
-                className="flex h-12 items-center justify-center gap-3 bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] px-7 text-[10px] font-black uppercase tracking-[0.14em] text-white shadow-[0_12px_40px_rgba(255,42,26,.18)] transition hover:brightness-110"
-              >
-                Crear evento
-
-                <span>
-                  →
-                </span>
-
-              </button>
+              <SubmitButton />
 
             </div>
 
@@ -515,8 +536,19 @@ function createSlug(
 
 function argentinaLocalToIso(
   value: string
-) {
-  return new Date(
+): string | null {
+  const date = new Date(
     `${value}:00-03:00`
-  ).toISOString();
+  );
+
+  // Un POST directo al server action (sin pasar por el <input
+  // type="datetime-local">, que normalmente evita esto) podia mandar un
+  // valor con un formato inesperado -- new Date(...).toISOString() tira
+  // un RangeError sin capturar, mostrando un 500 generico en vez del
+  // mensaje de validacion normal.
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString();
 }

@@ -99,7 +99,10 @@ export async function GET(request: NextRequest) {
     bars: barsResult.data ?? [],
     eventProducts: (eventProductsResult.data ?? []).map((ep) => ({ ...ep, product: productById.get(ep.product_id) ?? null })),
     barStock: barStockRows ?? [],
-    tables: tablesResult.data ?? [],
+    // price_minor es bigint: PostgREST lo devuelve como string -- sin
+    // normalizar, una mesa con precio exactamente 0 queda truthy en JS y
+    // el cliente muestra "$0" en vez de "Sin costo".
+    tables: (tablesResult.data ?? []).map((table) => ({ ...table, price_minor: table.price_minor === null ? null : Number(table.price_minor) })),
     recentSales: (barSalesResult.data ?? []).map((sale) => {
       const member = memberById.get(sale.bartender_member_id);
       const profile = member ? profileById.get(member.user_id) : null;
