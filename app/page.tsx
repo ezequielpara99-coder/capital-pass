@@ -366,6 +366,12 @@ export default function Home() {
   ] =
     useState(true);
 
+  const [
+    mobileMenuOpen,
+    setMobileMenuOpen,
+  ] =
+    useState(false);
+
   function toggleTheme() {
     const next =
       theme === "dark"
@@ -682,8 +688,84 @@ export default function Home() {
             >
               Empezar
             </Link>
+
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen((value) => !value)}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-nav-panel"
+              aria-label={mobileMenuOpen ? "Cerrar menú" : "Abrir menú"}
+              className="ml-1 flex h-10 w-10 items-center justify-center border border-[var(--cp-border)] text-[var(--cp-text)] lg:hidden"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                {mobileMenuOpen ? (
+                  <path d="M2 2l12 12M14 2L2 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                ) : (
+                  <path d="M1 3h14M1 8h14M1 13h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                )}
+              </svg>
+            </button>
           </div>
         </div>
+
+        {mobileMenuOpen && (
+          <nav
+            id="mobile-nav-panel"
+            className="border-t border-[var(--cp-border)] bg-[var(--cp-bg)] px-5 py-4 lg:hidden"
+          >
+            <a
+              href="#platform"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--cp-muted)] transition hover:text-[var(--cp-text)]"
+            >
+              Plataforma
+            </a>
+
+            <a
+              href="#tickets"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--cp-muted)] transition hover:text-[var(--cp-text)]"
+            >
+              Tickets
+            </a>
+
+            <a
+              href="#pricing"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--cp-muted)] transition hover:text-[var(--cp-text)]"
+            >
+              Suscripción
+            </a>
+
+            <a
+              href={whatsappUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--cp-muted)] transition hover:text-[#ff6343]"
+            >
+              Soporte
+            </a>
+
+            <div className="mt-2 flex items-center gap-2 border-t border-[var(--cp-border)] pt-4 sm:hidden">
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="h-10 flex-1 border border-[var(--cp-border)] px-4 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--cp-muted)] transition hover:text-[var(--cp-text)]"
+              >
+                {dark ? "Light" : "Dark"}
+              </button>
+
+              <Link
+                href="/login"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex h-10 flex-1 items-center justify-center border border-[var(--cp-border)] text-[9px] font-bold uppercase tracking-[0.16em]"
+              >
+                Ingresar
+              </Link>
+            </div>
+          </nav>
+        )}
       </header>
 
       {/* =====================================================

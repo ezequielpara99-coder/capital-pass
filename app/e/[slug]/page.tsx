@@ -1,8 +1,70 @@
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { getAppBaseUrl } from "../../../lib/mercadopago/server";
 import EventCheckout from "./event-checkout";
 import FallbackImage from "./fallback-image";
+
+// Esta pagina se comparte activamente por WhatsApp/Instagram (es el flujo
+// de venta principal) -- sin esto, todos los eventos indexaban con el
+// mismo titulo/descripcion generico de la landing, y pegar el link no
+// generaba ninguna preview con el nombre/fecha/imagen del evento.
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const admin = createAdminClient();
+
+  const { data: event } = await admin
+    .from("events")
+    .select("name, description, starts_at, venue_name, city, banner_horizontal_path, banner_square_path")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (!event) {
+    return { title: "Evento no encontrado · Capital Pass" };
+  }
+
+  const dateLabel = new Intl.DateTimeFormat("es-AR", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    timeZone: "America/Argentina/Buenos_Aires",
+  }).format(new Date(event.starts_at));
+
+  const place = [event.venue_name, event.city].filter(Boolean).join(", ");
+  const description =
+    event.description?.trim() ||
+    `${dateLabel}${place ? ` · ${place}` : ""}. Comprá tu entrada online con Capital Pass.`;
+
+  const imagePath = event.banner_horizontal_path || event.banner_square_path;
+  const imageUrl = imagePath ? admin.storage.from("event-assets").getPublicUrl(imagePath).data.publicUrl : null;
+  const pageUrl = `${getAppBaseUrl()}/e/${slug}`;
+
+  return {
+    title: `${event.name} · Capital Pass`,
+    description,
+    alternates: { canonical: pageUrl },
+    openGraph: {
+      title: event.name,
+      description,
+      url: pageUrl,
+      siteName: "Capital Pass",
+      type: "website",
+      locale: "es_AR",
+      images: imageUrl ? [{ url: imageUrl }] : undefined,
+    },
+    twitter: {
+      card: imageUrl ? "summary_large_image" : "summary",
+      title: event.name,
+      description,
+      images: imageUrl ? [imageUrl] : undefined,
+    },
+  };
+}
 
 export default async function PublicEventPage({
   params,
