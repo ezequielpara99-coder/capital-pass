@@ -301,8 +301,26 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }
             <Field label="Apellido" value={lastName} onChange={setLastName} required />
           </div>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <Field label="DNI" value={dni} onChange={setDni} required />
-            <Field label="WhatsApp" value={phone} onChange={setPhone} required placeholder="Ej: 3462..." />
+            <Field
+              label="DNI"
+              value={dni}
+              onChange={setDni}
+              required
+              inputMode="numeric"
+              pattern="[0-9.]{6,12}"
+              title="Ingresá tu DNI, solo números (podés usar puntos)"
+            />
+            <Field
+              label="WhatsApp"
+              value={phone}
+              onChange={setPhone}
+              required
+              placeholder="Ej: 3462..."
+              type="tel"
+              inputMode="tel"
+              pattern="[0-9 +\-]{8,20}"
+              title="Ingresá tu WhatsApp, solo números (8 a 20 dígitos)"
+            />
           </div>
           <div className="mt-4">
             <Field label="Email (opcional)" type="email" value={email} onChange={setEmail} />
@@ -416,6 +434,9 @@ function Field({
   placeholder,
   required = false,
   type = "text",
+  inputMode,
+  pattern,
+  title,
 }: {
   label: string;
   value: string;
@@ -423,6 +444,9 @@ function Field({
   placeholder?: string;
   required?: boolean;
   type?: string;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+  pattern?: string;
+  title?: string;
 }) {
   return (
     <label className="block">
@@ -432,6 +456,9 @@ function Field({
         value={value}
         required={required}
         placeholder={placeholder}
+        inputMode={inputMode}
+        pattern={pattern}
+        title={title}
         onChange={(e) => onChange(e.target.value)}
         className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-black/20 px-4 text-sm outline-none focus:border-[#ff5a2a]/50"
       />
