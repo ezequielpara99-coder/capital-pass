@@ -44,6 +44,7 @@ const stockAccessMembresiaMigration = readFileSync(new URL("../supabase/migratio
 // aplican aca: son endpoints HTTP publicos que no se prueban por RPC
 // directa, sin ninguna funcion de este harness que dependa de ellas.
 const idempotenciaBarraMigration = readFileSync(new URL("../supabase/migrations/20260951_idempotencia_venta_barra.sql", import.meta.url), "utf8");
+const indicesMigration = readFileSync(new URL("../supabase/migrations/20260952_indices_columnas_calientes.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -131,6 +132,7 @@ async function database() {
   await db.exec(correccionesRevisionMigration);
   await db.exec(stockAccessMembresiaMigration);
   await db.exec(idempotenciaBarraMigration);
+  await db.exec(indicesMigration);
   return db;
 }
 
