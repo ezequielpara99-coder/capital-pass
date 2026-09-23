@@ -19,5 +19,10 @@ export default async function CatalogoPresupuestosPage() {
 
   if (error && !isMissingTable(error)) console.error("ADMIN CATALOGO:", error);
 
-  return <CatalogClient items={(data ?? []) as CatalogItem[]} missingSql={isMissingTable(error)} />;
+  // unit_price_minor es bigint: PostgREST lo serializa como string, no
+  // como number -- normalizamos aca para que un item gratuito (precio 0)
+  // no llegue como el string "0" (truthy en JS) al cliente.
+  const items = (data ?? []).map((item) => ({ ...item, unit_price_minor: Number(item.unit_price_minor) }));
+
+  return <CatalogClient items={items as CatalogItem[]} missingSql={isMissingTable(error)} />;
 }

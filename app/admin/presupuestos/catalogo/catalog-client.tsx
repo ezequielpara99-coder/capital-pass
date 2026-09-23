@@ -56,11 +56,17 @@ export default function CatalogClient({ items, missingSql }: { items: CatalogIte
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo guardar.");
 
+      // unit_price_minor es bigint: PostgREST lo devuelve como string, no
+      // como number -- si no se normaliza, un item con precio 0 queda
+      // truthy y "formatMoney(item.unit_price_minor) : "—"" muestra un
+      // precio donde deberia mostrar "—".
+      const item: CatalogItem = { ...result.item, unit_price_minor: Number(result.item.unit_price_minor) };
+
       if (editingId) {
-        setRows((prev) => prev.map((row) => (row.id === editingId ? result.item : row)));
+        setRows((prev) => prev.map((row) => (row.id === editingId ? item : row)));
         setEditingId(null);
       } else {
-        setRows((prev) => [...prev, result.item]);
+        setRows((prev) => [...prev, item]);
       }
       setDraft(draftFrom());
     } catch (err) {

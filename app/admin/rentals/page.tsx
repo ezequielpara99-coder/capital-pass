@@ -30,7 +30,8 @@ export default async function AdminRentalsPage() {
   const { data: inquiries } = await admin
     .from("rental_inquiries")
     .select("id, business_name, contact_name, phone, email, city, terminal_quantity, message, status, created_at")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(1000);
 
   return <RentalsClient inquiries={inquiries ?? []} />;
 }

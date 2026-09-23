@@ -17,7 +17,7 @@ type Inquiry = {
 };
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  return new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires" }).format(new Date(value));
 }
 
 const STATUS_LABEL: Record<string, string> = { nuevo: "Nuevo", contactado: "Contactado", cerrado: "Cerrado" };

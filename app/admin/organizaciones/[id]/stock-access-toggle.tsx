@@ -15,6 +15,12 @@ export default function StockAccessToggle({
 
   async function save(next: boolean) {
     if (busy) return;
+    // Bloquear le corta el modulo de Stock a una organizacion real de
+    // golpe -- un click accidental en el boton equivocado no deberia
+    // poder dejar a alguien sin barras/mesas en medio de un evento.
+    if (next && !window.confirm("¿Bloquear el módulo de Stock para esta organización? Va a perder acceso a barras, bartenders y mesas de inmediato.")) {
+      return;
+    }
     setBusy(true);
     setError("");
     try {

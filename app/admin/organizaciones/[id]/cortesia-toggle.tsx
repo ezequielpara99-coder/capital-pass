@@ -18,6 +18,12 @@ export default function CortesiaToggle({
 
   async function save(next: boolean) {
     if (busy) return;
+    // Activar cortesia le da a la organizacion el pack completo GRATIS,
+    // sin vencimiento -- un click accidental en el boton equivocado no
+    // deberia poder regalar el servicio sin querer.
+    if (next && !window.confirm("¿Activar cortesía? Esta organización va a usar Capital Pass gratis, con el pack completo, sin vencimiento.")) {
+      return;
+    }
     setBusy(true);
     setError("");
     try {

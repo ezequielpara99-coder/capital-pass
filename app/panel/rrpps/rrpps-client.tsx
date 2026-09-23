@@ -487,6 +487,21 @@ export default function RRPPsClient({
     setError("");
 
     try {
+      // Si eligio una provincia nueva pero no llego a confirmar la
+      // localidad, antes esto se guardaba en silencio SIN la ubicacion
+      // (ninguna de las dos ramas de abajo aplicaba): el modal se
+      // cerraba como "guardado" pero la ubicacion elegida se
+      // descartaba sin ningun aviso. Mismo chequeo que ya hace
+      // createRRPP.
+      if (
+        editLocation.provinceId &&
+        !editLocation.localityId
+      ) {
+        throw new Error(
+          "Seleccioná una ciudad o localidad."
+        );
+      }
+
       const payload: Record<
         string,
         unknown

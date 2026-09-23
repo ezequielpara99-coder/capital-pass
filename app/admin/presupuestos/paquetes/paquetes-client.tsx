@@ -107,10 +107,15 @@ export default function PaquetesClient({ packages, missingSql }: { packages: Quo
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo guardar.");
 
+      // package_price_minor es bigint: PostgREST lo devuelve como string,
+      // no como number -- se normaliza para que un paquete de precio 0
+      // no quede truthy y muestre un monto donde deberia mostrar "—".
+      const pkg = { ...result.package, package_price_minor: Number(result.package.package_price_minor) };
+
       if (editingId) {
-        setRows((prev) => prev.map((row) => (row.id === editingId ? result.package : row)));
+        setRows((prev) => prev.map((row) => (row.id === editingId ? pkg : row)));
       } else {
-        setRows((prev) => [...prev, result.package]);
+        setRows((prev) => [...prev, pkg]);
       }
       startNew();
     } catch (err) {

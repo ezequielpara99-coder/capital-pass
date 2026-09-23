@@ -56,6 +56,19 @@ export function shade(hex: string, t: number) {
   return `#${mixed.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 }
 
+// El organizador puede elegir CUALQUIER color de acento (incluyendo blanco,
+// amarillo pastel, rosa palido). Ese color se usa como fondo de la pildora
+// con el nombre del evento, con texto blanco fijo -- con un accent claro,
+// el texto queda practicamente ilegible (blanco sobre casi blanco). Esto
+// devuelve blanco o un texto oscuro segun el brillo percibido del accent
+// (formula YIQ, el estandar liviano para elegir texto claro/oscuro sobre
+// un color de fondo arbitrario).
+export function readableTextOn(hex: string) {
+  const [r, g, b] = channels(hex);
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+  return brightness > 165 ? "#1a1008" : "#ffffff";
+}
+
 // Plantilla tecnica para disenadores (1080 x 1920). Muestra donde va cada
 // pieza de la entrada y que zonas quedan libres para el arte.
 export function buildTicketTemplateSvg(accentColor: string) {

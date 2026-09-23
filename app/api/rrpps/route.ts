@@ -342,6 +342,45 @@ async function getOrganizerContext(
     } as const;
   }
 
+  // Crear/pausar/reactivar RRPPs, cambiarles la comision o registrarles un
+  // pago siempre usaba el cliente de service_role directo (sin pasar por
+  // ninguna RPC), asi que nunca se validaba la suscripcion -- a diferencia
+  // de vender entradas o tragos, que si la chequean (create_sale,
+  // create_bartender_sale, etc.) y quedan bloqueados con la suscripcion
+  // vencida. Una organizacion vencida podia seguir gestionando RRPPs
+  // reales (crear usuarios, cambiar comisiones) indefinidamente.
+  const {
+    data: hasService,
+    error: serviceError,
+  } = await admin.rpc(
+    "cp_org_has_service",
+    {
+      p_organization_id:
+        membership.organization_id,
+    }
+  );
+
+  if (serviceError) {
+    console.error(
+      "RRPPs - cp_org_has_service:",
+      serviceError
+    );
+
+    return {
+      error:
+        "No se pudo verificar la suscripción.",
+      status: 500,
+    } as const;
+  }
+
+  if (!hasService) {
+    return {
+      error:
+        "La organización necesita una suscripción activa.",
+      status: 402,
+    } as const;
+  }
+
   const {
     data: event,
   } = await admin

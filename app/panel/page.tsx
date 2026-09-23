@@ -42,7 +42,7 @@ export default async function OrganizerPanel({
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return null;
+    redirect("/login");
   }
 
   const admin = createAdminClient();

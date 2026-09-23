@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createRecoveryClient } from "../../lib/supabase/client";
 
 export const dynamic = "force-dynamic";
@@ -152,6 +153,13 @@ export default function CreatePasswordPage() {
               <div className="border border-red-500/30 bg-red-500/10 p-5 text-center text-sm font-bold leading-6 text-red-200">
                 {error}
               </div>
+
+              <Link
+                href="/recuperar-contrasena"
+                className="mt-6 flex h-12 w-full items-center justify-center border border-white/10 text-sm font-medium text-white/55 transition hover:border-white/25 hover:text-white"
+              >
+                Pedir un enlace nuevo
+              </Link>
             </div>
           ) : (
             <>

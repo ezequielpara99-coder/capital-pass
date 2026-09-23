@@ -57,12 +57,27 @@ export default async function NuevoPresupuestoPage({
     admin.from("quote_packages").select("id, kind, name, items, price_mode, package_price_minor, notes").eq("active", true).order("name"),
   ]);
 
+  // unit_price_minor/package_price_minor son bigint en la base: PostgREST
+  // los serializa como STRING, no como number. Sin esto, un item o
+  // paquete gratuito (precio 0) queda como el string "0" -- truthy en JS
+  // -- y los chequeos tipo `entry.unit_price_minor ? ... : ""` en
+  // quote-editor.tsx fallan en silencio y muestran un precio donde no
+  // deberian.
+  const normalizedCatalog = (catalog ?? []).map((item) => ({
+    ...item,
+    unit_price_minor: Number(item.unit_price_minor),
+  }));
+  const normalizedPackages = (packages ?? []).map((pkg) => ({
+    ...pkg,
+    package_price_minor: Number(pkg.package_price_minor),
+  }));
+
   return (
     <QuoteEditor
       init={init}
-      catalog={(catalog ?? []) as CatalogItem[]}
+      catalog={normalizedCatalog as CatalogItem[]}
       clients={(clients ?? []) as QuoteClient[]}
-      packages={(packages ?? []) as QuotePackageOption[]}
+      packages={normalizedPackages as QuotePackageOption[]}
     />
   );
 }

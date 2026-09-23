@@ -17,5 +17,10 @@ export default async function PaquetesPresupuestosPage() {
 
   if (error && !isMissingTable(error)) console.error("ADMIN PAQUETES:", error);
 
-  return <PaquetesClient packages={(data ?? []) as QuotePackage[]} missingSql={isMissingTable(error)} />;
+  // package_price_minor es bigint: PostgREST lo serializa como string, no
+  // como number -- normalizamos aca para que un paquete gratuito (precio
+  // 0) no llegue como el string "0" (truthy en JS) al cliente.
+  const packages = (data ?? []).map((pkg) => ({ ...pkg, package_price_minor: Number(pkg.package_price_minor) }));
+
+  return <PaquetesClient packages={packages as QuotePackage[]} missingSql={isMissingTable(error)} />;
 }

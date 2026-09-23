@@ -5,6 +5,7 @@ import {
   TICKET_W,
   ZONES,
   normalizeAccent,
+  readableTextOn,
   rgba,
   shade,
   type Zone,
@@ -62,6 +63,7 @@ export default function TicketPoster({
   const accent = normalizeAccent(accentValue);
   const light = shade(accent, 0.45);
   const dark = shade(accent, -0.5);
+  const eventPillText = readableTextOn(accent);
   const z = ZONES;
 
   const stampText = status === "used" ? "Utilizada" : status === "cancelled" ? "Anulada" : null;
@@ -177,7 +179,7 @@ export default function TicketPoster({
 
       {/* NOMBRE DEL EVENTO */}
       <div
-        className="flex flex-col items-center justify-center text-center text-white"
+        className="flex flex-col items-center justify-center text-center"
         style={{
           ...box(z.eventPill),
           borderRadius: 9999,
@@ -185,6 +187,7 @@ export default function TicketPoster({
           border: "2px solid rgba(255,255,255,0.30)",
           boxShadow: `0 0 ${cq(50)} ${rgba(accent, 0.5)}, inset 0 1px 0 rgba(255,255,255,0.45)`,
           padding: `0 ${cq(40)}`,
+          color: eventPillText,
         }}
       >
         <p

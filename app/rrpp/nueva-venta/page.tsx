@@ -958,15 +958,16 @@ export default function NuevaVentaRRPPPage() {
 
               <button
                 type="button"
+                disabled={loadingEntries}
                 onClick={() =>
                   loadGeneratedEntries(
                     saleResult.sale_id,
                     window.open("", "_blank")
                   )
                 }
-                className="mt-4 rounded-xl border border-orange-300/25 bg-orange-500/10 px-4 py-2.5 text-sm font-semibold text-orange-100"
+                className="mt-4 rounded-xl border border-orange-300/25 bg-orange-500/10 px-4 py-2.5 text-sm font-semibold text-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Reintentar cargar entradas
+                {loadingEntries ? "Cargando..." : "Reintentar cargar entradas"}
               </button>
             </div>
           )}

@@ -51,9 +51,10 @@ function formatDni(value: string | null) {
     return value;
   }
 
-  return new Intl.NumberFormat("es-AR").format(
-    Number(onlyNumbers)
-  );
+  // Separador de miles a mano en vez de Number(onlyNumbers): un DNI con
+  // cero inicial (poco común pero real) perdía ese cero al pasar por
+  // Number(), mostrando un DNI distinto al del documento físico.
+  return onlyNumbers.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
 
 export default async function EntradaPage({
@@ -219,7 +220,14 @@ export default async function EntradaPage({
     qrPayload,
     {
       width: 900,
-      margin: 1,
+      // El estandar QR recomienda un margen silencioso minimo de 4
+      // modulos. Con margin:1 el padding que compensaba esto vivia solo
+      // en el <div> del poster (React), no en la imagen en si -- si
+      // alguien guarda la imagen del QR sola (long-press en el celular)
+      // o la entrada se recorta/comprime al reenviarla por WhatsApp, se
+      // pierde ese padding y queda un margen real insuficiente, mas
+      // riesgo de que la camara de la puerta no lo lea bien.
+      margin: 4,
       errorCorrectionLevel: "M",
       color: {
         dark: "#050505",

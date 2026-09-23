@@ -58,7 +58,7 @@ function totalOf(quote: QuoteRow) {
 }
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
+  return new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "short", year: "numeric", timeZone: "America/Argentina/Buenos_Aires" }).format(new Date(value));
 }
 
 export default function PresupuestosClient({ quotes, missingSql }: { quotes: QuoteRow[]; missingSql: boolean }) {
