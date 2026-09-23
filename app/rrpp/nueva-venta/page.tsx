@@ -463,7 +463,8 @@ export default function NuevaVentaRRPPPage() {
   // =====================================================
 
   async function loadGeneratedEntries(
-    saleId: string
+    saleId: string,
+    waWindow: Window | null
   ) {
     setLoadingEntries(true);
     setEntryError("");
@@ -495,13 +496,16 @@ export default function NuevaVentaRRPPPage() {
       // listas las entradas abrimos WhatsApp con todo cargado — el
       // vendedor solo tiene que apretar enviar, no buscar el botón.
       sendAllWhatsApp(
-        result as EntriesResponse
+        result as EntriesResponse,
+        waWindow
       );
     } catch (err) {
       console.error(
         "ERROR CARGANDO ENTRADAS:",
         err
       );
+
+      waWindow?.close();
 
       setEntryError(
         err instanceof Error
@@ -595,6 +599,17 @@ export default function NuevaVentaRRPPPage() {
 
     setSaving(true);
 
+    // Abrimos la pestaña de WhatsApp YA, todavia dentro del gesto de click
+    // del submit (antes de cualquier await) -- si esperamos a que terminen
+    // los pedidos a la base, el navegador ya perdio el "user activation"
+    // transitorio y bloquea el popup como si fuera spam. Despues solo le
+    // cambiamos la URL una vez que sabemos el link real.
+    const waWindow =
+      window.open(
+        "",
+        "_blank"
+      );
+
     try {
       // -----------------------------------------------
       // VENTA REAL
@@ -665,13 +680,16 @@ export default function NuevaVentaRRPPPage() {
       setSaleResult(result);
 
       await loadGeneratedEntries(
-        result.sale_id
+        result.sale_id,
+        waWindow
       );
     } catch (err) {
       console.error(
         "ERROR CREANDO VENTA:",
         err
       );
+
+      waWindow?.close();
 
       setError(
         err instanceof Error
@@ -688,14 +706,18 @@ export default function NuevaVentaRRPPPage() {
   // =====================================================
 
   function sendAllWhatsApp(
-    result: EntriesResponse
+    result: EntriesResponse,
+    waWindow: Window | null
   ) {
     const number =
       normalizeWhatsAppNumber(
         result.buyer.phone
       );
 
-    if (!number) return;
+    if (!number) {
+      waWindow?.close();
+      return;
+    }
 
     const buyerName =
       result.buyer.firstName;
@@ -729,11 +751,17 @@ export default function NuevaVentaRRPPPage() {
         lines.join("\n")
       )}`;
 
-    window.open(
-      whatsappUrl,
-      "_blank",
-      "noopener,noreferrer"
-    );
+    if (waWindow) {
+      waWindow.location.href = whatsappUrl;
+    } else {
+      // El navegador ya bloqueo la pestaña vacia (o no soporta abrirla
+      // sin gesto directo) -- probamos igual, sabiendo que puede fallar.
+      window.open(
+        whatsappUrl,
+        "_blank",
+        "noopener,noreferrer"
+      );
+    }
   }
 
   function sendWhatsApp(
@@ -932,7 +960,8 @@ export default function NuevaVentaRRPPPage() {
                 type="button"
                 onClick={() =>
                   loadGeneratedEntries(
-                    saleResult.sale_id
+                    saleResult.sale_id,
+                    window.open("", "_blank")
                   )
                 }
                 className="mt-4 rounded-xl border border-orange-300/25 bg-orange-500/10 px-4 py-2.5 text-sm font-semibold text-orange-100"

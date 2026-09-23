@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 type TicketType = {
@@ -62,6 +62,19 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Al confirmar, navegamos afuera con window.location.assign y nunca
+  // volvemos a poner submitting en false (la pagina se va). Si el
+  // comprador vuelve con el boton "atras" desde Mercado Pago y el
+  // navegador restaura esta pagina desde bfcache en vez de recargarla,
+  // el boton quedaria deshabilitado para siempre sin este reset.
+  useEffect(() => {
+    function onPageShow(event: PageTransitionEvent) {
+      if (event.persisted) setSubmitting(false);
+    }
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
   const [error, setError] = useState("");
 
   const ticketCartItems = useMemo(
@@ -123,14 +136,7 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }
   }
 
   if (returningSaleId) {
-    return (
-      <div className="mt-5 rounded-[24px] border border-emerald-400/20 bg-emerald-400/[0.05] p-7 text-sm leading-6 text-emerald-100">
-        <p className="text-lg font-bold text-emerald-200">¡Gracias por tu compra!</p>
-        <p className="mt-2 text-white/60">
-          Estamos confirmando tu pago con Mercado Pago — puede tardar unos segundos. Si el pago se aprobó, tu entrada te va a llegar a tu WhatsApp o email, y también podés revisar el estado escribiéndole al organizador con el número de referencia: <span className="font-mono text-white/80">{returningSaleId}</span>.
-        </p>
-      </div>
-    );
+    return <ReturningSaleStatus slug={slug} saleId={returningSaleId} />;
   }
 
   return (
@@ -323,6 +329,83 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }
         </form>
       )}
     </>
+  );
+}
+
+type SaleStatus = "checking" | "pending_approval" | "confirmed" | "cancelled" | "refunded" | "unknown";
+
+// Pantalla de vuelta de Mercado Pago. El webhook normalmente confirma la
+// venta en segundos, pero si esa notificacion puntual se pierde o llega
+// fuera de orden, antes no habia forma de que el comprador supiera si su
+// pago se acredito o no -- se quedaba mirando un mensaje generico para
+// siempre. Esto chequea el estado real una vez solo al entrar (dandole
+// tiempo al webhook) y deja un boton para volver a intentar a mano.
+function ReturningSaleStatus({ slug, saleId }: { slug: string; saleId: string }) {
+  const [status, setStatus] = useState<SaleStatus>("checking");
+  const [checking, setChecking] = useState(false);
+
+  async function verify() {
+    setChecking(true);
+    try {
+      const response = await fetch(`/api/e/${slug}/checkout/verificar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ saleId }),
+      });
+      const result = await response.json();
+      setStatus(response.ok && result.status ? (result.status as SaleStatus) : "unknown");
+    } catch {
+      setStatus("unknown");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  useEffect(() => {
+    const timer = setTimeout(() => void verify(), 4000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saleId]);
+
+  if (status === "confirmed") {
+    return (
+      <div className="mt-5 rounded-[24px] border border-emerald-400/20 bg-emerald-400/[0.05] p-7 text-sm leading-6 text-emerald-100">
+        <p className="text-lg font-bold text-emerald-200">¡Pago confirmado!</p>
+        <p className="mt-2 text-white/60">
+          Tu entrada te va a llegar a tu WhatsApp o email en unos instantes. Número de referencia: <span className="font-mono text-white/80">{saleId}</span>.
+        </p>
+      </div>
+    );
+  }
+
+  if (status === "cancelled" || status === "refunded") {
+    return (
+      <div className="mt-5 rounded-[24px] border border-white/15 bg-white/[0.03] p-7 text-sm leading-6 text-white/70">
+        <p className="text-lg font-bold text-white/85">
+          {status === "refunded" ? "Este pago fue reembolsado" : "No pudimos confirmar el pago"}
+        </p>
+        <p className="mt-2 text-white/50">
+          Si te descontaron dinero y esto no coincide, escribile al organizador con el número de referencia: <span className="font-mono text-white/80">{saleId}</span>.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-5 rounded-[24px] border border-emerald-400/20 bg-emerald-400/[0.05] p-7 text-sm leading-6 text-emerald-100">
+      <p className="text-lg font-bold text-emerald-200">¡Gracias por tu compra!</p>
+      <p className="mt-2 text-white/60">
+        Estamos confirmando tu pago con Mercado Pago — puede tardar unos segundos. Si el pago se aprobó, tu entrada te va a llegar a tu WhatsApp o email, y también podés revisar el estado escribiéndole al organizador con el número de referencia: <span className="font-mono text-white/80">{saleId}</span>.
+      </p>
+      <button
+        type="button"
+        onClick={() => void verify()}
+        disabled={checking}
+        className="mt-4 h-11 rounded-xl border border-emerald-300/25 bg-emerald-400/10 px-5 text-sm font-bold text-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {checking ? "Verificando..." : "Verificar mi pago"}
+      </button>
+    </div>
   );
 }
 

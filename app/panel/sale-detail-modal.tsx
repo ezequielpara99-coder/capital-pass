@@ -4,6 +4,7 @@ import {
   FormEvent,
   ReactNode,
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -162,6 +163,10 @@ export default function SaleDetailModal({
     useState<SaleDetail | null>(
       null
     );
+
+  // Si se abre el detalle de otra venta antes de que esta carga termine,
+  // el request viejo no debe pisar el estado con datos de la venta nueva.
+  const loadIdRef = useRef(0);
 
   const [
     loading,
@@ -330,6 +335,9 @@ export default function SaleDetailModal({
       return;
     }
 
+    const loadId =
+      ++loadIdRef.current;
+
     setLoading(true);
     setError("");
 
@@ -346,6 +354,13 @@ export default function SaleDetailModal({
       const data =
         await response.json();
 
+      if (
+        loadIdRef.current !==
+        loadId
+      ) {
+        return;
+      }
+
       if (!response.ok) {
         throw new Error(
           data?.error ??
@@ -357,13 +372,25 @@ export default function SaleDetailModal({
         data as SaleDetail
       );
     } catch (err) {
+      if (
+        loadIdRef.current !==
+        loadId
+      ) {
+        return;
+      }
+
       setError(
         err instanceof Error
           ? err.message
           : "No se pudo cargar la venta."
       );
     } finally {
-      setLoading(false);
+      if (
+        loadIdRef.current ===
+        loadId
+      ) {
+        setLoading(false);
+      }
     }
   }
 

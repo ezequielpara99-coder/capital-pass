@@ -408,6 +408,21 @@ export default function DoorSellerPage() {
   // DISPONIBILIDAD DE PUERTA
   // =====================================================
 
+  // Si el vendedor deja la pantalla abierta antes de que arranque (o
+  // despues de que termine) la ventana de venta en puerta, esto tiene que
+  // reflejarlo solo sin necesitar un F5 -- por eso se recalcula cada 30
+  // segundos, no solo cuando cambia el evento.
+  const [nowTick, setNowTick] =
+    useState(() => nowMs());
+
+  useEffect(() => {
+    const interval = setInterval(
+      () => setNowTick(nowMs()),
+      30000
+    );
+    return () => clearInterval(interval);
+  }, []);
+
   const doorAvailable =
     useMemo(() => {
       if (!event) {
@@ -418,7 +433,7 @@ export default function DoorSellerPage() {
         return false;
       }
 
-      const now = nowMs();
+      const now = nowTick;
 
       if (
         event.door_sales_start_at &&
@@ -441,7 +456,7 @@ export default function DoorSellerPage() {
       }
 
       return true;
-    }, [event]);
+    }, [event, nowTick]);
 
   // =====================================================
   // CREAR VENTA
@@ -484,6 +499,17 @@ export default function DoorSellerPage() {
 
     setSelling(true);
     setError("");
+
+    // Abrimos la pestaña de WhatsApp YA, todavia dentro del gesto de click
+    // del submit (antes de cualquier await) -- si esperamos a que terminen
+    // los pedidos a la base, el navegador ya perdio el "user activation"
+    // transitorio y bloquea el popup como si fuera spam. Despues solo le
+    // cambiamos la URL una vez que sabemos el link real.
+    const waWindow =
+      window.open(
+        "",
+        "_blank"
+      );
 
     try {
       const {
@@ -559,13 +585,16 @@ export default function DoorSellerPage() {
       // listas las entradas abrimos WhatsApp con todo cargado — el
       // vendedor solo tiene que apretar enviar, no buscar el botón.
       sendAllWhatsApp(
-        ticketData as SaleResult
+        ticketData as SaleResult,
+        waWindow
       );
     } catch (err) {
       console.error(
         "ERROR CREANDO VENTA PUERTA:",
         err
       );
+
+      waWindow?.close();
 
       setError(
         err instanceof Error
@@ -605,12 +634,16 @@ export default function DoorSellerPage() {
   // =====================================================
 
   function sendAllWhatsApp(
-    result: SaleResult
+    result: SaleResult,
+    waWindow: Window | null
   ) {
     const number =
       normalizeWhatsApp(result.buyer.phone ?? "");
 
-    if (!number) return;
+    if (!number) {
+      waWindow?.close();
+      return;
+    }
 
     const lines = [
       `🎟️ *Tus entradas para ${result.event.name}*`,
@@ -636,12 +669,18 @@ export default function DoorSellerPage() {
       "Capital Pass"
     );
 
-    window.open(
+    const url =
       `https://wa.me/${number}?text=${encodeURIComponent(
         lines.join("\n")
-      )}`,
-      "_blank"
-    );
+      )}`;
+
+    if (waWindow) {
+      waWindow.location.href = url;
+    } else {
+      // El navegador ya bloqueo la pestaña vacia (o no soporta abrirla
+      // sin gesto directo) -- probamos igual, sabiendo que puede fallar.
+      window.open(url, "_blank");
+    }
   }
 
   function sendWhatsApp(

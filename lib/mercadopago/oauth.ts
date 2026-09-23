@@ -86,12 +86,28 @@ export async function accessTokenFor(organizationId: string) {
   if (expiresInMs > 5 * 60 * 1000) return data.access_token as string;
 
   const refreshed = await tokenRequest({ grant_type: "refresh_token", refresh_token: data.refresh_token });
-  const { error: updateError } = await admin.from("organization_mercadopago_accounts").update({
-    access_token: refreshed.access_token,
-    refresh_token: refreshed.refresh_token,
-    expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  }).eq("organization_id", organizationId);
-  if (updateError) throw new Error("No se pudo renovar la conexion con Mercado Pago.");
+
+  // Mercado Pago ya invalido el refresh_token viejo apenas respondio esto
+  // (rotacion estandar de OAuth): si el guardado en la base falla por un
+  // error transitorio, el organizador queda con una conexion rota hasta
+  // que reconecte a mano, sin ningun aviso. Reintentamos un par de veces
+  // antes de rendirnos, para no perder el token nuevo por un hipo puntual
+  // de la base.
+  let updateError: { message: string } | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
+    const result = await admin.from("organization_mercadopago_accounts").update({
+      access_token: refreshed.access_token,
+      refresh_token: refreshed.refresh_token,
+      expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("organization_id", organizationId);
+    updateError = result.error;
+    if (!updateError) break;
+  }
+  if (updateError) {
+    console.error(`MERCADOPAGO OAUTH: no se pudo guardar el token renovado para la organizacion ${organizationId} tras reintentar.`, updateError);
+    throw new Error("No se pudo renovar la conexion con Mercado Pago.");
+  }
   return refreshed.access_token;
 }

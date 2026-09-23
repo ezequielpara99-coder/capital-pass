@@ -1,7 +1,7 @@
 import "server-only";
 import type { User } from "@supabase/supabase-js";
 import { createAdminClient } from "../supabase/admin";
-import { destinationFor, signupFromReference, upgradeChargeFromReference, verifiedPayment, type BillingMembership, type ProviderPayment } from "./rules";
+import { destinationFor, saleFromReference, signupFromReference, upgradeChargeFromReference, verifiedPayment, type BillingMembership, type ProviderPayment } from "./rules";
 import { getPayment, getPlatformCollectorId, paymentsForReference } from "./provider";
 import { sendSubscriptionReceipt } from "../email/subscription-receipt";
 import { sendPushToPlatformAdmins } from "../push/server";
@@ -156,12 +156,51 @@ async function applyUpgradeCharge(payment: ProviderPayment, chargeId: string) {
   return true;
 }
 
+// =========================================================
+// VENTA DE ENTRADAS ONLINE (checkout del comprador final)
+// =========================================================
+
+async function applySalePayment(payment: ProviderPayment, saleId: string) {
+  const admin = createAdminClient();
+  const { data: sale, error } = await admin.from("sales")
+    .select("id, organization_id, total_charged_minor, currency")
+    .eq("id", saleId).eq("channel", "online").maybeSingle();
+  if (error) throw new Error("No se pudo consultar la venta.");
+  if (!sale || sale.total_charged_minor == null) return false;
+  const { data: account } = await admin.from("organization_mercadopago_accounts")
+    .select("mp_user_id").eq("organization_id", sale.organization_id).maybeSingle();
+  if (!account) return false;
+  const verified = verifiedPayment(payment, {
+    amount: Number(sale.total_charged_minor), currency: sale.currency, collectorId: account.mp_user_id,
+    live: process.env.MERCADOPAGO_ENV !== "sandbox",
+  });
+  const result = await admin.rpc("confirm_online_sale", { p_sale_id: saleId, p_status: verified.status });
+  if (result.error) throw new Error("No se pudo confirmar la venta.");
+  return true;
+}
+
+// Mismo mecanismo que reconcileUpgradeCharge/reconcileSignup: busca el pago
+// real por external_reference en vez de depender de que el webhook ya haya
+// llegado. Lo usa el comprador final desde "Verificar mi pago" en la
+// pantalla de vuelta de Mercado Pago, sin necesitar sesion (la referencia
+// es el UUID de la venta, ya visible en esa misma URL).
+export async function reconcileOnlineSale(saleId: string) {
+  const payments = await paymentsForReference(`capitalpass_sale:${saleId}`);
+  let applied = false;
+  for (const payment of payments) {
+    if (await applySalePayment(payment, saleId)) applied = true;
+  }
+  return applied;
+}
+
 export async function reconcilePayment(paymentId: string) {
   const payment = await getPayment(paymentId);
   const signupId = signupFromReference(payment.external_reference);
   if (signupId) return applyPayment(payment, signupId);
   const chargeId = upgradeChargeFromReference(payment.external_reference);
   if (chargeId) return applyUpgradeCharge(payment, chargeId);
+  const saleId = saleFromReference(payment.external_reference);
+  if (saleId) return applySalePayment(payment, saleId);
   return false;
 }
 

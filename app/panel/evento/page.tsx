@@ -129,6 +129,7 @@ function ManageEventContent() {
   // null = todavia no sabemos; false = la base no tiene la columna del color.
   const [accentSupported, setAccentSupported] = useState<boolean | null>(null);
   const accentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadIdRef = useRef(0);
   const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
   const [tickets, setTickets] = useState<TicketRecord[]>([]);
   const [saleItems, setSaleItems] = useState<SaleItemRecord[]>([]);
@@ -172,6 +173,13 @@ function ManageEventContent() {
   // =======================================================
 
   async function loadData() {
+    // Si el organizador cambia de evento de nuevo antes de que esta carga
+    // termine (ej: adelante/atras del navegador entre dos eventos, sin
+    // pasar por una recarga completa de pagina), esta corrida queda
+    // "vieja" y no debe pisar el estado con datos del evento anterior.
+    const loadId = ++loadIdRef.current;
+    const stale = () => loadIdRef.current !== loadId;
+
     const supabase = createClient();
 
     setLoading(true);
@@ -179,6 +187,8 @@ function ManageEventContent() {
     const {
       data: { user },
     } = await supabase.auth.getUser();
+
+    if (stale()) return;
 
     if (!user) {
       router.push("/login");
@@ -229,6 +239,8 @@ function ManageEventContent() {
         .limit(1));
     }
 
+    if (stale()) return;
+
     if (eventError) {
       showError("No se pudo cargar el evento.");
       setLoading(false);
@@ -239,6 +251,8 @@ function ManageEventContent() {
       .from("events")
       .select("id, name")
       .order("starts_at", { ascending: false });
+
+    if (stale()) return;
 
     setAllEvents(eventOptions ?? []);
 
@@ -261,6 +275,8 @@ function ManageEventContent() {
       .select("ticket_accent_color")
       .eq("id", selectedEvent.id)
       .maybeSingle();
+
+    if (stale()) return;
 
     setAccentSupported(!accentError);
     setTicketAccent(
@@ -316,6 +332,8 @@ function ManageEventContent() {
         .eq("event_id", selectedEvent.id)
         .order("created_at", { ascending: true });
 
+    if (stale()) return;
+
     if (ticketTypeError) {
       showError("No se pudieron cargar las tandas.");
       setLoading(false);
@@ -336,11 +354,14 @@ function ManageEventContent() {
           eventProductId: ep.id,
           name: ep.product?.name ?? "Producto",
         }));
+        if (stale()) return;
         setEventProducts(options);
       } else {
+        if (stale()) return;
         setEventProducts([]);
       }
     } catch {
+      if (stale()) return;
       setEventProducts([]);
     }
 
@@ -348,11 +369,14 @@ function ManageEventContent() {
       const packsResponse = await fetch(`/api/stock/packs?eventId=${selectedEvent.id}`, { cache: "no-store" });
       if (packsResponse.ok) {
         const packsResult = await packsResponse.json();
+        if (stale()) return;
         setPacks((packsResult.packs ?? []) as TicketPack[]);
       }
     } catch {
       // silencioso: la seccion de packs se muestra vacia
     }
+
+    if (stale()) return;
 
     // TICKETS YA GENERADOS
     const { data: ticketData } = await supabase
@@ -364,6 +388,8 @@ function ManageEventContent() {
       `)
       .eq("event_id", selectedEvent.id);
 
+    if (stale()) return;
+
     setTickets((ticketData ?? []) as TicketRecord[]);
 
     // DETALLES DE VENTA
@@ -374,6 +400,8 @@ function ManageEventContent() {
         quantity
       `)
       .eq("event_id", selectedEvent.id);
+
+    if (stale()) return;
 
     setSaleItems((saleItemData ?? []) as SaleItemRecord[]);
 
