@@ -175,6 +175,11 @@ export default function ControlPage() {
             "controller"
           )
           .eq("active", true)
+          // Sin order by, Postgres no garantiza que fila devuelve si el
+          // controlador quedo asignado a mas de un evento activo a la
+          // vez -- podia mostrar/validar entradas de un evento distinto
+          // en cada refresh. Se prioriza la asignacion mas reciente.
+          .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
 

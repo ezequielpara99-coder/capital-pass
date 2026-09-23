@@ -25,36 +25,46 @@ export async function GET(request: NextRequest) {
     .maybeSingle();
   if (!member) return NextResponse.json({ error: "Tu cuenta no tiene acceso activo a la barra." }, { status: 403 });
 
+  // Sin order by, Postgres no garantiza que fila devuelve si el
+  // bartender quedo asignado a mas de un evento activo a la vez --
+  // podia devolver un evento/barra distinto al de /api/stock/bartender-context
+  // en la misma sesion. Se prioriza la asignacion mas reciente.
   const { data: staff } = await admin
     .from("event_staff")
     .select("event_id, bar_id")
     .eq("organization_member_id", member.id)
     .eq("staff_role", "bartender")
     .eq("active", true)
+    .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (!staff || !staff.bar_id) return NextResponse.json({ error: "No tenés ninguna barra asignada." }, { status: 403 });
 
+  // combo_type/combo_event_product_id se leen del SNAPSHOT de la entrada
+  // (tickets), no de la tanda en vivo (ticket_types) -- si el organizador
+  // edita el combo de la tanda despues de vender, las entradas ya
+  // emitidas tienen que seguir validando contra lo que el comprador
+  // realmente pago, no contra la configuracion nueva.
   const { data: ticket } = await admin
     .from("tickets")
-    .select("id, status, ticket_type_id, combo_remaining_quantity, combo_remaining_credit_minor, sale_id")
+    .select("id, status, ticket_type_id, combo_type, combo_event_product_id, combo_remaining_quantity, combo_remaining_credit_minor, sale_id")
     .eq("event_id", staff.event_id)
     .ilike("manual_code", manualCode)
     .maybeSingle();
 
   if (!ticket) return NextResponse.json({ error: "No se encontró ninguna entrada con ese código." }, { status: 404 });
-
-  const { data: ticketType } = await admin
-    .from("ticket_types")
-    .select("name, combo_type, combo_event_product_id")
-    .eq("id", ticket.ticket_type_id)
-    .maybeSingle();
-  if (!ticketType || !ticketType.combo_type) {
+  if (!ticket.combo_type) {
     return NextResponse.json({ error: "Esta entrada no incluye consumición." }, { status: 400 });
   }
   if (ticket.status === "cancelled") {
     return NextResponse.json({ error: "Esta entrada fue anulada." }, { status: 400 });
   }
+
+  const { data: ticketType } = await admin
+    .from("ticket_types")
+    .select("name")
+    .eq("id", ticket.ticket_type_id)
+    .maybeSingle();
 
   const { data: sale } = await admin.from("sales").select("buyer_id").eq("id", ticket.sale_id).maybeSingle();
   const { data: buyer } = sale?.buyer_id
@@ -62,11 +72,11 @@ export async function GET(request: NextRequest) {
     : { data: null };
 
   let includedProductName: string | null = null;
-  if (ticketType.combo_type === "producto" && ticketType.combo_event_product_id) {
+  if (ticket.combo_type === "producto" && ticket.combo_event_product_id) {
     const { data: ep } = await admin
       .from("event_products")
       .select("product_id")
-      .eq("id", ticketType.combo_event_product_id)
+      .eq("id", ticket.combo_event_product_id)
       .maybeSingle();
     if (ep) {
       const { data: product } = await admin.from("products").select("name").eq("id", ep.product_id).maybeSingle();
@@ -79,9 +89,9 @@ export async function GET(request: NextRequest) {
     ticket: {
       id: ticket.id,
       buyerName: buyer ? `${buyer.first_name} ${buyer.last_name}`.trim() : "Comprador",
-      ticketTypeName: ticketType.name,
-      comboType: ticketType.combo_type as "producto" | "credito",
-      comboEventProductId: ticketType.combo_event_product_id,
+      ticketTypeName: ticketType?.name ?? "Entrada",
+      comboType: ticket.combo_type as "producto" | "credito",
+      comboEventProductId: ticket.combo_event_product_id,
       includedProductName,
       remainingQuantity: ticket.combo_remaining_quantity,
       remainingCreditMinor: ticket.combo_remaining_credit_minor,

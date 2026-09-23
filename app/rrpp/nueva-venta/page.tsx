@@ -4,6 +4,7 @@ import {
   FormEvent,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -225,6 +226,16 @@ export default function NuevaVentaRRPPPage() {
     ? selectedPack.quantity_per_pack * quantity
     : quantity;
 
+  // Se reusa en un reintento de la MISMA venta (ej. se corta la wifi
+  // justo cuando el servidor ya la registro) y se renueva si cambia
+  // algo del pedido -- sin esto, reintentar tras perder la respuesta
+  // generaba una segunda venta y descontaba cupo dos veces por un cobro
+  // que se hizo una sola vez.
+  const saleAttemptKeyRef = useRef<string>(crypto.randomUUID());
+  useEffect(() => {
+    saleAttemptKeyRef.current = crypto.randomUUID();
+  }, [ticketTypeId, packId, quantity, paymentMethod, firstName, lastName, dni, phone]);
+
   // =====================================================
   // CARGAR EVENTO + TANDAS
   // =====================================================
@@ -300,6 +311,11 @@ export default function NuevaVentaRRPPPage() {
             "rrpp"
           )
           .eq("active", true)
+          // Sin order by, Postgres no garantiza que fila devuelve si el
+          // RRPP quedo asignado a mas de un evento activo a la vez -- se
+          // prioriza la asignacion mas reciente para que sea consistente
+          // entre refrescos de pantalla.
+          .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -647,6 +663,9 @@ export default function NuevaVentaRRPPPage() {
 
           p_pack_id:
             selectedPack ? selectedPack.id : null,
+
+          p_idempotency_key:
+            saleAttemptKeyRef.current,
         }
       );
 

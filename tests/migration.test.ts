@@ -45,6 +45,8 @@ const stockAccessMembresiaMigration = readFileSync(new URL("../supabase/migratio
 // directa, sin ninguna funcion de este harness que dependa de ellas.
 const idempotenciaBarraMigration = readFileSync(new URL("../supabase/migrations/20260951_idempotencia_venta_barra.sql", import.meta.url), "utf8");
 const indicesMigration = readFileSync(new URL("../supabase/migrations/20260952_indices_columnas_calientes.sql", import.meta.url), "utf8");
+const comboSnapshotMigration = readFileSync(new URL("../supabase/migrations/20260953_combo_snapshot_por_entrada.sql", import.meta.url), "utf8");
+const idempotenciaCreateSaleMigration = readFileSync(new URL("../supabase/migrations/20260954_idempotencia_create_sale.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -133,6 +135,8 @@ async function database() {
   await db.exec(stockAccessMembresiaMigration);
   await db.exec(idempotenciaBarraMigration);
   await db.exec(indicesMigration);
+  await db.exec(comboSnapshotMigration);
+  await db.exec(idempotenciaCreateSaleMigration);
   return db;
 }
 
@@ -844,6 +848,21 @@ test("combos (entrada + consumicion) y packs de entradas", async () => {
   assert.equal(plainSale.rows[0].tickets_created, 2);
   assert.equal(await scalar(`select count(*)::int from tickets where sale_id = '${plainSale.rows[0].sale_id}' and combo_remaining_quantity is null and combo_remaining_credit_minor is null`), 2);
 
+  // Idempotencia: un reintento con la MISMA clave (ej. el vendedor de
+  // puerta reintenta tras perder la respuesta por un corte de wifi) no
+  // debe crear una segunda venta ni descontar cupo de nuevo.
+  const doorSaleKey = "c0ffee00-0000-4000-8000-000000000099";
+  const doorSaleFirst = await db.query<{ sale_id: string; total_minor: string; tickets_created: number }>(
+    `select * from create_sale('${event}','${ticketTypeGeneral}',3,'Cliente','Puerta','30777777','3462777777',null,'efectivo',null,'${doorSaleKey}')`
+  );
+  const doorSaleRetry = await db.query<{ sale_id: string; total_minor: string; tickets_created: number }>(
+    `select * from create_sale('${event}','${ticketTypeGeneral}',3,'Cliente','Puerta','30777777','3462777777',null,'efectivo',null,'${doorSaleKey}')`
+  );
+  assert.equal(doorSaleRetry.rows[0].sale_id, doorSaleFirst.rows[0].sale_id, "el reintento devuelve la MISMA venta, no crea una nueva");
+  assert.equal(doorSaleRetry.rows[0].tickets_created, 3);
+  assert.equal(await scalar(`select count(*)::int from sales where buyer_id = (select buyer_id from sales where id = '${doorSaleFirst.rows[0].sale_id}')`), 1, "no se duplico la venta");
+  assert.equal(await scalar(`select count(*)::int from tickets where sale_id = '${doorSaleFirst.rows[0].sale_id}'`), 3, "no se duplicaron las entradas ni se desconto cupo dos veces");
+
   // Venta de un pack: 1 pack de "Pack x3 General" genera 3 entradas de General,
   // cobra el precio del pack (no 3 x precio de lista), y prorratea el
   // unit_price_minor de sale_items para que siga cuadrando con el total.
@@ -978,6 +997,35 @@ test("combos (entrada + consumicion) y packs de entradas", async () => {
     `select * from redeem_combo_ticket('${bar}','VIPCODE1','${eventProductFernet}',2)`
   );
   assert.equal(redeemAfterCancel.rows[0].remaining_quantity, 0, "se pueden volver a canjear los 2 Fernet completos");
+
+  // Editar el combo de la tanda DESPUES de vender no debe romper el
+  // canje de entradas ya emitidas: tienen que seguir validando contra lo
+  // que el comprador realmente pago (snapshot en la entrada), no contra
+  // la configuracion nueva de la tanda.
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);`);
+  const vip2Sale = await db.query<{ sale_id: string }>(
+    `select * from create_sale('${event}','${ticketTypeVip}',1,'Cliente','Vip2','30666666','3462666666',null)`
+  );
+  const vip2TicketId = await scalar(`select id::text from tickets where sale_id = '${vip2Sale.rows[0].sale_id}'`);
+  await db.exec(`update tickets set manual_code = 'VIPCODE2' where id = '${vip2TicketId}'`);
+  assert.equal(await scalar(`select combo_type from tickets where id = '${vip2TicketId}'`), "producto", "la entrada emitida guarda su propio snapshot del combo");
+  assert.equal(await scalar(`select combo_event_product_id::text from tickets where id = '${vip2TicketId}'`), eventProductFernet);
+
+  // El organizador cambia la tanda VIP de "incluye Fernet" a "incluye Coca".
+  await db.exec(`update ticket_types set combo_event_product_id = '${eventProductCoca}' where id = '${ticketTypeVip}'`);
+
+  await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
+  // La entrada ya vendida sigue canjeando Fernet (lo que el comprador
+  // pago), no Coca (la configuracion nueva de la tanda).
+  const redeemAfterEdit = await db.query<{ remaining_quantity: number }>(
+    `select * from redeem_combo_ticket('${bar}','VIPCODE2','${eventProductFernet}',1)`
+  );
+  assert.equal(redeemAfterEdit.rows[0].remaining_quantity, 1, "sigue canjeando el Fernet que tenia incluido al momento de la venta");
+  await assert.rejects(
+    () => db.query(`select redeem_combo_ticket('${bar}','VIPCODE2','${eventProductCoca}',1)`),
+    /no incluye ese producto/,
+    "no debe aceptar el producto nuevo de la tanda editada -- la entrada ya vendida no cambio de combo"
+  );
 
   await db.close();
 });

@@ -4,6 +4,7 @@ import {
   FormEvent,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -170,6 +171,16 @@ export default function DoorSellerPage() {
   const [whatsAppBlocked, setWhatsAppBlocked] =
     useState(false);
 
+  // Se reusa en un reintento de la MISMA venta (ej. se corta la wifi
+  // justo cuando el servidor ya la registro) y se renueva si cambia
+  // algo del pedido -- sin esto, reintentar tras perder la respuesta
+  // generaba una segunda venta y descontaba cupo dos veces por un cobro
+  // que se hizo una sola vez.
+  const saleAttemptKeyRef = useRef<string>(crypto.randomUUID());
+  useEffect(() => {
+    saleAttemptKeyRef.current = crypto.randomUUID();
+  }, [ticketTypeId, packId, quantity, paymentMethod, firstName, lastName, dni, phone]);
+
   // =====================================================
   // CARGAR VENDEDOR + EVENTO
   // =====================================================
@@ -255,6 +266,11 @@ export default function DoorSellerPage() {
             "door_seller"
           )
           .eq("active", true)
+          // Sin order by, Postgres no garantiza que fila devuelve si el
+          // vendedor quedo asignado a mas de un evento activo a la vez
+          // -- podia mostrar/vender entradas de un evento distinto en
+          // cada refresh. Se prioriza la asignacion mas reciente.
+          .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -548,6 +564,9 @@ export default function DoorSellerPage() {
 
           p_pack_id:
             selectedPack ? selectedPack.id : null,
+
+          p_idempotency_key:
+            saleAttemptKeyRef.current,
         }
       );
 
