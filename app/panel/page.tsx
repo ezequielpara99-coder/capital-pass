@@ -132,6 +132,9 @@ export default async function OrganizerPanel({
       )
       .order("starts_at", {
         ascending: false,
+      })
+      .order("created_at", {
+        ascending: false,
       });
 
   const event =

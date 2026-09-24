@@ -231,11 +231,12 @@ function ManageEventContent() {
 
     let { data: events, error: eventError } = wantedEventId
       ? await eventQuery().eq("id", wantedEventId).limit(1)
-      : await eventQuery().order("starts_at", { ascending: false }).limit(1);
+      : await eventQuery().order("starts_at", { ascending: false }).order("created_at", { ascending: false }).limit(1);
 
     if (!eventError && !events?.length && !requestedEventId) {
       ({ data: events, error: eventError } = await eventQuery()
         .order("starts_at", { ascending: false })
+        .order("created_at", { ascending: false })
         .limit(1));
     }
 
@@ -250,7 +251,8 @@ function ManageEventContent() {
     const { data: eventOptions } = await supabase
       .from("events")
       .select("id, name")
-      .order("starts_at", { ascending: false });
+      .order("starts_at", { ascending: false })
+      .order("created_at", { ascending: false });
 
     if (stale()) return;
 

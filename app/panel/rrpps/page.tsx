@@ -102,6 +102,12 @@ export default async function RRPPsPage({
       {
         ascending: false,
       }
+    )
+    .order(
+      "created_at",
+      {
+        ascending: false,
+      }
     );
 
   const event =

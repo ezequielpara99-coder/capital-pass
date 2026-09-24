@@ -41,7 +41,8 @@ export default async function RRPPMesasPage() {
       .from("events")
       .select("id, name, starts_at")
       .in("id", eventIds)
-      .order("starts_at", { ascending: true });
+      .order("starts_at", { ascending: true })
+      .order("created_at", { ascending: false });
 
     const selected = events?.[0];
     if (selected) {

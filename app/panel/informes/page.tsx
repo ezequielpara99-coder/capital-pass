@@ -207,6 +207,9 @@ export default async function InformesPage() {
     )
     .order("starts_at", {
       ascending: false,
+    })
+    .order("created_at", {
+      ascending: false,
     });
 
   const events =

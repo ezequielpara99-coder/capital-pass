@@ -235,6 +235,12 @@ export default async function NotificationsPage({
       {
         ascending: false,
       }
+    )
+    .order(
+      "created_at",
+      {
+        ascending: false,
+      }
     );
 
   const event =

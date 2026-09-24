@@ -41,7 +41,8 @@ export async function GET() {
       .from("events")
       .select("id, name, starts_at")
       .eq("organization_id", membership.organization_id)
-      .order("starts_at", { ascending: false });
+      .order("starts_at", { ascending: false })
+      .order("created_at", { ascending: false });
 
     const event = await pickSelectedEvent(events ?? []);
 

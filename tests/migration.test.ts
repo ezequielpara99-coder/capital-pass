@@ -49,6 +49,7 @@ const comboSnapshotMigration = readFileSync(new URL("../supabase/migrations/2026
 const idempotenciaCreateSaleMigration = readFileSync(new URL("../supabase/migrations/20260954_idempotencia_create_sale.sql", import.meta.url), "utf8");
 const adminDashboardTotalsMigration = readFileSync(new URL("../supabase/migrations/20260956_admin_dashboard_totales_reales.sql", import.meta.url), "utf8");
 const migracionesRecuperadasMigration = readFileSync(new URL("../supabase/migrations/20260957_recupera_migraciones_nunca_aplicadas.sql", import.meta.url), "utf8");
+const cancelBarSaleSnapshotMigration = readFileSync(new URL("../supabase/migrations/20260958_cancel_bar_sale_usa_snapshot_combo.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -141,6 +142,7 @@ async function database() {
   await db.exec(idempotenciaCreateSaleMigration);
   await db.exec(adminDashboardTotalsMigration);
   await db.exec(migracionesRecuperadasMigration);
+  await db.exec(cancelBarSaleSnapshotMigration);
   return db;
 }
 
@@ -1029,6 +1031,27 @@ test("combos (entrada + consumicion) y packs de entradas", async () => {
     () => db.query(`select redeem_combo_ticket('${bar}','VIPCODE2','${eventProductCoca}',1)`),
     /no incluye ese producto/,
     "no debe aceptar el producto nuevo de la tanda editada -- la entrada ya vendida no cambio de combo"
+  );
+
+  // cancel_bar_sale tiene que restaurar el saldo de la entrada leyendo el
+  // SNAPSHOT de la propia entrada (tickets.combo_type), no la
+  // configuracion en vivo de la tanda -- si el organizador cambio el tipo
+  // de combo de la tanda (producto -> credito) DESPUES del canje, cancelar
+  // esa venta no debe perderse el saldo ni incrementar el campo
+  // equivocado.
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);`);
+  const vip2RedeemSaleId = await scalar(`select id::text from bar_sales where ticket_id = '${vip2TicketId}' and payment_method = 'combo'`);
+  await db.exec(`update ticket_types set combo_type = 'credito', combo_event_product_id = null, combo_quantity = null, combo_credit_minor = 5000 where id = '${ticketTypeVip}'`);
+  await db.query(`select cancel_bar_sale('${vip2RedeemSaleId}','Test cancelacion tras editar tipo de combo')`);
+  assert.equal(
+    await scalar(`select combo_remaining_quantity from tickets where id = '${vip2TicketId}'`),
+    2,
+    "restaura combo_remaining_quantity (el campo real de esta entrada) aunque la tanda ahora sea tipo credito"
+  );
+  assert.equal(
+    await scalar(`select combo_remaining_credit_minor from tickets where id = '${vip2TicketId}'`),
+    null,
+    "no incrementa combo_remaining_credit_minor -- esta entrada nunca usa ese campo, su snapshot sigue siendo tipo producto"
   );
 
   await db.close();

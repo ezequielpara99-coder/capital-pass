@@ -138,7 +138,8 @@ export default async function RRPPPage() {
       .from("events")
       .select("id, name, starts_at")
       .in("id", eventIds)
-      .order("starts_at", { ascending: true });
+      .order("starts_at", { ascending: true })
+      .order("created_at", { ascending: false });
 
     events = (eventsData ?? []) as EventRow[];
   }
