@@ -113,20 +113,23 @@ async function applyPayment(payment: ProviderPayment, signupId: string) {
     } catch { console.error("BILLING: recibo pendiente de envio."); }
   }
   // Aviso push a los admins de la plataforma cuando una organizacion nueva
-  // paga por primera vez (no en cada renovacion).
-  if (verified.status === "approved") {
+  // paga por primera vez (no en cada renovacion). organizations.
+  // new_subscription_notified_at se reclama con un UPDATE atomico: si dos
+  // llamadas a applyPayment corren casi al mismo tiempo para el primer
+  // pago (ej. el polling de /cuenta y un reintento del webhook), solo una
+  // gana la carrera y manda el push -- antes se recontaba en vivo cuantos
+  // pagos aprobados tenia la organizacion en cada llamada, asi que
+  // cualquier reintento dentro del primer periodo (antes de la primera
+  // renovacion) volvia a mandar la misma alerta.
+  if (verified.status === "approved" && signup.organization_id) {
     try {
-      const { data: orgSignups } = await admin
-        .from("subscription_signups")
-        .select("id")
-        .eq("organization_id", signup.organization_id);
-      const orgSignupIds = (orgSignups ?? []).map((s) => s.id);
-      const { count } = await admin
-        .from("subscription_payments")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "approved")
-        .in("signup_id", orgSignupIds);
-      if (count === 1) {
+      const claimed = await admin
+        .from("organizations")
+        .update({ new_subscription_notified_at: new Date().toISOString() })
+        .eq("id", signup.organization_id)
+        .is("new_subscription_notified_at", null)
+        .select("id");
+      if ((claimed.data?.length ?? 0) > 0) {
         await sendPushToPlatformAdmins({
           title: "🎉 Nueva suscripción",
           body: `${signup.organization_name} se suscribió a Capital Pass.`,

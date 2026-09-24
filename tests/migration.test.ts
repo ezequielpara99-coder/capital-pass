@@ -54,6 +54,8 @@ const validateTicketMethodMigration = readFileSync(new URL("../supabase/migratio
 const confirmOnlineSaleAcumulaCupoMigration = readFileSync(new URL("../supabase/migrations/20260960_confirm_online_sale_acumula_cupo_por_tanda.sql", import.meta.url), "utf8");
 const snapshotComisionRrppMigration = readFileSync(new URL("../supabase/migrations/20260961_snapshot_comision_rrpp.sql", import.meta.url), "utf8");
 const processTicketReturnMigration = readFileSync(new URL("../supabase/migrations/20260962_process_ticket_return_sin_race_de_combo.sql", import.meta.url), "utf8");
+const cpPrepareCheckoutRespetaPlanMigration = readFileSync(new URL("../supabase/migrations/20260963_cp_prepare_checkout_respeta_plan_elegido.sql", import.meta.url), "utf8");
+const evitaSpamPushSuscripcionMigration = readFileSync(new URL("../supabase/migrations/20260964_evita_spam_push_nueva_suscripcion.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -156,6 +158,8 @@ async function database() {
   await db.exec(confirmOnlineSaleAcumulaCupoMigration);
   await db.exec(snapshotComisionRrppMigration);
   await db.exec(processTicketReturnMigration);
+  await db.exec(cpPrepareCheckoutRespetaPlanMigration);
+  await db.exec(evitaSpamPushSuscripcionMigration);
   return db;
 }
 
@@ -205,6 +209,25 @@ test("migracion real: alta, cobro, RLS, repetidos, reembolsos y recuperacion", a
   await db.exec(`update subscription_signups set checkout_started_at = now() - interval '3 minutes' where id = '${signup}'`);
   assert.equal(await scalar(`select cp_lock_checkout('${signup}')`), true, "debe permitir re-lockear para renovar tras vencer");
   assert.equal(await scalar(`select cp_lock_checkout('${signup}')`), false, "el enfriamiento de 2 minutos sigue vigente");
+
+  // cp_prepare_checkout con un plan DISTINTO al de la solicitud existente
+  // (el servicio sigue sin estar activo por el reembolso de arriba) debe
+  // actualizar esa solicitud al plan nuevo, no devolver la vieja tal cual.
+  const planB = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  await db.exec(`insert into subscription_plans(id,code,name,price_minor,currency,billing_interval) values ('${planB}','anual','Anual',90000,'ARS','yearly')`);
+  const switched = await db.query<{ id: string; plan_id: string; expected_amount: string; expected_currency: string; frequency_months: number }>(
+    `select id, plan_id, expected_amount, expected_currency, frequency_months from jsonb_to_record(cp_prepare_checkout('${user}', '${planB}')) as x(id uuid, plan_id uuid, expected_amount bigint, expected_currency text, frequency_months integer)`
+  );
+  assert.equal(switched.rows[0].id, signup, "no crea una solicitud nueva, actualiza la misma");
+  assert.equal(switched.rows[0].plan_id, planB, "el plan pasa a ser el elegido, no el viejo");
+  assert.equal(Number(switched.rows[0].expected_amount), 90000, "el monto a cobrar tambien pasa a ser el del plan nuevo");
+  assert.equal(switched.rows[0].expected_currency, "ARS");
+  assert.equal(switched.rows[0].frequency_months, 12, "anual = 12 meses, no el 1 del plan mensual anterior");
+
+  // Reintentar con el MISMO plan nuevo es idempotente: no lo vuelve a actualizar de mas.
+  assert.equal(await scalar(`select cp_prepare_checkout('${user}', '${planB}')->>'id'`), signup);
+  assert.equal(await scalar(`select cp_prepare_checkout('${user}', '${planB}')->>'plan_id'`), planB);
+
   await db.exec(`insert into subscription_signups(plan_id,first_name,last_name,organization_name,email,mercadopago_preapproval_id)
     values ('${plan}','Owner','Test','Club','OWNER@example.test','legacy-owner'), ('${plan}','Other','Test','Other','other@example.test','legacy-other');
     select cp_ensure_account('${user}');`);
@@ -1443,6 +1466,35 @@ test("ventas online: un pago tardio no sobrevende si el carrito tenia 2 lineas d
     await scalar(`select count(*)::int from tickets where ticket_type_id='${ticketType}' and status <> 'cancelled'`),
     2,
     "no se debe haber emitido ninguna entrada de mas para esta tanda"
+  );
+
+  await db.close();
+});
+
+test("organizations.new_subscription_notified_at se reclama una sola vez (evita spam del push de nueva suscripcion)", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "77777777-7777-4777-8777-777777777777";
+
+  await db.exec(`insert into organizations(id,name,slug) values ('${org}','Club Push','club-push')`);
+  assert.equal(await scalar(`select new_subscription_notified_at from organizations where id='${org}'`), null);
+
+  const claim = async (n: string) => {
+    const result = await db.query<{ id: string }>(
+      `update organizations set new_subscription_notified_at = '${n}' where id='${org}' and new_subscription_notified_at is null returning id`
+    );
+    return result.rows;
+  };
+
+  // Simula 2 llamadas a applyPayment casi simultaneas para el primer pago
+  // aprobado de la organizacion (ej. el polling de /cuenta y un reintento
+  // del webhook) -- solo la primera debe "ganar" la marca.
+  assert.equal((await claim("2026-01-01T00:00:00Z")).length, 1, "la primera llamada reclama la marca y manda el push");
+  assert.equal((await claim("2026-01-01T00:00:01Z")).length, 0, "la segunda llamada no encuentra nada para actualizar -- no reenvia el push");
+  assert.equal(
+    Number(await scalar(`select extract(epoch from new_subscription_notified_at) from organizations where id='${org}'`)),
+    Date.parse("2026-01-01T00:00:00Z") / 1000,
+    "la marca queda fija en la primera reclamacion, la segunda no la pisa"
   );
 
   await db.close();

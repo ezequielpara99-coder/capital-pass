@@ -25,9 +25,12 @@ export default function RegisterPage() {
           data: { first_name: value("first_name"), last_name: value("last_name"), organization_name: value("organization_name") },
         },
       });
-      if (signUpError) throw new Error(signUpError.code === "user_already_exists"
-        ? "Ya existe una cuenta con ese email. Iniciá sesión."
-        : "No pudimos crear la cuenta. Revisá tus datos o reintentá en unos minutos.");
+      // Mensaje genérico a propósito, sin importar el motivo real del
+      // error -- decir explícitamente "ya existe una cuenta con ese email"
+      // permite enumerar qué emails están registrados en la plataforma
+      // probando uno por uno. Si ya tenés cuenta, el link de "Iniciar
+      // sesión" de abajo la resuelve igual, sin necesidad de confirmarlo acá.
+      if (signUpError) throw new Error("No pudimos crear la cuenta con esos datos. Revisá el email y la contraseña, o iniciá sesión si ya tenías una cuenta.");
       if (data.session) { window.location.replace("/cuenta"); return; }
       setSent(true);
     } catch (e) { setError(e instanceof Error ? e.message : "No pudimos crear la cuenta."); }

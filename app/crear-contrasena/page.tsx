@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createRecoveryClient } from "../../lib/supabase/client";
@@ -20,6 +20,36 @@ export default function CreatePasswordPage() {
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Confirmar el link de recuperación deja una sesión completa activa
+  // (no solo "permiso para cambiar la contraseña") -- si alguien abre el
+  // link desde una casilla de correo compartida y confirma pero abandona
+  // esta pantalla sin llegar a guardar la contraseña nueva, esa sesión
+  // queda utilizable en ese dispositivo indefinidamente (acceso a /cuenta
+  // y, según el rol, al resto de la app). Cerrarla apenas se abandona la
+  // pantalla sin completar el cambio reduce esa ventana a "mientras la
+  // pantalla sigue abierta", en vez de "para siempre".
+  const passwordSavedRef = useRef(false);
+
+  useEffect(() => {
+    if (!validSession) return;
+
+    function closeAbandonedSession() {
+      if (passwordSavedRef.current) return;
+      // fire-and-forget: no hay garantía de que termine antes de que la
+      // pestaña se cierre, pero vale la pena intentarlo igual.
+      void supabase.auth.signOut();
+    }
+
+    window.addEventListener("beforeunload", closeAbandonedSession);
+    return () => {
+      window.removeEventListener("beforeunload", closeAbandonedSession);
+      // Cubre la navegación DENTRO de la app (ej. tocar "Pedir un enlace
+      // nuevo", o cualquier otro link) -- ahí no hay beforeunload porque
+      // Next.js no recarga la página completa.
+      closeAbandonedSession();
+    };
+  }, [validSession, supabase]);
 
   useEffect(() => {
     async function initializeRecovery() {
@@ -107,6 +137,8 @@ export default function CreatePasswordPage() {
       setSaving(false);
       return;
     }
+
+    passwordSavedRef.current = true;
 
     await supabase.auth.signOut();
 
