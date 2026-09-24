@@ -30,15 +30,6 @@ type MemberRow = {
   user_id: string;
 };
 
-type SaleRow = {
-  id: string;
-  organization_id: string | null;
-  event_id: string | null;
-  total_minor: number | string | null;
-  status: string;
-  created_at: string | null;
-};
-
 // Fuera del componente: el linter marca "Date.now()" como impuro si se
 // llama directo dentro de un componente/pagina.
 function onlineCutoffMs() {
@@ -89,9 +80,8 @@ export default async function AdminPage() {
   const [
     organizationsResult,
     eventsResult,
-    membersResult,
-    salesResult,
     allOrganizationsResult,
+    totalsResult,
   ] = await Promise.all([
     admin
       .from("organizations")
@@ -105,21 +95,16 @@ export default async function AdminPage() {
       .order("starts_at", { ascending: false })
       .limit(8),
 
-    admin
-      .from("organization_members")
-      .select("id, organization_id, role, status, user_id")
-      .limit(500),
-
-    admin
-      .from("sales")
-      .select("id, organization_id, event_id, total_minor, status, created_at")
-      .eq("status", "confirmed")
-      .order("created_at", { ascending: false })
-      .limit(500),
-
     // Para "conectados ahora" necesitamos TODAS las organizaciones (arriba
     // solo se traen las 8 mas recientes para la lista).
     admin.from("organizations").select("id, name"),
+
+    // Totales reales (sin capar a las filas que se traen para las listas
+    // de "recientes"): Organizaciones/Eventos/Usuarios/Ventas/Total
+    // vendido se calculan con agregados en la base, no sumando/contando
+    // en JS sobre un .limit() que podia dejar numeros truncados y sin
+    // ningun aviso.
+    admin.rpc("cp_admin_dashboard_totals"),
   ]);
 
   const organizations =
@@ -128,12 +113,6 @@ export default async function AdminPage() {
   const events =
     (eventsResult.data ?? []) as EventRow[];
 
-  const members =
-    (membersResult.data ?? []) as MemberRow[];
-
-  const sales =
-    (salesResult.data ?? []) as SaleRow[];
-
   const organizationMap = new Map(
     organizations.map((organization) => [
       organization.id,
@@ -141,30 +120,50 @@ export default async function AdminPage() {
     ])
   );
 
-  const activeOrganizations = organizations.length;
+  const totals = totalsResult.data?.[0] ?? {
+    organizations_count: 0,
+    events_count: 0,
+    active_members_count: 0,
+    organizers_count: 0,
+    sales_count: 0,
+    total_sales_minor: 0,
+  };
 
-  const activeMembers = members.filter(
-    (member) => member.status === "active"
-  ).length;
-
-  const organizers = members.filter(
-    (member) =>
-      member.role === "organizer" &&
-      member.status === "active"
-  ).length;
-
-  const totalSales = sales.reduce(
-    (total, sale) => total + Number(sale.total_minor ?? 0),
-    0
-  );
+  const totalOrganizations = totals.organizations_count;
+  const totalEvents = totals.events_count;
+  const activeMembers = totals.active_members_count;
+  const organizers = totals.organizers_count;
+  const totalSalesCount = totals.sales_count;
+  const totalSales = Number(totals.total_sales_minor ?? 0);
 
   const allOrganizations = (allOrganizationsResult.data ?? []) as { id: string; name: string }[];
   const allOrgNameById = new Map(allOrganizations.map((o) => [o.id, o.name]));
 
+  const recentOrgIds = organizations.map((o) => o.id);
+
+  // Scoped a las organizaciones que se muestran en la tabla de abajo (no
+  // a un .limit() global), asi el conteo por organizacion es correcto sin
+  // importar cuantos miembros tenga la plataforma en total.
+  const { data: recentOrgMembersData } = recentOrgIds.length
+    ? await admin
+        .from("organization_members")
+        .select("id, organization_id, role, user_id, status")
+        .in("organization_id", recentOrgIds)
+    : { data: [] as MemberRow[] };
+  const recentOrgMembers = (recentOrgMembersData ?? []) as MemberRow[];
+
   // "Conectados ahora": organizadores activos cuyo ultimo heartbeat
   // (profiles.last_active_at) fue hace 5 minutos o menos. Tolerante: si
   // todavia no se corrio la migracion de presencia, esto queda vacio.
-  const activeOrganizerMembers = members.filter((m) => m.role === "organizer" && m.status === "active");
+  // Se resuelve con su propia query (no con las 8 orgs recientes de
+  // arriba) para no perderse un organizador online de una organizacion
+  // mas vieja.
+  const { data: activeOrganizerMembersData } = await admin
+    .from("organization_members")
+    .select("id, organization_id, role, user_id, status")
+    .eq("role", "organizer")
+    .eq("status", "active");
+  const activeOrganizerMembers = (activeOrganizerMembersData ?? []) as MemberRow[];
   const organizerUserIds = [...new Set(activeOrganizerMembers.map((m) => m.user_id))];
 
   let onlineOrganizers: { name: string; organizationName: string }[] = [];
@@ -196,7 +195,7 @@ export default async function AdminPage() {
   }
 
   const recentOrganizations = organizations.map((organization) => {
-    const orgMembers = members.filter(
+    const orgMembers = recentOrgMembers.filter(
       (member) => member.organization_id === organization.id
     );
 
@@ -257,15 +256,15 @@ export default async function AdminPage() {
           <Metric
             number="01"
             label="Organizaciones"
-            value={String(organizations.length)}
-            detail={`${activeOrganizations} activas`}
+            value={String(totalOrganizations)}
+            detail="total"
             accent
           />
           <Metric
             number="02"
             label="Eventos"
-            value={String(events.length)}
-            detail="últimos cargados"
+            value={String(totalEvents)}
+            detail="total"
           />
           <Metric
             number="03"
@@ -276,7 +275,7 @@ export default async function AdminPage() {
           <Metric
             number="04"
             label="Ventas"
-            value={String(sales.length)}
+            value={String(totalSalesCount)}
             detail="confirmadas"
           />
           <Metric

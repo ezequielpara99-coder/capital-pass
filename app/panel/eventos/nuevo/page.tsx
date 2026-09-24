@@ -232,6 +232,19 @@ export default async function NuevoEventoPage({
   const params =
     await searchParams;
 
+  // Server Component sin middleware.ts en el proyecto: cada pagina
+  // protegida es responsable de chequear su propia sesion. Esta le
+  // faltaba -- solo la server action createEvent la validaba, asi que
+  // el formulario (vacio, sin datos de otra organizacion) se renderizaba
+  // igual para un visitante sin sesion.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    redirect("/login");
+  }
+
   const errorMessage =
     params.error
       ? decodeURIComponent(

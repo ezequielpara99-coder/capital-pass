@@ -107,11 +107,15 @@ export async function GET() {
     let comboValueMinor = 0;
 
     for (const sale of barSales) {
+      // total_minor es bigint: PostgREST lo serializa como STRING, no
+      // como number. Sin el Number() de aca, "0 + string" en JS concatena
+      // texto en vez de sumar (0 + "1500" -> "01500") -- con 2+ ventas,
+      // todos los totales de este endpoint quedaban corrompidos.
       const isCombo = sale.payment_method === "combo";
-      const saleMoney = isCombo ? 0 : sale.total_minor;
+      const saleMoney = isCombo ? 0 : Number(sale.total_minor);
 
       totalSoldMinor += saleMoney;
-      if (isCombo) comboValueMinor += sale.total_minor;
+      if (isCombo) comboValueMinor += Number(sale.total_minor);
 
       const row = salesByMember.get(sale.bartender_member_id) ?? {
         salesCount: 0,

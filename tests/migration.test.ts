@@ -47,6 +47,7 @@ const idempotenciaBarraMigration = readFileSync(new URL("../supabase/migrations/
 const indicesMigration = readFileSync(new URL("../supabase/migrations/20260952_indices_columnas_calientes.sql", import.meta.url), "utf8");
 const comboSnapshotMigration = readFileSync(new URL("../supabase/migrations/20260953_combo_snapshot_por_entrada.sql", import.meta.url), "utf8");
 const idempotenciaCreateSaleMigration = readFileSync(new URL("../supabase/migrations/20260954_idempotencia_create_sale.sql", import.meta.url), "utf8");
+const adminDashboardTotalsMigration = readFileSync(new URL("../supabase/migrations/20260956_admin_dashboard_totales_reales.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -137,6 +138,7 @@ async function database() {
   await db.exec(indicesMigration);
   await db.exec(comboSnapshotMigration);
   await db.exec(idempotenciaCreateSaleMigration);
+  await db.exec(adminDashboardTotalsMigration);
   return db;
 }
 
