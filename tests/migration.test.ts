@@ -48,6 +48,7 @@ const indicesMigration = readFileSync(new URL("../supabase/migrations/20260952_i
 const comboSnapshotMigration = readFileSync(new URL("../supabase/migrations/20260953_combo_snapshot_por_entrada.sql", import.meta.url), "utf8");
 const idempotenciaCreateSaleMigration = readFileSync(new URL("../supabase/migrations/20260954_idempotencia_create_sale.sql", import.meta.url), "utf8");
 const adminDashboardTotalsMigration = readFileSync(new URL("../supabase/migrations/20260956_admin_dashboard_totales_reales.sql", import.meta.url), "utf8");
+const migracionesRecuperadasMigration = readFileSync(new URL("../supabase/migrations/20260957_recupera_migraciones_nunca_aplicadas.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -139,6 +140,7 @@ async function database() {
   await db.exec(comboSnapshotMigration);
   await db.exec(idempotenciaCreateSaleMigration);
   await db.exec(adminDashboardTotalsMigration);
+  await db.exec(migracionesRecuperadasMigration);
   return db;
 }
 
