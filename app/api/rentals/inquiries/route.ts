@@ -57,6 +57,9 @@ export async function POST(request: NextRequest) {
     if (!businessName) return NextResponse.json({ error: "Falta el nombre del negocio." }, { status: 400 });
     if (!contactName) return NextResponse.json({ error: "Falta el nombre de contacto." }, { status: 400 });
     if (!phone) return NextResponse.json({ error: "Falta un teléfono de contacto." }, { status: 400 });
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json({ error: "El email no parece válido." }, { status: 400 });
+    }
 
     const admin = createAdminClient();
     const { error } = await admin.from("rental_inquiries").insert({

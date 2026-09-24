@@ -94,12 +94,14 @@ export async function GET() {
       id: string;
       first_name: string | null;
       last_name: string | null;
+      phone: string | null;
+      email: string | null;
     }[] = [];
 
     if (userIds.length > 0) {
       const { data: profileData } = await admin
         .from("profiles")
-        .select("id, first_name, last_name")
+        .select("id, first_name, last_name, phone, email")
         .in("id", userIds);
 
       profiles = (profileData ?? []) as typeof profiles;
@@ -108,6 +110,59 @@ export async function GET() {
     const profileMap = new Map(
       profiles.map((profile) => [profile.id, profile])
     );
+
+    // Venta RRPP real del evento -- sin esto, la tarjeta de cobertura
+    // mostraba siempre $0 vendido y 0 entradas por vendedor, aunque
+    // estuvieran facturando (quedaba hardcodeado en vez de calculado).
+    const { data: salesData } = await admin
+      .from("sales")
+      .select("id, seller_member_id, total_minor")
+      .eq("event_id", event.id)
+      .eq("status", "confirmed")
+      .eq("channel", "rrpp")
+      .in("seller_member_id", memberIds);
+
+    const sales = salesData ?? [];
+    const saleIds = sales.map((sale) => sale.id);
+
+    let tickets: { id: string; sale_id: string; status: string }[] = [];
+
+    if (saleIds.length > 0) {
+      const { data: ticketData } = await admin
+        .from("tickets")
+        .select("id, sale_id, status")
+        .eq("event_id", event.id)
+        .in("sale_id", saleIds);
+
+      tickets = (ticketData ?? []) as typeof tickets;
+    }
+
+    const ticketsBySale = new Map<string, number>();
+    for (const ticket of tickets) {
+      if (ticket.status === "cancelled") continue;
+      ticketsBySale.set(ticket.sale_id, (ticketsBySale.get(ticket.sale_id) ?? 0) + 1);
+    }
+
+    const performanceByMember = new Map<
+      string,
+      { salesCount: number; ticketsSold: number; totalSold: number }
+    >();
+
+    for (const sale of sales) {
+      if (!sale.seller_member_id) continue;
+
+      const current = performanceByMember.get(sale.seller_member_id) ?? {
+        salesCount: 0,
+        ticketsSold: 0,
+        totalSold: 0,
+      };
+
+      current.salesCount += 1;
+      current.ticketsSold += ticketsBySale.get(sale.id) ?? 0;
+      current.totalSold += Number(sale.total_minor ?? 0);
+
+      performanceByMember.set(sale.seller_member_id, current);
+    }
 
     const rrpps = staffRows
       .map((staff) => {
@@ -118,6 +173,12 @@ export async function GET() {
         }
 
         const profile = profileMap.get(member.user_id);
+
+        const performance = performanceByMember.get(member.id) ?? {
+          salesCount: 0,
+          ticketsSold: 0,
+          totalSold: 0,
+        };
 
         const locationLabel = [
           staff.assigned_city,
@@ -135,8 +196,8 @@ export async function GET() {
           eventStaffId: staff.id,
           firstName: profile?.first_name?.trim() || "RRPP",
           lastName: profile?.last_name?.trim() || "",
-          phone: null,
-          email: null,
+          phone: profile?.phone ?? null,
+          email: profile?.email ?? null,
           active:
             member.status === "active" &&
             Boolean(staff.active),
@@ -151,9 +212,9 @@ export async function GET() {
             staff.location_label ??
             (locationLabel ? locationLabel : null),
           mapped: lat !== null && lng !== null,
-          salesCount: 0,
-          ticketsSold: 0,
-          totalSold: 0,
+          salesCount: performance.salesCount,
+          ticketsSold: performance.ticketsSold,
+          totalSold: performance.totalSold,
         };
       })
       .filter((rrpp): rrpp is NonNullable<typeof rrpp> => rrpp !== null)
@@ -189,6 +250,9 @@ export async function GET() {
         )
     );
 
+    const totalSold = rrpps.reduce((total, rrpp) => total + rrpp.totalSold, 0);
+    const ticketsSold = rrpps.reduce((total, rrpp) => total + rrpp.ticketsSold, 0);
+
     return NextResponse.json({
       ok: true,
       event: {
@@ -203,8 +267,8 @@ export async function GET() {
         unmappedRRPPs: rrpps.filter((rrpp) => !rrpp.mapped).length,
         totalZones: zones.size,
         totalCities: cities.size,
-        totalSold: 0,
-        ticketsSold: 0,
+        totalSold,
+        ticketsSold,
       },
     });
   } catch (error) {

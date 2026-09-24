@@ -112,7 +112,9 @@ export default async function PublicEventPage({
         description,
         price_minor,
         status,
-        active
+        active,
+        sales_start_at,
+        sales_end_at
       `)
       .eq("event_id", event.id)
       .eq("active", true)
@@ -129,7 +131,7 @@ export default async function PublicEventPage({
       price_minor,
       active,
       ticket_type_id,
-      ticket_types ( name, status, active )
+      ticket_types ( name, status, active, sales_start_at, sales_end_at )
     `)
     .eq("event_id", event.id)
     .eq("active", true)
@@ -142,6 +144,37 @@ export default async function PublicEventPage({
     .maybeSingle();
 
   const canBuyOnline = Boolean(mpAccount);
+
+  const mappedTicketTypes = (ticketTypes ?? []).map((ticket) => ({
+    id: ticket.id,
+    name: ticket.name,
+    description: ticket.description,
+    priceMinor: Number(ticket.price_minor),
+    status: ticket.status,
+    active: ticket.active,
+    salesStartAt: ticket.sales_start_at,
+    salesEndAt: ticket.sales_end_at,
+  }));
+
+  // El chequeo de fecha (sales_start_at/sales_end_at contra "ahora") se
+  // hace del lado del cliente (EventCheckout) en vez de aca -- un
+  // Server Component no puede llamar Date.now()/comparar contra la hora
+  // actual durante el render (la regla de pureza de React lo bloquea).
+  const mappedPacks = (packRows ?? []).map((pack) => {
+    const ticketType = Array.isArray(pack.ticket_types) ? pack.ticket_types[0] : pack.ticket_types;
+    return {
+      id: pack.id,
+      name: pack.name,
+      quantityPerPack: pack.quantity_per_pack,
+      priceMinor: Number(pack.price_minor),
+      ticketTypeId: pack.ticket_type_id,
+      ticketTypeName: ticketType?.name ?? "",
+      ticketTypeActive: Boolean(ticketType?.active),
+      ticketTypeStatus: ticketType?.status ?? "available",
+      salesStartAt: ticketType?.sales_start_at ?? null,
+      salesEndAt: ticketType?.sales_end_at ?? null,
+    };
+  });
 
   const date =
     new Intl.DateTimeFormat(
@@ -455,26 +488,8 @@ export default async function PublicEventPage({
             <EventCheckout
               slug={slug}
               canBuyOnline={canBuyOnline}
-              ticketTypes={(ticketTypes ?? []).map((ticket) => ({
-                id: ticket.id,
-                name: ticket.name,
-                description: ticket.description,
-                priceMinor: Number(ticket.price_minor),
-                status: ticket.status,
-                active: ticket.active,
-              }))}
-              packs={(packRows ?? []).map((pack) => {
-                const ticketType = Array.isArray(pack.ticket_types) ? pack.ticket_types[0] : pack.ticket_types;
-                return {
-                  id: pack.id,
-                  name: pack.name,
-                  quantityPerPack: pack.quantity_per_pack,
-                  priceMinor: Number(pack.price_minor),
-                  ticketTypeId: pack.ticket_type_id,
-                  ticketTypeName: ticketType?.name ?? "",
-                  available: Boolean(ticketType?.active && ticketType?.status === "available"),
-                };
-              })}
+              ticketTypes={mappedTicketTypes}
+              packs={mappedPacks}
             />
 
           </section>

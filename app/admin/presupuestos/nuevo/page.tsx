@@ -29,7 +29,14 @@ export default async function NuevoPresupuestoPage({
       .maybeSingle();
 
     if (inquiry) {
-      const quantity = Number(String(inquiry.terminal_quantity ?? "").match(/\d+/)?.[0]);
+      // terminal_quantity es texto libre de un formulario público (ej.
+      // "no sé bien, quizás 2 o 3" o un teléfono pegado ahí sin querer)
+      // -- tomar el primer numero que aparezca sin tope podia precargar
+      // una cantidad absurda (como un numero de telefono) sin que se
+      // note. Un tope generoso pero razonable evita eso; fuera de rango
+      // se deja en 1 para que el admin lo complete a mano.
+      const rawQuantity = Number(String(inquiry.terminal_quantity ?? "").match(/\d+/)?.[0]);
+      const quantity = Number.isFinite(rawQuantity) && rawQuantity > 0 && rawQuantity <= 500 ? rawQuantity : 1;
       init = {
         kind: "rental",
         client_name: inquiry.business_name,
@@ -40,7 +47,7 @@ export default async function NuevoPresupuestoPage({
         items: [
           {
             description: "Alquiler de terminal de pago",
-            quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+            quantity,
             unit: "mes",
             unit_price_minor: 0,
           },

@@ -50,6 +50,31 @@ export async function POST(request: NextRequest) {
     const totalStock = Math.max(0, Math.round(Number(body.totalStock ?? 0)));
     const lowStockThreshold = Math.max(0, Math.round(Number(body.lowStockThreshold ?? 5)));
 
+    // Si el producto ya estaba cargado y se está bajando total_stock, no
+    // puede quedar por debajo de lo que ya se repartió a las barras --
+    // si no, "disponible para repartir" (total_stock - suma en barras)
+    // queda negativo en el panel hasta que se vuelva a subir.
+    const { data: existing } = await admin
+      .from("event_products")
+      .select("id")
+      .eq("event_id", eventId)
+      .eq("product_id", productId)
+      .maybeSingle();
+
+    if (existing) {
+      const { data: assignedRows } = await admin
+        .from("bar_stock")
+        .select("quantity")
+        .eq("event_product_id", existing.id);
+      const assignedTotal = (assignedRows ?? []).reduce((sum, row) => sum + row.quantity, 0);
+      if (totalStock < assignedTotal) {
+        return NextResponse.json(
+          { error: `No podés bajar el stock total a menos de lo ya repartido en barras (${assignedTotal}).` },
+          { status: 400 }
+        );
+      }
+    }
+
     const { data: eventProduct, error } = await admin
       .from("event_products")
       .upsert(

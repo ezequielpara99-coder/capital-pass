@@ -10,7 +10,22 @@ type TicketType = {
   priceMinor: number;
   status: string;
   active: boolean;
+  salesStartAt: string | null;
+  salesEndAt: string | null;
 };
+
+// El estado ("available"/"sold_out"/etc.) y la ventana de fecha
+// (sales_start_at/sales_end_at) son independientes: una tanda puede
+// seguir "available" pero tener una preventa programada para mas
+// adelante, o ya haber pasado su fecha de cierre. Sin este chequeo la
+// pagina mostraba la tanda como comprable y recien create_online_sale
+// la rechazaba al final, despues de que el comprador ya cargo sus datos.
+function withinSalesWindow(ticket: Pick<TicketType, "salesStartAt" | "salesEndAt">) {
+  const now = Date.now();
+  if (ticket.salesStartAt && new Date(ticket.salesStartAt).getTime() > now) return false;
+  if (ticket.salesEndAt && new Date(ticket.salesEndAt).getTime() < now) return false;
+  return true;
+}
 
 type Pack = {
   id: string;
@@ -19,7 +34,10 @@ type Pack = {
   priceMinor: number;
   ticketTypeId: string;
   ticketTypeName: string;
-  available: boolean;
+  ticketTypeActive: boolean;
+  ticketTypeStatus: string;
+  salesStartAt: string | null;
+  salesEndAt: string | null;
 };
 
 type Props = {
@@ -42,12 +60,14 @@ function formatMoney(value: number) {
   }).format(value);
 }
 
-function formatTicketStatus(status: string) {
-  if (status === "available") return "Disponible";
-  if (status === "sold_out") return "Agotada";
-  if (status === "upcoming") return "Próximamente";
-  if (status === "paused") return "Pausada";
-  return status;
+function formatTicketStatus(ticket: TicketType) {
+  if (ticket.status === "sold_out") return "Agotada";
+  if (ticket.status === "paused") return "Pausada";
+  if (ticket.status === "upcoming") return "Próximamente";
+  if (ticket.salesStartAt && new Date(ticket.salesStartAt).getTime() > Date.now()) return "Próximamente";
+  if (ticket.salesEndAt && new Date(ticket.salesEndAt).getTime() < Date.now()) return "Finalizada";
+  if (ticket.status === "available") return "Disponible";
+  return ticket.status;
 }
 
 export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }: Props) {
@@ -143,7 +163,7 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }
     <>
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         {ticketTypes.map((ticket) => {
-          const available = ticket.status === "available" && ticket.active;
+          const available = ticket.status === "available" && ticket.active && withinSalesWindow(ticket);
           const quantity = quantities[ticketKey(ticket.id)] ?? 0;
 
           return (
@@ -171,7 +191,7 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }
                           : "border-[#ff5a2a]/20 bg-[#ff5a2a]/[0.07] text-[#ff9b82]"
                     }`}
                   >
-                    {formatTicketStatus(ticket.status)}
+                    {formatTicketStatus(ticket)}
                   </span>
                 </div>
 
@@ -218,6 +238,10 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             {packs.map((pack) => {
               const quantity = quantities[packKey(pack.id)] ?? 0;
+              const available =
+                pack.ticketTypeActive &&
+                pack.ticketTypeStatus === "available" &&
+                withinSalesWindow(pack);
 
               return (
                 <article
@@ -235,18 +259,18 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }
 
                       <span
                         className={`shrink-0 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${
-                          pack.available
+                          available
                             ? "border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-200"
                             : "border-[#ff5a2a]/20 bg-[#ff5a2a]/[0.07] text-[#ff9b82]"
                         }`}
                       >
-                        {pack.available ? "Disponible" : "No disponible"}
+                        {available ? "Disponible" : "No disponible"}
                       </span>
                     </div>
 
                     <p className="mt-7 text-3xl font-black tracking-tight">{formatMoney(pack.priceMinor)}</p>
 
-                    {canBuyOnline && pack.available && (
+                    {canBuyOnline && available && (
                       <div className="mt-5 flex h-12 w-fit items-center rounded-xl border border-white/10 bg-black/20">
                         <button
                           type="button"

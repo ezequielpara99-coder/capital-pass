@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { sendPushToOrganizers } from "../../../../lib/push/server";
+import { checkRateLimit } from "../../../../lib/http/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
@@ -77,12 +78,19 @@ export async function POST(request: NextRequest) {
 
           if (barStock && eventProduct) {
             const { data: ep } = await admin.from("event_products").select("low_stock_threshold").eq("id", eventProductId).maybeSingle();
+            // Sin esto, cada venta que deja el stock por debajo del umbral
+            // vuelve a disparar la alerta -- si se mantiene bajo, el
+            // organizador recibe una push idéntica por cada trago vendido
+            // en vez de una sola vez cada tanto.
             if (ep && barStock.quantity <= ep.low_stock_threshold) {
-              await sendPushToOrganizers(event.organization_id, "low_stock", {
-                title: "⚠️ Stock bajo",
-                body: `Quedan ${barStock.quantity} de ${productName} en ${bar.name}`,
-                url: "/panel/stock",
-              });
+              const allowed = await checkRateLimit(`low-stock-push:${barId}:${eventProductId}`, 1, 1800);
+              if (allowed) {
+                await sendPushToOrganizers(event.organization_id, "low_stock", {
+                  title: "⚠️ Stock bajo",
+                  body: `Quedan ${barStock.quantity} de ${productName} en ${bar.name}`,
+                  url: "/panel/stock",
+                });
+              }
             }
           }
         }

@@ -67,6 +67,10 @@ export default function MesasClient({ eventId, eventName }: { eventId: string; e
 
   async function confirmSale() {
     if (!tableId || !firstName.trim() || !lastName.trim() || !phone.trim() || !paymentMethod) return;
+    if (normalizeWhatsAppNumber(phone).length < 12) {
+      setError("Ese número de WhatsApp no parece válido. Revisalo antes de cobrar — es donde le vamos a mandar la confirmación.");
+      return;
+    }
     setSelling(true);
     setError("");
     try {

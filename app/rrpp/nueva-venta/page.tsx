@@ -735,6 +735,14 @@ export default function NuevaVentaRRPPPage() {
 
     if (!number) {
       waWindow?.close();
+
+      // La venta ya se registró -- si no avisamos, el vendedor cree que
+      // el WhatsApp se mandó y el comprador se queda sin forma de
+      // recibir sus entradas.
+      setEntryError(
+        "La venta se registró, pero el teléfono cargado no es válido y no pudimos abrir WhatsApp. Contactá al comprador por otro medio para pasarle sus entradas."
+      );
+
       return;
     }
 
