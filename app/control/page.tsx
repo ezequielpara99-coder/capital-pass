@@ -586,6 +586,9 @@ export default function ControlPage() {
 
           p_manual_code:
             normalized,
+
+          p_method:
+            "manual",
         }
       );
 

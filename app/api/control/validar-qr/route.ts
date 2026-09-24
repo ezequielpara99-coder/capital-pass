@@ -3,10 +3,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { verifyTicketSignature } from "../../../../lib/tickets/signature";
+import { verifyControllerForEvent } from "../../../../lib/control/auth";
 
 type QRRequestBody = {
   eventId?: string;
   qrPayload?: string;
+  // true cuando esta llamada es la sincronizacion de un escaneo que se
+  // valido offline contra el cache local (modo offline de control) --
+  // sirve solo para etiquetar method='qr_offline' en entry_scans, la
+  // verificacion de firma/permisos es identica en ambos casos.
+  offline?: boolean;
 };
 
 type QRPayloadResult =
@@ -55,6 +61,7 @@ export async function POST(request: NextRequest) {
 
     const eventId = body.eventId?.trim();
     const qrPayload = body.qrPayload?.trim();
+    const offline = body.offline === true;
 
     if (!eventId || !qrPayload) {
       return NextResponse.json(
@@ -68,112 +75,16 @@ export async function POST(request: NextRequest) {
     }
 
     // =====================================================
-    // 2. VERIFICAR USUARIO
+    // 2-4. VERIFICAR USUARIO + CONTROLADOR ASIGNADO AL EVENTO
     // =====================================================
 
     const supabase = await createClient();
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
+    const verification = await verifyControllerForEvent(eventId);
+    if (!verification.ok) {
       return NextResponse.json(
-        {
-          error: "No hay una sesión válida.",
-        },
-        {
-          status: 401,
-        }
-      );
-    }
-
-    // =====================================================
-    // 3. VERIFICAR QUE SEA CONTROLADOR ACTIVO
-    // =====================================================
-
-    const {
-      data: memberships,
-      error: membershipError,
-    } = await supabase
-      .from("organization_members")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("role", "controller")
-      .eq("status", "active");
-
-    if (membershipError) {
-      console.error(
-        "ERROR MEMBERSHIP QR:",
-        membershipError
-      );
-
-      return NextResponse.json(
-        {
-          error: "No se pudo verificar el acceso del controlador.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    const memberIds =
-      memberships?.map((item) => item.id) ?? [];
-
-    if (memberIds.length === 0) {
-      return NextResponse.json(
-        {
-          error: "Tu cuenta no tiene permisos de control.",
-        },
-        {
-          status: 403,
-        }
-      );
-    }
-
-    // =====================================================
-    // 4. VERIFICAR ASIGNACIÓN AL EVENTO
-    // =====================================================
-
-    const {
-      data: assignment,
-      error: assignmentError,
-    } = await supabase
-      .from("event_staff")
-      .select("id")
-      .eq("event_id", eventId)
-      .in("organization_member_id", memberIds)
-      .eq("staff_role", "controller")
-      .eq("active", true)
-      .limit(1)
-      .maybeSingle();
-
-    if (assignmentError) {
-      console.error(
-        "ERROR ASSIGNMENT QR:",
-        assignmentError
-      );
-
-      return NextResponse.json(
-        {
-          error: "No se pudo verificar la asignación al evento.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    if (!assignment) {
-      return NextResponse.json(
-        {
-          error: "No estás autorizado para controlar este evento.",
-        },
-        {
-          status: 403,
-        }
+        { error: verification.error },
+        { status: verification.status }
       );
     }
 
@@ -276,6 +187,7 @@ export async function POST(request: NextRequest) {
       {
         p_event_id: eventId,
         p_manual_code: ticket.manual_code,
+        p_method: offline ? "qr_offline" : "qr",
       }
     );
 

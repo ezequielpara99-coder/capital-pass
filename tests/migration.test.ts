@@ -50,6 +50,7 @@ const idempotenciaCreateSaleMigration = readFileSync(new URL("../supabase/migrat
 const adminDashboardTotalsMigration = readFileSync(new URL("../supabase/migrations/20260956_admin_dashboard_totales_reales.sql", import.meta.url), "utf8");
 const migracionesRecuperadasMigration = readFileSync(new URL("../supabase/migrations/20260957_recupera_migraciones_nunca_aplicadas.sql", import.meta.url), "utf8");
 const cancelBarSaleSnapshotMigration = readFileSync(new URL("../supabase/migrations/20260958_cancel_bar_sale_usa_snapshot_combo.sql", import.meta.url), "utf8");
+const validateTicketMethodMigration = readFileSync(new URL("../supabase/migrations/20260959_validate_ticket_manual_method_offline.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -94,6 +95,8 @@ async function database() {
       used_at timestamptz, updated_at timestamptz default now());
     create table audit_logs(id uuid primary key default gen_random_uuid(), actor_user_id uuid, organization_id uuid,
       event_id uuid, action text, entity_type text, entity_id uuid, metadata jsonb, created_at timestamptz default now());
+    create table entry_scans(id uuid primary key default gen_random_uuid(), event_id uuid, ticket_id uuid,
+      controller_member_id uuid, method text, result text, input_hash text, scanned_at timestamptz default now());
     create function public.is_platform_admin() returns boolean language sql stable security definer set search_path='' as $$
       select exists(select 1 from public.platform_admins where user_id=auth.uid()) $$;`);
   for (const row of fixture.filter((r) => r.seccion === "funciones_de_acceso")) await db.exec((row.detalle as { definicion: string }).definicion);
@@ -143,6 +146,7 @@ async function database() {
   await db.exec(adminDashboardTotalsMigration);
   await db.exec(migracionesRecuperadasMigration);
   await db.exec(cancelBarSaleSnapshotMigration);
+  await db.exec(validateTicketMethodMigration);
   return db;
 }
 
@@ -1225,6 +1229,75 @@ test("presupuestos: directorio de clientes reutilizable", async () => {
 
   await db.exec(`delete from quote_clients where id = '${clientId}'`);
   assert.equal(await scalar(`select count(*)::int from quote_clients`), 0);
+
+  await db.close();
+});
+
+test("control de ingreso: validate_ticket_manual valida, bloquea doble uso y registra el metodo", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const org = "f1111111-1111-4111-8111-111111111111";
+  const event = "f2222222-2222-4222-8222-222222222222";
+  const controllerUser = "f3333333-3333-4333-8333-333333333333";
+  const buyer = "f4444444-4444-4444-8444-444444444444";
+  const sale = "f5555555-5555-4555-8555-555555555555";
+  const ticketType = "f6666666-6666-4666-8666-666666666666";
+  const ticket = "f7777777-7777-4777-8777-777777777777";
+  const cancelledTicket = "f8888888-8888-4888-8888-888888888888";
+
+  await db.exec(`insert into auth.users values ('${controllerUser}','control-test@example.test',now(),'{}');
+    insert into organizations(id,name,slug,complimentary) values ('${org}','Club Control','club-control',true);
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${controllerUser}','controller','active');`);
+
+  const controllerMemberId = await scalar(`select id::text from organization_members where user_id = '${controllerUser}'`);
+  await db.exec(`insert into event_staff(event_id,organization_member_id,staff_role,active) values ('${event}','${controllerMemberId}','controller',true);
+    insert into buyers(id,organization_id,first_name,last_name,dni) values ('${buyer}','${org}','Juan','Perez','30111222');
+    insert into sales(id,organization_id,event_id,buyer_id,status,total_minor) values ('${sale}','${org}','${event}','${buyer}','confirmed',5000);
+    insert into ticket_types(id,event_id,name,price_minor,capacity) values ('${ticketType}','${event}','General',5000,10);
+    insert into tickets(id,sale_id,event_id,ticket_type_id,status,manual_code) values ('${ticket}','${sale}','${event}','${ticketType}','issued','ABC123');
+    insert into tickets(id,sale_id,event_id,ticket_type_id,status,manual_code) values ('${cancelledTicket}','${sale}','${event}','${ticketType}','cancelled','DEF456');`);
+
+  await db.exec(`select set_config('request.jwt.claim.sub','${controllerUser}',false);`);
+
+  // Metodo invalido: rechazado antes de tocar nada.
+  await assert.rejects(
+    () => db.query(`select validate_ticket_manual('${event}','ABC123','otro_metodo')`),
+    /Metodo de validacion invalido/
+  );
+
+  // Primer escaneo: valida, marca la entrada como usada, registra method='qr'.
+  const first = await db.query<{ result: string; ticket_id: string }>(
+    `select * from validate_ticket_manual('${event}','ABC123','qr')`
+  );
+  assert.equal(first.rows[0].result, "valid");
+  assert.equal(await scalar(`select status from tickets where id = '${ticket}'`), "used");
+  assert.equal(await scalar(`select method from entry_scans where ticket_id = '${ticket}' and result = 'valid'`), "qr");
+
+  // Reintento (ej. dos controladores casi simultaneos, o sincronizacion offline de un escaneo ya validado en vivo): already_used.
+  const second = await db.query<{ result: string }>(
+    `select * from validate_ticket_manual('${event}','ABC123','qr_offline')`
+  );
+  assert.equal(second.rows[0].result, "already_used", "el lock evita el doble ingreso aunque el metodo sea distinto");
+  assert.equal(
+    await scalar(`select count(*)::int from entry_scans where ticket_id = '${ticket}' and result = 'already_used' and method = 'qr_offline'`),
+    1,
+    "el reintento queda registrado con SU PROPIO metodo (qr_offline), no pisa el registro original"
+  );
+
+  // Entrada anulada.
+  const cancelled = await db.query<{ result: string }>(
+    `select * from validate_ticket_manual('${event}','DEF456','manual_offline')`
+  );
+  assert.equal(cancelled.rows[0].result, "cancelled");
+
+  // Codigo inexistente.
+  const invalid = await db.query<{ result: string; ticket_id: string | null }>(
+    `select * from validate_ticket_manual('${event}','NOEXISTE','manual')`
+  );
+  assert.equal(invalid.rows[0].result, "invalid");
+  assert.equal(invalid.rows[0].ticket_id, null);
 
   await db.close();
 });
