@@ -11,6 +11,7 @@ import {
 } from "../../../../lib/quotes/totals";
 
 const MISSING_SQL = "Falta aplicar la actualización de la base de datos (presupuestos).";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // POST: crea un presupuesto nuevo (borrador).
 export async function POST(request: NextRequest) {
@@ -26,7 +27,14 @@ export async function POST(request: NextRequest) {
     const validDays = Number(body.validDays);
     const inquiryId = String(body.rentalInquiryId ?? "").trim();
 
+    // id opcional: lo manda el editor cuando el presupuesto se creó
+    // offline (UUID generado en el cliente para poder tener una URL
+    // consistente sin señal) -- si no viene, se usa el default de la
+    // base (gen_random_uuid()), igual que siempre.
+    const clientId = String(body.id ?? "").trim();
+
     const row = {
+      ...(clientId && UUID.test(clientId) ? { id: clientId } : {}),
       kind: normalizeKind(body.kind),
       client_name: clientName.slice(0, 200),
       client_contact: String(body.clientContact ?? "").trim().slice(0, 200) || null,

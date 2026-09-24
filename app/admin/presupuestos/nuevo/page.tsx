@@ -1,90 +1,125 @@
-import { createAdminClient } from "../../../../lib/supabase/admin";
-import { requireAdminPage } from "../../../../lib/quotes/auth";
-import { normalizeKind } from "../../../../lib/quotes/totals";
-import QuoteEditor, { CatalogItem, QuoteClient, QuoteInit, QuotePackageOption } from "../quote-editor";
+"use client";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { createClient } from "../../../../lib/supabase/client";
+import { normalizeKind } from "../../../../lib/quotes/totals";
+import { loadBootstrap, saveBootstrap } from "../../../../lib/offline/quote-cache";
+import QuoteEditor, { CatalogItem, QuoteClient, QuoteInit, QuotePackageOption } from "../quote-editor";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export default async function NuevoPresupuestoPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ tipo?: string; consulta?: string }>;
-}) {
-  await requireAdminPage();
+type Bootstrap = { catalog: CatalogItem[]; clients: QuoteClient[]; packages: QuotePackageOption[] };
 
-  const params = await searchParams;
-  const admin = createAdminClient();
+function LoadingScreen() {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-[#050505] text-[#f7f3ed]">
+      <p className="text-sm text-white/40">Cargando presupuesto...</p>
+    </main>
+  );
+}
 
-  let init: QuoteInit = { kind: normalizeKind(params.tipo) };
+// useSearchParams() necesita un boundary de Suspense propio (Next lo exige
+// para poder prerenderizar el resto de la página) -- por eso la carga vive
+// en un componente hijo en vez de directamente en el default export.
+function NuevoPresupuestoContent() {
+  const searchParams = useSearchParams();
+  const [state, setState] = useState<
+    | { status: "loading" }
+    | { status: "error"; message: string }
+    | { status: "ready"; init: QuoteInit; bootstrap: Bootstrap }
+  >({ status: "loading" });
 
-  // Presupuesto de rentals armado a partir de una consulta de la landing.
-  if (params.consulta && UUID.test(params.consulta)) {
-    const { data: inquiry } = await admin
-      .from("rental_inquiries")
-      .select("id, business_name, contact_name, phone, email, terminal_quantity")
-      .eq("id", params.consulta)
-      .maybeSingle();
+  useEffect(() => {
+    let cancelled = false;
 
-    if (inquiry) {
-      // terminal_quantity es texto libre de un formulario público (ej.
-      // "no sé bien, quizás 2 o 3" o un teléfono pegado ahí sin querer)
-      // -- tomar el primer numero que aparezca sin tope podia precargar
-      // una cantidad absurda (como un numero de telefono) sin que se
-      // note. Un tope generoso pero razonable evita eso; fuera de rango
-      // se deja en 1 para que el admin lo complete a mano.
-      const rawQuantity = Number(String(inquiry.terminal_quantity ?? "").match(/\d+/)?.[0]);
-      const quantity = Number.isFinite(rawQuantity) && rawQuantity > 0 && rawQuantity <= 500 ? rawQuantity : 1;
-      init = {
-        kind: "rental",
-        client_name: inquiry.business_name,
-        client_contact: inquiry.contact_name,
-        client_phone: inquiry.phone,
-        client_email: inquiry.email,
-        title: "Alquiler de terminales de pago",
-        items: [
-          {
-            description: "Alquiler de terminal de pago",
-            quantity,
-            unit: "mes",
-            unit_price_minor: 0,
-          },
-        ],
-        price_mode: "items",
-        rental_inquiry_id: inquiry.id,
-      };
+    async function load() {
+      const supabase = createClient();
+
+      // Chequeo liviano de sesión: getSession() lee lo que ya está
+      // guardado localmente, sin red -- a diferencia de getUser(), que
+      // revalida contra el servidor y falla sin conexión. La autoridad
+      // real sigue siendo el servidor: cualquier intento de guardar se
+      // valida ahí (verifyAdmin) apenas haya señal.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        window.location.replace("/login");
+        return;
+      }
+
+      const tipo = searchParams.get("tipo") ?? undefined;
+      const consulta = searchParams.get("consulta") ?? undefined;
+
+      let init: QuoteInit = { kind: normalizeKind(tipo) };
+
+      let bootstrap: Bootstrap | null = null;
+      try {
+        const response = await fetch("/api/admin/presupuestos/bootstrap", { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.error ?? "No se pudo cargar.");
+        bootstrap = { catalog: data.catalog, clients: data.clients, packages: data.packages };
+        await saveBootstrap(bootstrap);
+
+        // El prefill desde una consulta pública de rental solo se puede
+        // resolver con conexión (necesita leer rental_inquiries).
+        if (consulta && UUID.test(consulta)) {
+          const inquiryResponse = await fetch(`/api/admin/presupuestos/consulta?id=${consulta}`, { cache: "no-store" });
+          if (inquiryResponse.ok) {
+            const inquiryData = await inquiryResponse.json();
+            if (inquiryData?.inquiry) init = inquiryData.inquiry as QuoteInit;
+          }
+        }
+      } catch {
+        const cached = await loadBootstrap();
+        if (!cached) {
+          if (!cancelled) {
+            setState({
+              status: "error",
+              message: "No hay conexión y todavía no se guardó ningún dato local. Abrí esta pantalla una vez con conexión para poder usarla offline después.",
+            });
+          }
+          return;
+        }
+        bootstrap = cached as unknown as Bootstrap;
+      }
+
+      if (!cancelled) setState({ status: "ready", init, bootstrap: bootstrap as Bootstrap });
     }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (state.status === "loading") return <LoadingScreen />;
+
+  if (state.status === "error") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#050505] px-6 text-center text-[#f7f3ed]">
+        <p className="max-w-sm text-sm text-white/50">{state.message}</p>
+      </main>
+    );
   }
-
-  const [{ data: catalog }, { data: clients }, { data: packages }] = await Promise.all([
-    admin.from("quote_catalog").select("id, kind, description, unit, unit_price_minor").eq("active", true).order("description"),
-    admin.from("quote_clients").select("id, name, contact, phone, email").order("name"),
-    admin.from("quote_packages").select("id, kind, name, items, price_mode, package_price_minor, notes").eq("active", true).order("name"),
-  ]);
-
-  // unit_price_minor/package_price_minor son bigint en la base: PostgREST
-  // los serializa como STRING, no como number. Sin esto, un item o
-  // paquete gratuito (precio 0) queda como el string "0" -- truthy en JS
-  // -- y los chequeos tipo `entry.unit_price_minor ? ... : ""` en
-  // quote-editor.tsx fallan en silencio y muestran un precio donde no
-  // deberian.
-  const normalizedCatalog = (catalog ?? []).map((item) => ({
-    ...item,
-    unit_price_minor: Number(item.unit_price_minor),
-  }));
-  const normalizedPackages = (packages ?? []).map((pkg) => ({
-    ...pkg,
-    package_price_minor: Number(pkg.package_price_minor),
-  }));
 
   return (
     <QuoteEditor
-      init={init}
-      catalog={normalizedCatalog as CatalogItem[]}
-      clients={(clients ?? []) as QuoteClient[]}
-      packages={normalizedPackages as QuotePackageOption[]}
+      init={state.init}
+      catalog={state.bootstrap.catalog}
+      clients={state.bootstrap.clients}
+      packages={state.bootstrap.packages}
     />
+  );
+}
+
+export default function NuevoPresupuestoPage() {
+  return (
+    <Suspense fallback={<LoadingScreen />}>
+      <NuevoPresupuestoContent />
+    </Suspense>
   );
 }

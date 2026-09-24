@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  CachedQuote,
+  enqueueSave,
+  getPendingForQuote,
+  removePendingSave,
+  saveQuoteLocal,
+} from "../../../lib/offline/quote-cache";
 import {
   computeTotals,
   contentCount,
@@ -145,6 +152,16 @@ export default function QuoteEditor({
   const [saved, setSaved] = useState("");
   const [clientList, setClientList] = useState(clients);
   const [selectedClientId, setSelectedClientId] = useState("");
+
+  const [isOnline, setIsOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine);
+  // true = el id actual solo existe en el cache local, nunca se confirmó
+  // creado en el servidor (se guardó offline al menos una vez y todavía no
+  // sincronizó) -- decide si el próximo guardado tiene que ser un POST
+  // (con este mismo id) o ya puede ser un PATCH normal.
+  const [localOnly, setLocalOnly] = useState(false);
+  const [hasPendingSync, setHasPendingSync] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const syncingRef = useRef(false);
 
   const isDesign = kind === "diseno";
   const showPrices = priceMode === "items";
@@ -300,6 +317,42 @@ export default function QuoteEditor({
     };
   }
 
+  // Mismo shape que devuelve el servidor (campos de QUOTE_FIELDS) -- se usa
+  // para guardar en el cache local tanto un borrador offline como la
+  // respuesta real después de un guardado/sincronización exitosos.
+  function snapshotForCache(quoteId: string): CachedQuote {
+    return {
+      id: quoteId,
+      number,
+      kind,
+      status,
+      client_name: clientName,
+      client_contact: clientContact || null,
+      client_phone: clientPhone || null,
+      client_email: clientEmail || null,
+      title: title || null,
+      event_name: eventName || null,
+      modality: modality || null,
+      items: parsedItems,
+      price_mode: priceMode,
+      package_price_minor: Math.round(toNumber(packagePrice)),
+      discount_type: discountType,
+      discount_value: discountValue,
+      discount_label: discount.mode === "monthly" ? MONTHLY_DISCOUNT_LABEL : null,
+      notes: notes || null,
+      valid_days: toNumber(validDays),
+      rental_inquiry_id: init.rental_inquiry_id ?? null,
+    };
+  }
+
+  function normalizeForCache(quote: Record<string, unknown>): CachedQuote {
+    return {
+      ...(quote as CachedQuote),
+      package_price_minor: Number(quote.package_price_minor),
+      discount_value: Number(quote.discount_value),
+    };
+  }
+
   async function save(): Promise<string | null> {
     if (!clientName.trim()) {
       setError("Ingresá el nombre del cliente.");
@@ -308,17 +361,47 @@ export default function QuoteEditor({
 
     setError("");
     setSaved("");
+
+    // Nuevo o todavía no confirmado creado en el servidor (se guardó
+    // offline antes): manda el mismo id generado en el cliente para que
+    // la URL/edición siga siendo consistente cuando sincronice.
+    const isCreate = !id || localOnly;
+    const quoteId = id ?? crypto.randomUUID();
+    const body = isCreate ? { ...payload(), id: quoteId } : payload();
+
+    let response: Response;
     try {
-      const response = await fetch(id ? `/api/admin/presupuestos/${id}` : "/api/admin/presupuestos", {
-        method: id ? "PATCH" : "POST",
+      response = await fetch(isCreate ? "/api/admin/presupuestos" : `/api/admin/presupuestos/${quoteId}`, {
+        method: isCreate ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload()),
+        body: JSON.stringify(body),
       });
+    } catch {
+      // Falla de red real (no una respuesta del servidor): no se pierde el
+      // cambio -- se guarda local y se encola para mandar lo mismo apenas
+      // vuelva la señal.
+      await enqueueSave({ quoteId, operation: isCreate ? "create" : "update", payload: body });
+      await saveQuoteLocal(snapshotForCache(quoteId));
+      if (!id) {
+        setId(quoteId);
+        window.history.replaceState(null, "", `/admin/presupuestos/${quoteId}`);
+      }
+      setLocalOnly(isCreate);
+      setHasPendingSync(true);
+      setSaved("Guardado localmente — se sube al reconectar");
+      return quoteId;
+    }
+
+    try {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo guardar.");
 
       setId(result.quote.id);
       setNumber(result.quote.number);
+      setLocalOnly(false);
+      setHasPendingSync(false);
+      await removePendingSave(result.quote.id);
+      await saveQuoteLocal(normalizeForCache(result.quote));
       setSaved("Guardado ✓");
       // Deja la URL del presupuesto guardado sin volver a montar el editor.
       if (!id) window.history.replaceState(null, "", `/admin/presupuestos/${result.quote.id}`);
@@ -335,6 +418,80 @@ export default function QuoteEditor({
     await save();
     setBusy("");
   }
+
+  // =====================================================
+  // SINCRONIZAR AL RECONECTAR
+  //
+  // Repite exactamente la misma llamada que se haría en vivo (mismo
+  // POST/PATCH que ya usa save()) con el último estado guardado offline.
+  // Si falla por un motivo real del servidor (no de red), se deja en la
+  // cola para reintentar -- no se pierde el cambio.
+  // =====================================================
+
+  async function syncPendingSave() {
+    if (!id || syncingRef.current) return;
+    const pending = await getPendingForQuote(id);
+    if (!pending) return;
+
+    syncingRef.current = true;
+    setSyncing(true);
+    try {
+      const response = await fetch(pending.operation === "create" ? "/api/admin/presupuestos" : `/api/admin/presupuestos/${id}`, {
+        method: pending.operation === "create" ? "POST" : "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(pending.payload),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        console.error("ERROR SYNC PRESUPUESTO:", result.error);
+        return;
+      }
+
+      await removePendingSave(id);
+      await saveQuoteLocal(normalizeForCache(result.quote));
+      setLocalOnly(false);
+      setHasPendingSync(false);
+      setNumber(result.quote.number);
+      setSaved("Sincronizado ✓");
+    } catch (err) {
+      console.error("ERROR SYNC PRESUPUESTO (red):", err);
+    } finally {
+      syncingRef.current = false;
+      setSyncing(false);
+    }
+  }
+
+  // Si se reabre un presupuesto que ya tenía un guardado sin sincronizar
+  // (de esta sesión o de una anterior), reflejarlo en la UI.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    getPendingForQuote(id).then((pending) => {
+      if (cancelled || !pending) return;
+      setLocalOnly(pending.operation === "create");
+      setHasPendingSync(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    function handleOnline() {
+      setIsOnline(true);
+      syncPendingSave();
+    }
+    function handleOffline() {
+      setIsOnline(false);
+    }
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   async function fetchPdf(quoteId: string) {
     const response = await fetch(`/api/admin/presupuestos/${quoteId}/pdf`);
@@ -422,6 +579,18 @@ export default function QuoteEditor({
           <h1 className="mt-2 text-[clamp(30px,5vw,52px)] font-black uppercase leading-[0.95] tracking-[-0.04em]">
             {isNew && !id ? "Nuevo presupuesto." : "Presupuesto."}
           </h1>
+
+          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10px] font-bold uppercase tracking-[0.1em]">
+            <span className={`inline-flex items-center gap-1.5 ${isOnline ? "text-emerald-300" : "text-amber-300"}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${isOnline ? "bg-emerald-400" : "bg-amber-400"}`} />
+              {isOnline ? "Online" : "Sin conexión"}
+            </span>
+            {hasPendingSync && (
+              <span className="text-white/40">
+                {syncing ? "Sincronizando…" : "Guardado local sin sincronizar"}
+              </span>
+            )}
+          </div>
         </header>
 
         {/* Tipo */}
@@ -809,7 +978,8 @@ export default function QuoteEditor({
             <button
               type="button"
               onClick={onShare}
-              disabled={Boolean(busy)}
+              disabled={Boolean(busy) || !isOnline}
+              title={!isOnline ? "Necesita conexión para generar el PDF." : undefined}
               className="h-11 border border-emerald-400/30 bg-emerald-400/10 px-4 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-300 transition hover:bg-emerald-400/20 disabled:opacity-40"
             >
               {busy === "share" ? "Preparando…" : "Compartir"}
@@ -817,7 +987,8 @@ export default function QuoteEditor({
             <button
               type="button"
               onClick={onDownload}
-              disabled={Boolean(busy)}
+              disabled={Boolean(busy) || !isOnline}
+              title={!isOnline ? "Necesita conexión para generar el PDF." : undefined}
               className={`h-11 px-4 text-[10px] font-black uppercase tracking-[0.14em] text-white transition disabled:opacity-40 sm:px-5 ${
                 isDesign ? "bg-violet-600 hover:bg-violet-500" : "bg-[#ff2a1a] hover:bg-[#ff4a2d]"
               }`}

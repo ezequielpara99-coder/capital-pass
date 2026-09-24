@@ -1,55 +1,132 @@
-import { notFound } from "next/navigation";
-import { createAdminClient } from "../../../../lib/supabase/admin";
-import { QUOTE_FIELDS, requireAdminPage } from "../../../../lib/quotes/auth";
-import QuoteEditor, { CatalogItem, QuoteClient, QuoteInit, QuotePackageOption } from "../quote-editor";
+"use client";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import { createClient } from "../../../../lib/supabase/client";
+import { loadBootstrap, loadQuoteLocal, saveBootstrap, saveQuoteLocal, type CachedQuote } from "../../../../lib/offline/quote-cache";
+import QuoteEditor, { CatalogItem, QuoteClient, QuoteInit, QuotePackageOption } from "../quote-editor";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export default async function EditarPresupuestoPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireAdminPage();
+type Bootstrap = { catalog: CatalogItem[]; clients: QuoteClient[]; packages: QuotePackageOption[] };
 
-  const { id } = await params;
-  if (!UUID.test(id)) notFound();
+function normalizeQuote(quote: Record<string, unknown>): QuoteInit {
+  return {
+    ...(quote as unknown as QuoteInit),
+    package_price_minor: Number(quote.package_price_minor),
+    discount_value: Number(quote.discount_value),
+  };
+}
 
-  const admin = createAdminClient();
-  const { data: quote } = await admin.from("quotes").select(QUOTE_FIELDS).eq("id", id).maybeSingle();
-  if (!quote) notFound();
+export default function EditarPresupuestoPage() {
+  const params = useParams<{ id: string }>();
+  const id = params.id;
 
-  const [{ data: catalog }, { data: clients }, { data: packages }] = await Promise.all([
-    admin.from("quote_catalog").select("id, kind, description, unit, unit_price_minor").eq("active", true).order("description"),
-    admin.from("quote_clients").select("id, name, contact, phone, email").order("name"),
-    admin.from("quote_packages").select("id, kind, name, items, price_mode, package_price_minor, notes").eq("active", true).order("name"),
-  ]);
+  const [state, setState] = useState<
+    | { status: "loading" }
+    | { status: "error"; message: string }
+    | { status: "ready"; init: QuoteInit; bootstrap: Bootstrap }
+  >({ status: "loading" });
 
-  // unit_price_minor/package_price_minor son bigint en la base: PostgREST
-  // los serializa como STRING, no como number (el motivo por el que
-  // package_price_minor/discount_value de quote ya se normalizan arriba
-  // con Number()). Sin esto, un item o paquete gratuito (precio 0) queda
-  // como el string "0" -- truthy en JS -- y los chequeos tipo
-  // `entry.unit_price_minor ? ... : ""` en quote-editor.tsx fallan en
-  // silencio y muestran un precio donde no deberian.
-  const normalizedCatalog = (catalog ?? []).map((item) => ({
-    ...item,
-    unit_price_minor: Number(item.unit_price_minor),
-  }));
-  const normalizedPackages = (packages ?? []).map((pkg) => ({
-    ...pkg,
-    package_price_minor: Number(pkg.package_price_minor),
-  }));
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      if (!UUID.test(id)) {
+        setState({ status: "error", message: "Presupuesto inválido." });
+        return;
+      }
+
+      const supabase = createClient();
+
+      // Mismo chequeo liviano que en nuevo/page.tsx: getSession() no
+      // necesita red, la autoridad real la aplica el servidor en cada
+      // fetch/guardado.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        window.location.replace("/login");
+        return;
+      }
+
+      let init: QuoteInit | null = null;
+      try {
+        const response = await fetch(`/api/admin/presupuestos/${id}`, { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) {
+          if (!cancelled) setState({ status: "error", message: data?.error ?? "No se encontró el presupuesto." });
+          return;
+        }
+        init = normalizeQuote(data.quote);
+        await saveQuoteLocal({ ...(data.quote as CachedQuote), ...init } as CachedQuote);
+      } catch {
+        const cached = await loadQuoteLocal(id);
+        if (!cached) {
+          if (!cancelled) {
+            setState({
+              status: "error",
+              message: "No hay conexión y este presupuesto todavía no se guardó localmente. Abrilo una vez con conexión para poder editarlo offline después.",
+            });
+          }
+          return;
+        }
+        init = cached as unknown as QuoteInit;
+      }
+
+      let bootstrap: Bootstrap | null = null;
+      try {
+        const response = await fetch("/api/admin/presupuestos/bootstrap", { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) throw new Error();
+        bootstrap = { catalog: data.catalog, clients: data.clients, packages: data.packages };
+        await saveBootstrap(bootstrap);
+      } catch {
+        bootstrap = (await loadBootstrap()) as unknown as Bootstrap | null;
+      }
+
+      if (!bootstrap) {
+        if (!cancelled) {
+          setState({
+            status: "error",
+            message: "No hay conexión y todavía no se guardó el catálogo local. Abrí esta pantalla una vez con conexión para poder usarla offline después.",
+          });
+        }
+        return;
+      }
+
+      if (!cancelled) setState({ status: "ready", init: init as QuoteInit, bootstrap });
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (state.status === "loading") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#050505] text-[#f7f3ed]">
+        <p className="text-sm text-white/40">Cargando presupuesto...</p>
+      </main>
+    );
+  }
+
+  if (state.status === "error") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#050505] px-6 text-center text-[#f7f3ed]">
+        <p className="max-w-sm text-sm text-white/50">{state.message}</p>
+      </main>
+    );
+  }
 
   return (
     <QuoteEditor
-      init={{
-        ...(quote as unknown as QuoteInit),
-        package_price_minor: Number(quote.package_price_minor),
-        discount_value: Number(quote.discount_value),
-      }}
-      catalog={normalizedCatalog as CatalogItem[]}
-      clients={(clients ?? []) as QuoteClient[]}
-      packages={normalizedPackages as QuotePackageOption[]}
+      init={state.init}
+      catalog={state.bootstrap.catalog}
+      clients={state.bootstrap.clients}
+      packages={state.bootstrap.packages}
     />
   );
 }

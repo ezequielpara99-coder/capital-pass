@@ -19,6 +19,33 @@ function optionalText(value: unknown, max: number) {
   return String(value ?? "").trim().slice(0, max) || null;
 }
 
+// GET: un presupuesto individual -- lo usa el editor del lado del cliente
+// para poder abrir /admin/presupuestos/[id] sin depender de un render
+// server-side (necesario para que la página pueda cachearse y abrir offline).
+export async function GET(_request: NextRequest, context: Context) {
+  try {
+    const verification = await verifyAdmin();
+    if (!verification.ok) return NextResponse.json({ error: verification.error }, { status: verification.status });
+
+    const { id } = await context.params;
+    if (!UUID.test(id)) return NextResponse.json({ error: "Presupuesto inválido." }, { status: 400 });
+
+    const admin = createAdminClient();
+    const { data, error } = await admin.from("quotes").select(QUOTE_FIELDS).eq("id", id).maybeSingle();
+
+    if (error) {
+      if (isMissingTable(error)) return NextResponse.json({ error: "Falta aplicar la actualización de la base de datos (presupuestos)." }, { status: 503 });
+      console.error("PRESUPUESTOS GET:", error);
+      return NextResponse.json({ error: "No se pudo consultar el presupuesto." }, { status: 500 });
+    }
+    if (!data) return NextResponse.json({ error: "No se encontró el presupuesto." }, { status: 404 });
+
+    return NextResponse.json({ ok: true, quote: data });
+  } catch {
+    return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
+  }
+}
+
 // PATCH: edita un presupuesto. Solo se tocan los campos que llegan.
 export async function PATCH(request: NextRequest, context: Context) {
   try {
