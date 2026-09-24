@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { createClient } from "../../lib/supabase/client";
+import { clearQuoteCache } from "../../lib/offline/quote-cache";
 
 export default function LogoutPage() {
   useEffect(() => {
@@ -27,6 +28,11 @@ export default function LogoutPage() {
       } catch {
         // No bloquear el cierre de sesion si esto falla.
       }
+
+      // El cache offline de presupuestos tiene nombre, contacto, email y
+      // teléfono de todos los clientes con presupuesto -- no debe quedar
+      // en el dispositivo después de cerrar sesión.
+      await clearQuoteCache().catch(() => {});
 
       const supabase = createClient();
 
