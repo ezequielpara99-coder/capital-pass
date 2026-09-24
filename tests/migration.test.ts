@@ -52,6 +52,8 @@ const migracionesRecuperadasMigration = readFileSync(new URL("../supabase/migrat
 const cancelBarSaleSnapshotMigration = readFileSync(new URL("../supabase/migrations/20260958_cancel_bar_sale_usa_snapshot_combo.sql", import.meta.url), "utf8");
 const validateTicketMethodMigration = readFileSync(new URL("../supabase/migrations/20260959_validate_ticket_manual_method_offline.sql", import.meta.url), "utf8");
 const confirmOnlineSaleAcumulaCupoMigration = readFileSync(new URL("../supabase/migrations/20260960_confirm_online_sale_acumula_cupo_por_tanda.sql", import.meta.url), "utf8");
+const snapshotComisionRrppMigration = readFileSync(new URL("../supabase/migrations/20260961_snapshot_comision_rrpp.sql", import.meta.url), "utf8");
+const processTicketReturnMigration = readFileSync(new URL("../supabase/migrations/20260962_process_ticket_return_sin_race_de_combo.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -78,10 +80,10 @@ async function database() {
   for (const c of constraints) {
     await db.exec(`alter table public.${q(c.table)} add constraint ${q(c.nombre)} ${c.definicion}`);
   }
-  await db.exec(`create table events(id uuid primary key, organization_id uuid, status public.event_status,
+  await db.exec(`create table events(id uuid primary key, organization_id uuid, name text, status public.event_status,
       rrpp_sales_enabled boolean default true, rrpp_sales_cutoff_at timestamptz,
       door_sales_enabled boolean default true, door_sales_start_at timestamptz, door_sales_end_at timestamptz);
-    create table event_staff(event_id uuid, organization_member_id uuid, staff_role public.event_staff_role, active boolean);
+    create table event_staff(event_id uuid, organization_member_id uuid, staff_role public.event_staff_role, active boolean, commission_percentage numeric);
     create table sales(id uuid primary key default gen_random_uuid(), organization_id uuid, event_id uuid, buyer_id uuid,
       seller_member_id uuid, status public.sale_status default 'confirmed', total_minor bigint default 0, currency text default 'ARS',
       channel public.sale_channel default 'organizer', confirmed_at timestamptz, created_at timestamptz default now(), updated_at timestamptz default now());
@@ -96,6 +98,9 @@ async function database() {
       used_at timestamptz, updated_at timestamptz default now());
     create table audit_logs(id uuid primary key default gen_random_uuid(), actor_user_id uuid, organization_id uuid,
       event_id uuid, action text, entity_type text, entity_id uuid, metadata jsonb, created_at timestamptz default now());
+    create table ticket_returns(id uuid primary key default gen_random_uuid(), organization_id uuid, event_id uuid, sale_id uuid,
+      ticket_id uuid unique, reason text, refund_status text, refund_amount_minor bigint, returned_by_profile_id uuid,
+      returned_at timestamptz, refunded_at timestamptz, created_at timestamptz default now());
     create table entry_scans(id uuid primary key default gen_random_uuid(), event_id uuid, ticket_id uuid,
       controller_member_id uuid, method text, result text, input_hash text, scanned_at timestamptz default now());
     create function public.is_platform_admin() returns boolean language sql stable security definer set search_path='' as $$
@@ -149,6 +154,8 @@ async function database() {
   await db.exec(cancelBarSaleSnapshotMigration);
   await db.exec(validateTicketMethodMigration);
   await db.exec(confirmOnlineSaleAcumulaCupoMigration);
+  await db.exec(snapshotComisionRrppMigration);
+  await db.exec(processTicketReturnMigration);
   return db;
 }
 
@@ -1060,6 +1067,45 @@ test("combos (entrada + consumicion) y packs de entradas", async () => {
     "no incrementa combo_remaining_credit_minor -- esta entrada nunca usa ese campo, su snapshot sigue siendo tipo producto"
   );
 
+  // ==========================================================
+  // process_ticket_return: el reintegro descuenta lo ya canjeado del
+  // combo. vipTicketId termino con los 2 Fernet incluidos canjeados de
+  // nuevo tras la cancelacion de arriba (2 x $2000 = $4000 activos; el
+  // canje original de $2000 quedo cancelado y no cuenta).
+  // organizerUser ya quedo como el rol activo (set_config de arriba).
+  // ==========================================================
+
+  const vipReturn = await db.query<{
+    return_id: string;
+    refund_status: string;
+    refund_amount_minor: string;
+    ticket_status: string;
+  }>(
+    `select * from process_ticket_return('${vipTicketId}','Compro de mas','refunded',null)`
+  );
+  assert.equal(Number(vipReturn.rows[0].refund_amount_minor), 11000, "15000 originales - 4000 activos consumidos del combo = 11000");
+  assert.equal(vipReturn.rows[0].ticket_status, "cancelled");
+  assert.equal(await scalar(`select status from tickets where id='${vipTicketId}'`), "cancelled");
+
+  // No puede pedir mas de lo que quedo disponible para reintegrar.
+  await assert.rejects(
+    () => db.query(`select process_ticket_return('${premiumTicketId}','Otro motivo','refunded',999999)`),
+    /no puede superar/
+  );
+
+  // No puede devolver dos veces la misma entrada.
+  await assert.rejects(
+    () => db.query(`select process_ticket_return('${vipTicketId}','De nuevo','refunded',null)`),
+    /ya esta anulada|ya tiene una devolucion/
+  );
+
+  // No puede devolver una entrada ya usada.
+  await db.exec(`update tickets set status = 'used', used_at = now() where id = '${premiumTicketId}'`);
+  await assert.rejects(
+    () => db.query(`select process_ticket_return('${premiumTicketId}','Ya se uso','no_refund',null)`),
+    /ya fue utilizada/
+  );
+
   await db.close();
 });
 
@@ -1300,6 +1346,47 @@ test("control de ingreso: validate_ticket_manual valida, bloquea doble uso y reg
   );
   assert.equal(invalid.rows[0].result, "invalid");
   assert.equal(invalid.rows[0].ticket_id, null);
+
+  await db.close();
+});
+
+test("comision de RRPP: se congela en la venta, editar el % despues no cambia lo ya vendido", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "33333333-3333-4333-8333-333333333333";
+  const event = "44444444-4444-4444-8444-444444444444";
+  const rrppUser = "55555555-5555-4555-8555-555555555555";
+  const ticketType = "66666666-6666-4666-8666-666666666666";
+
+  await db.exec(`insert into auth.users values ('${rrppUser}','rrpp@example.test',now(),'{}');
+    insert into organizations(id,name,slug,complimentary) values ('${org}','Club RRPP','club-rrpp',true);
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into ticket_types(id,event_id,name,price_minor,capacity,active,status)
+      values ('${ticketType}','${event}','General',10000,50,true,'available');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${rrppUser}','rrpp','active');`);
+
+  const rrppMember = await scalar(`select id::text from organization_members where user_id = '${rrppUser}'`);
+  await db.exec(`insert into event_staff(event_id,organization_member_id,staff_role,active,commission_percentage)
+    values ('${event}','${rrppMember}','rrpp',true,15);
+    select set_config('request.jwt.claim.sub','${rrppUser}',false);`);
+
+  const firstSale = await scalar(
+    `select sale_id::text from create_sale('${event}','${ticketType}',1,'Cliente','Uno','30111111','3462111111',null,'efectivo')`
+  );
+  assert.equal(Number(await scalar(`select commission_percentage_snapshot from sales where id='${firstSale}'`)), 15, "la venta congela el % vigente al momento de vender");
+
+  // El organizador baja la comision DESPUES de esta primera venta.
+  await db.exec(`update event_staff set commission_percentage = 5 where organization_member_id = '${rrppMember}'`);
+
+  const secondSale = await scalar(
+    `select sale_id::text from create_sale('${event}','${ticketType}',1,'Cliente','Dos','30222222','3462222222',null,'efectivo')`
+  );
+  assert.equal(Number(await scalar(`select commission_percentage_snapshot from sales where id='${secondSale}'`)), 5, "la venta nueva usa el % ya actualizado");
+  assert.equal(
+    Number(await scalar(`select commission_percentage_snapshot from sales where id='${firstSale}'`)),
+    15,
+    "la venta vieja NO cambia retroactivamente cuando se edita el % despues"
+  );
 
   await db.close();
 });

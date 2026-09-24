@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 
 import { createClient } from "../../../../lib/supabase/server";
-import { createAdminClient } from "../../../../lib/supabase/admin";
-import { verifyOrganizerForOrg } from "../../../../lib/auth/organizer";
 
 // ============================================================
 // HELPERS
@@ -76,6 +74,14 @@ function getAmount(
 //   refundStatus: "pending" | "refunded" | "no_refund",
 //   refundAmountMinor?: 12000
 // }
+//
+// Toda la validación (permisos, estado de la entrada, cuánto se consumió
+// ya del combo en la barra, y la anulación en sí) vive en la función
+// process_ticket_return -- una sola transacción que toma el lock de la
+// entrada ANTES de leer cuánto combo se consumió, para que un canje en la
+// barra casi simultáneo no pueda dejar el reintegro calculado con un
+// monto desactualizado (mismo patrón que ya usan redeem_combo_ticket,
+// cancel_bar_sale y validate_ticket_manual).
 // ============================================================
 
 export async function POST(
@@ -104,10 +110,6 @@ export async function POST(
       getAmount(
         body.refundAmountMinor
       );
-
-    // ========================================================
-    // VALIDACIONES BÁSICAS
-    // ========================================================
 
     if (!ticketId) {
       return NextResponse.json(
@@ -145,10 +147,6 @@ export async function POST(
       );
     }
 
-    // ========================================================
-    // USUARIO
-    // ========================================================
-
     const supabase =
       await createClient();
 
@@ -169,284 +167,25 @@ export async function POST(
       );
     }
 
-    const admin =
-      createAdminClient();
-
-    // ========================================================
-    // ENTRADA
-    // ========================================================
-
     const {
-      data: ticket,
-    } = await admin
-      .from("tickets")
-      .select(`
-        id,
-        display_number,
-        sale_id,
-        sale_item_id,
-        event_id,
-        ticket_type_id,
-        status,
-        issued_at,
-        used_at,
-        cancelled_at
-      `)
-      .eq(
-        "id",
-        ticketId
-      )
-      .maybeSingle();
-
-    if (!ticket) {
-      return NextResponse.json(
-        {
-          error:
-            "Entrada no encontrada.",
-        },
-        {
-          status: 404,
-        }
-      );
-    }
-
-    // ========================================================
-    // EVENTO Y ORGANIZADOR
-    // Resolvemos primero la organización dueña del evento y
-    // recién después verificamos la membresía sobre ESA
-    // organización puntual (un organizador puede administrar
-    // más de una organización).
-    // ========================================================
-
-    const {
-      data: event,
-    } = await admin
-      .from("events")
-      .select(`
-        id,
-        organization_id,
-        name
-      `)
-      .eq(
-        "id",
-        ticket.event_id
-      )
-      .maybeSingle();
-
-    if (!event) {
-      return NextResponse.json(
-        {
-          error:
-            "Esta entrada no pertenece a tu organización.",
-        },
-        {
-          status: 403,
-        }
-      );
-    }
-
-    const verification =
-      await verifyOrganizerForOrg(
-        event.organization_id
-      );
-
-    if (!verification.ok) {
-      return NextResponse.json(
-        {
-          error:
-            verification.error,
-        },
-        {
-          status:
-            verification.status,
-        }
-      );
-    }
-
-    // ========================================================
-    // ESTADO DE LA ENTRADA
-    // ========================================================
-
-    if (
-      ticket.status ===
-      "used"
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "No se puede devolver una entrada que ya fue utilizada.",
-        },
-        {
-          status: 409,
-        }
-      );
-    }
-
-    if (
-      ticket.status ===
-      "cancelled"
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Esta entrada ya está anulada o devuelta.",
-        },
-        {
-          status: 409,
-        }
-      );
-    }
-
-    if (
-      ticket.status !==
-      "issued"
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            `No se puede devolver una entrada con estado "${ticket.status}".`,
-        },
-        {
-          status: 409,
-        }
-      );
-    }
-
-    // ========================================================
-    // VERIFICAR QUE NO EXISTA DEVOLUCIÓN
-    // ========================================================
-
-    const {
-      data: existingReturn,
-    } = await admin
-      .from(
-        "ticket_returns"
-      )
-      .select(`
-        id,
-        returned_at
-      `)
-      .eq(
-        "ticket_id",
-        ticket.id
-      )
-      .maybeSingle();
-
-    if (existingReturn) {
-      return NextResponse.json(
-        {
-          error:
-            "Esta entrada ya tiene una devolución registrada.",
-        },
-        {
-          status: 409,
-        }
-      );
-    }
-
-    // ========================================================
-    // PRECIO ORIGINAL DE ESA ENTRADA
-    //
-    // Usamos sale_items porque ahí quedó congelado
-    // el precio al momento de la venta.
-    // ========================================================
-
-    const {
-      data: saleItem,
-    } = await admin
-      .from(
-        "sale_items"
-      )
-      .select(`
-        id,
-        unit_price_minor
-      `)
-      .eq(
-        "id",
-        ticket.sale_item_id
-      )
-      .maybeSingle();
-
-    if (!saleItem) {
-      return NextResponse.json(
-        {
-          error:
-            "No se pudo determinar el precio original de la entrada.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    const originalPrice =
-      Number(
-        saleItem.unit_price_minor ??
-          0
-      );
-
-    // ========================================================
-    // CONSUMICIÓN DE COMBO YA ENTREGADA
-    //
-    // Si esta entrada incluía un combo (producto o crédito) y el
-    // comprador ya canjeó parte, esa plata ya se entregó en forma de
-    // bebida/consumición real -- no se puede reintegrar de vuelta.
-    // bar_sales.total_minor de cada canje activo (payment_method
-    // 'combo', no cancelado) ya refleja el valor entregado en ambos
-    // tipos de combo, así que sumarlo alcanza sin tener que
-    // distinguir 'producto' de 'credito'.
-    // ========================================================
-
-    const { data: comboRedemptions } = await admin
-      .from("bar_sales")
-      .select("total_minor")
-      .eq("ticket_id", ticket.id)
-      .eq("payment_method", "combo")
-      .is("cancelled_at", null);
-
-    const consumedComboValue = (comboRedemptions ?? []).reduce(
-      (sum, row) => sum + Number(row.total_minor ?? 0),
-      0
+      data,
+      error,
+    } = await supabase.rpc(
+      "process_ticket_return",
+      {
+        p_ticket_id: ticketId,
+        p_reason: reason,
+        p_refund_status: refundStatus,
+        p_refund_amount_minor: requestedRefundAmount,
+      }
     );
 
-    const maxRefund = Math.max(0, originalPrice - consumedComboValue);
-
-    // ========================================================
-    // IMPORTE DEL REINTEGRO
-    // ========================================================
-
-    let refundAmountMinor =
-      0;
-
-    if (
-      refundStatus ===
-      "pending" ||
-      refundStatus ===
-      "refunded"
-    ) {
-      refundAmountMinor =
-        requestedRefundAmount ??
-        maxRefund;
-    }
-
-    if (
-      refundStatus ===
-      "no_refund"
-    ) {
-      refundAmountMinor =
-        0;
-    }
-
-    if (
-      refundAmountMinor >
-      maxRefund
-    ) {
+    if (error) {
       return NextResponse.json(
         {
           error:
-            consumedComboValue > 0
-              ? `El reintegro no puede superar ${maxRefund / 100} (el precio original menos ${consumedComboValue / 100} ya consumidos del combo).`
-              : "El reintegro no puede superar el precio original de la entrada.",
+            error.message.replace(/^[A-Z0-9]{5}:\s*/, "") ||
+            "No se pudo procesar la devolución.",
         },
         {
           status: 400,
@@ -454,100 +193,13 @@ export async function POST(
       );
     }
 
-    const now =
-      new Date().toISOString();
+    const row = data?.[0];
 
-    // ========================================================
-    // 1. RESERVAMOS LA DEVOLUCIÓN
-    //
-    // ticket_id es UNIQUE.
-    // Esto evita que dos personas intenten devolver
-    // la misma entrada al mismo tiempo.
-    // ========================================================
-
-    const {
-      data: returnRow,
-      error: returnError,
-    } = await admin
-      .from(
-        "ticket_returns"
-      )
-      .insert({
-        organization_id:
-          event.organization_id,
-
-        event_id:
-          ticket.event_id,
-
-        sale_id:
-          ticket.sale_id,
-
-        ticket_id:
-          ticket.id,
-
-        reason,
-
-        refund_status:
-          refundStatus,
-
-        refund_amount_minor:
-          refundAmountMinor,
-
-        returned_by_profile_id:
-          user.id,
-
-        returned_at:
-          now,
-
-        refunded_at:
-          refundStatus ===
-          "refunded"
-            ? now
-            : null,
-      })
-      .select(`
-        id,
-        ticket_id,
-        reason,
-        refund_status,
-        refund_amount_minor,
-        returned_at,
-        refunded_at
-      `)
-      .single();
-
-    if (
-      returnError ||
-      !returnRow
-    ) {
-      /*
-       * Si fue una colisión del índice UNIQUE,
-       * probablemente ya se devolvió.
-       */
-      if (
-        returnError?.code ===
-        "23505"
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              "Esta entrada ya fue devuelta.",
-          },
-          {
-            status: 409,
-          }
-        );
-      }
-
-      console.error(
-        "Error creando ticket_return:",
-        returnError
-      );
-
+    if (!row) {
       return NextResponse.json(
         {
           error:
-            "No se pudo registrar la devolución.",
+            "No se pudo procesar la devolución.",
         },
         {
           status: 500,
@@ -555,161 +207,52 @@ export async function POST(
       );
     }
 
-    // ========================================================
-    // 2. ANULAR ENTRADA
-    //
-    // Solamente se actualiza si TODAVÍA está issued.
-    //
-    // Esto protege el caso extremo donde un controlador
-    // intenta usarla al mismo tiempo que se devuelve.
-    // ========================================================
-
-    const {
-      data: cancelledTicket,
-      error: cancelError,
-    } = await admin
-      .from("tickets")
-      .update({
-        status:
-          "cancelled",
-
-        cancelled_at:
-          now,
-
-        updated_at:
-          now,
-      })
-      .eq(
-        "id",
-        ticket.id
-      )
-      .eq(
-        "status",
-        "issued"
-      )
-      .select(`
-        id,
-        display_number,
-        sale_id,
-        event_id,
-        ticket_type_id,
-        status,
-        cancelled_at
-      `)
-      .maybeSingle();
-
-    // ========================================================
-    // SI NO PUDIMOS ANULARLA,
-    // ELIMINAMOS LA DEVOLUCIÓN RECIÉN CREADA.
-    // ========================================================
-
-    if (
-      cancelError ||
-      !cancelledTicket
-    ) {
-      await admin
-        .from(
-          "ticket_returns"
-        )
-        .delete()
-        .eq(
-          "id",
-          returnRow.id
-        );
-
-      // Volvemos a leer el estado actual
-      // para dar un mensaje correcto.
-
-      const {
-        data: currentTicket,
-      } = await admin
-        .from("tickets")
-        .select(`
-          status,
-          used_at
-        `)
-        .eq(
-          "id",
-          ticket.id
-        )
-        .maybeSingle();
-
-      if (
-        currentTicket?.status ===
-        "used"
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              "La entrada fue utilizada antes de completar la devolución.",
-          },
-          {
-            status: 409,
-          }
-        );
-      }
-
-      return NextResponse.json(
-        {
-          error:
-            "No se pudo anular la entrada.",
-        },
-        {
-          status: 409,
-        }
-      );
-    }
-
-    // ========================================================
-    // RESPUESTA
-    // ========================================================
-
     return NextResponse.json({
       ok: true,
 
       event: {
         id:
-          event.id,
+          row.event_id,
 
         name:
-          event.name,
+          row.event_name,
       },
 
       ticket: {
         id:
-          cancelledTicket.id,
+          ticketId,
 
         displayNumber:
-          cancelledTicket.display_number,
+          row.ticket_display_number,
 
         status:
-          cancelledTicket.status,
+          row.ticket_status,
 
         cancelledAt:
-          cancelledTicket.cancelled_at,
+          row.ticket_cancelled_at,
       },
 
       return: {
         id:
-          returnRow.id,
+          row.return_id,
 
         reason:
-          returnRow.reason,
+          row.reason,
 
         refundStatus:
-          returnRow.refund_status,
+          row.refund_status,
 
         refundAmountMinor:
           Number(
-            returnRow.refund_amount_minor ??
+            row.refund_amount_minor ??
               0
           ),
 
         returnedAt:
-          returnRow.returned_at,
+          row.returned_at,
 
         refundedAt:
-          returnRow.refunded_at,
+          row.refunded_at,
       },
     });
   } catch (error) {

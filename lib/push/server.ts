@@ -36,13 +36,17 @@ async function sendToSubscriptions(
         );
       } catch (error) {
         const statusCode = (error as { statusCode?: number })?.statusCode;
-        // 404/410 = la suscripcion ya no existe (desinstalo la app). 400/403
-        // tambien son permanentes segun la Push API (suscripcion invalida o
-        // credenciales VAPID desincronizadas) -- si no los borramos tambien,
-        // esa suscripcion muerta se reintenta para siempre en cada aviso
-        // futuro. Cualquier otro codigo (5xx, timeout) puede ser transitorio,
-        // asi que ahi solo logueamos y la dejamos para el proximo intento.
-        if (statusCode === 404 || statusCode === 410 || statusCode === 400 || statusCode === 403) {
+        // Solo 404/410 significan sin ambiguedad "esta suscripcion puntual
+        // ya no existe" (se desinstalo la app en ESE dispositivo) -- ahi si
+        // se borra, para no acumular suscripciones muertas para siempre.
+        // 400/403 NO se borran mas: antes se trataban igual que 404/410,
+        // pero 403 en particular tambien lo devuelve el proveedor cuando
+        // las credenciales VAPID del SERVIDOR estan desincronizadas (ej. se
+        // roto VAPID_PRIVATE_KEY sin actualizar la publica) -- en ese caso
+        // TODAS las suscripciones fallan con 403 al mismo tiempo, y
+        // borrarlas de una hubiera vaciado la base entera de suscripciones
+        // push por un problema de configuracion, no de los dispositivos.
+        if (statusCode === 404 || statusCode === 410) {
           await admin.from("push_subscriptions").delete().eq("id", sub.id);
         } else {
           // Solo el codigo/mensaje: el objeto completo del error incluye el

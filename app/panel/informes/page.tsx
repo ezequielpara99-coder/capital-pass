@@ -24,6 +24,7 @@ type SaleRow = {
   channel: string;
   status: string;
   created_at: string;
+  commission_percentage_snapshot: number | string | null;
 };
 
 type SaleItemRow = {
@@ -247,7 +248,8 @@ export default async function InformesPage() {
       total_minor,
       channel,
       status,
-      created_at
+      created_at,
+      commission_percentage_snapshot
     `)
     .in("event_id", eventIds)
     .eq("status", "confirmed");
@@ -1143,23 +1145,41 @@ export default async function InformesPage() {
                 )
               : 0;
 
-          const rrppReturnAmount =
-            sellerReturns
-              .filter(
-                (item) =>
-                  rrppSaleIds.has(
-                    item.sale_id
-                  )
+          const rrppReturnsBySale =
+            new Map<string, number>();
+
+          for (
+            const item of sellerReturns
+          ) {
+            if (
+              !rrppSaleIds.has(
+                item.sale_id
               )
-              .reduce(
-                (total, item) =>
-                  total +
-                  Number(
-                    item.refund_amount_minor ??
-                      0
-                  ),
-                0
-              );
+            ) {
+              continue;
+            }
+            const current =
+              rrppReturnsBySale.get(
+                item.sale_id
+              ) ?? 0;
+            rrppReturnsBySale.set(
+              item.sale_id,
+              current +
+                Number(
+                  item.refund_amount_minor ??
+                    0
+                )
+            );
+          }
+
+          const rrppReturnAmount =
+            Array.from(
+              rrppReturnsBySale.values()
+            ).reduce(
+              (total, amount) =>
+                total + amount,
+              0
+            );
 
           const commissionBase =
             rrppStaff
@@ -1170,12 +1190,44 @@ export default async function InformesPage() {
                 )
               : 0;
 
+          // Cada venta pesa con SU PROPIO % (congelado al momento de la
+          // venta con commission_percentage_snapshot, o el vigente como
+          // fallback para ventas de antes de este fix) -- si el organizador
+          // edita el % ahora, no cambia lo que ya se le debe al RRPP por
+          // ventas ya cerradas.
           const commissionGenerated =
             rrppStaff
-              ? Math.round(
-                  (commissionBase *
-                    commissionPercentage) /
-                    100
+              ? rrppSales.reduce(
+                  (total, sale) => {
+                    const netSaleAmount =
+                      Math.max(
+                        0,
+                        Number(
+                          sale.total_minor
+                        ) -
+                          (rrppReturnsBySale.get(
+                            sale.id
+                          ) ?? 0)
+                      );
+                    const salePct =
+                      sale.commission_percentage_snapshot !==
+                        null &&
+                      sale.commission_percentage_snapshot !==
+                        undefined
+                        ? Number(
+                            sale.commission_percentage_snapshot
+                          )
+                        : commissionPercentage;
+                    return (
+                      total +
+                      Math.round(
+                        (netSaleAmount *
+                          salePct) /
+                          100
+                      )
+                    );
+                  },
+                  0
                 )
               : 0;
 

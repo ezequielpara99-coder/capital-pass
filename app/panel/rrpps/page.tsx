@@ -373,6 +373,15 @@ export default async function RRPPsPage({
         staff.organization_member_id
     );
 
+  // % vigente por RRPP -- se usa como fallback para ventas viejas que
+  // todavia no tienen commission_percentage_snapshot (de antes de este fix).
+  const commissionPctByMember = new Map(
+    staffRows.map((staff) => [
+      staff.organization_member_id,
+      Number(staff.commission_percentage ?? 0),
+    ])
+  );
+
   // ==========================================================
   // VENTAS RRPP
   // ==========================================================
@@ -390,6 +399,11 @@ export default async function RRPPsPage({
 
     status: string;
     channel: string;
+
+    commission_percentage_snapshot:
+      | number
+      | string
+      | null;
   }[] = [];
 
   if (
@@ -404,7 +418,8 @@ export default async function RRPPsPage({
         seller_member_id,
         total_minor,
         status,
-        channel
+        channel,
+        commission_percentage_snapshot
       `)
       .eq(
         "event_id",
@@ -551,6 +566,7 @@ export default async function RRPPsPage({
         salesCount: number;
         ticketsSold: number;
         totalSold: number;
+        commissionGenerated: number;
       }
     >();
 
@@ -570,6 +586,7 @@ export default async function RRPPsPage({
         salesCount: 0,
         ticketsSold: 0,
         totalSold: 0,
+        commissionGenerated: 0,
       };
 
     current.salesCount += 1;
@@ -579,11 +596,26 @@ export default async function RRPPsPage({
         sale.id
       ) ?? 0;
 
-    current.totalSold +=
+    const saleTotal =
       Number(
         sale.total_minor ??
           0
       );
+
+    current.totalSold += saleTotal;
+
+    // El % se congela en el momento de la venta
+    // (commission_percentage_snapshot) -- una venta vieja, de antes de este
+    // fix, no lo tiene y usa el % vigente como antes.
+    const saleCommissionPct =
+      sale.commission_percentage_snapshot !== null &&
+      sale.commission_percentage_snapshot !== undefined
+        ? Number(sale.commission_percentage_snapshot)
+        : commissionPctByMember.get(sale.seller_member_id) ?? 0;
+
+    current.commissionGenerated += Math.round(
+      saleTotal * (saleCommissionPct / 100)
+    );
 
     salesByMember.set(
       sale.seller_member_id,
@@ -647,6 +679,7 @@ export default async function RRPPsPage({
             salesCount: 0,
             ticketsSold: 0,
             totalSold: 0,
+            commissionGenerated: 0,
           };
 
         const commissionPercentage =
@@ -655,14 +688,12 @@ export default async function RRPPsPage({
               0
           );
 
+        // Cada venta ya trae su propio % congelado (o el vigente como
+        // fallback para ventas viejas) sumado en salesByMember -- si se
+        // edita el % de comision ahora, no cambia lo que ya se le debe al
+        // RRPP por ventas ya hechas.
         const commissionGenerated =
-          Math.round(
-            performance.totalSold *
-              (
-                commissionPercentage /
-                100
-              )
-          );
+          performance.commissionGenerated;
 
         const commissionPaid =
           paidByMember.get(
