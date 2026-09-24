@@ -310,20 +310,16 @@ export default function NuevaVentaRRPPPage() {
             "staff_role",
             "rrpp"
           )
-          .eq("active", true)
-          // Sin order by, Postgres no garantiza que fila devuelve si el
-          // RRPP quedo asignado a mas de un evento activo a la vez -- se
-          // prioriza la asignacion mas reciente para que sea consistente
-          // entre refrescos de pantalla.
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .eq("active", true);
 
         if (staffError) {
           throw staffError;
         }
 
-        if (!staffData) {
+        const staffRows =
+          (staffData ?? []) as StaffRow[];
+
+        if (staffRows.length === 0) {
           setError(
             "No tenés ningún evento habilitado para vender."
           );
@@ -331,26 +327,33 @@ export default function NuevaVentaRRPPPage() {
           return;
         }
 
-        const staff =
-          staffData as StaffRow;
-
         // -----------------------------------------------
         // DATOS DEL EVENTO
+        //
+        // Si el RRPP quedo asignado a mas de un evento activo a la vez, se
+        // elige el mismo criterio que /rrpp y /rrpp/mesas (el que arranca
+        // antes) -- antes acá se elegía por la asignación más reciente en
+        // vez de por fecha del evento, y un RRPP podía ver un evento en el
+        // dashboard y terminar vendiendo para otro distinto sin darse cuenta.
         // -----------------------------------------------
 
         const {
-          data: eventData,
+          data: eventsData,
           error: eventError,
         } = await supabase
           .from("events")
           .select(
             "id, name, starts_at"
           )
-          .eq(
+          .in(
             "id",
-            staff.event_id
+            staffRows.map((row) => row.event_id)
           )
-          .maybeSingle();
+          .order("starts_at", { ascending: true })
+          .order("created_at", { ascending: false });
+
+        const eventData =
+          eventError ? null : (eventsData ?? [])[0] ?? null;
 
         if (eventError) {
           throw eventError;

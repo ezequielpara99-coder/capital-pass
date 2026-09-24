@@ -51,6 +51,7 @@ const adminDashboardTotalsMigration = readFileSync(new URL("../supabase/migratio
 const migracionesRecuperadasMigration = readFileSync(new URL("../supabase/migrations/20260957_recupera_migraciones_nunca_aplicadas.sql", import.meta.url), "utf8");
 const cancelBarSaleSnapshotMigration = readFileSync(new URL("../supabase/migrations/20260958_cancel_bar_sale_usa_snapshot_combo.sql", import.meta.url), "utf8");
 const validateTicketMethodMigration = readFileSync(new URL("../supabase/migrations/20260959_validate_ticket_manual_method_offline.sql", import.meta.url), "utf8");
+const confirmOnlineSaleAcumulaCupoMigration = readFileSync(new URL("../supabase/migrations/20260960_confirm_online_sale_acumula_cupo_por_tanda.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -147,6 +148,7 @@ async function database() {
   await db.exec(migracionesRecuperadasMigration);
   await db.exec(cancelBarSaleSnapshotMigration);
   await db.exec(validateTicketMethodMigration);
+  await db.exec(confirmOnlineSaleAcumulaCupoMigration);
   return db;
 }
 
@@ -1298,6 +1300,63 @@ test("control de ingreso: validate_ticket_manual valida, bloquea doble uso y reg
   );
   assert.equal(invalid.rows[0].result, "invalid");
   assert.equal(invalid.rows[0].ticket_id, null);
+
+  await db.close();
+});
+
+test("ventas online: un pago tardio no sobrevende si el carrito tenia 2 lineas de la misma tanda", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const admin = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const org = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const event = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const ticketType = "22222222-2222-4222-8222-222222222222";
+  const buyer = (n: string) => `'Comprador','${n}','30${n}','3462${n}',null`;
+
+  await db.exec(`insert into auth.users values ('${admin}','admin@example.test',now(),'{}');
+    insert into platform_admins(user_id) values ('${admin}');
+    insert into organizations(id,name,slug) values ('${org}','Club','club');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into ticket_types(id,event_id,name,price_minor,capacity,active,status)
+      values ('${ticketType}','${event}','General',5000,3,true,'available');
+    insert into organization_mercadopago_accounts(organization_id,mp_user_id,access_token,refresh_token,expires_at)
+      values ('${org}', 999, 'tok', 'ref', now() + interval '1 day');
+    select set_config('request.jwt.claim.sub','${admin}',false);`);
+
+  // Carrito con 2 LINEAS de la misma tanda (ej. entradas sueltas + un pack
+  // que resuelve a la misma tanda -- acá se simplifica a 2 lineas sueltas,
+  // que es exactamente lo que create_online_sale ya soporta y valida de
+  // forma acumulativa al crearse).
+  const twoLineCart = `'[{"ticket_type_id":"${ticketType}","quantity":1},{"ticket_type_id":"${ticketType}","quantity":1}]'::jsonb`;
+  const staleSale = await scalar(`select sale_id::text from create_online_sale('${event}', ${twoLineCart}, ${buyer("111111")})`);
+  assert.equal(await scalar(`select count(*)::int from sale_items where sale_id='${staleSale}'`), 2, "el carrito genero 2 sale_items para la misma tanda");
+
+  // El cron de 30 minutos la cancela antes de que llegue la confirmacion del pago.
+  await db.exec(`update sales set created_at = now() - interval '40 minutes' where id='${staleSale}'`);
+  assert.equal(await scalar("select cp_cancel_stale_online_sales()"), 1);
+  assert.equal(await scalar(`select status from sales where id='${staleSale}'`), "cancelled");
+
+  // Mientras tanto, otro comprador se queda con 2 de las 3 entradas de cupo real.
+  const otherCart = `'[{"ticket_type_id":"${ticketType}","quantity":2}]'::jsonb`;
+  const otherSale = await scalar(`select sale_id::text from create_online_sale('${event}', ${otherCart}, ${buyer("222222")})`);
+  await db.query("select confirm_online_sale($1,'approved')", [otherSale]);
+  assert.equal(await scalar(`select count(*)::int from tickets where ticket_type_id='${ticketType}' and status <> 'cancelled'`), 2);
+
+  // Pago tardio del carrito original (efectivo/Pago Facil): con solo 1 lugar
+  // libre y 2 lineas de 1 entrada cada una para la misma tanda, NO debe
+  // sobrevender -- cada linea "pasaria" el chequeo por separado si no se
+  // suman entre si antes de comparar contra el cupo.
+  await db.query("select confirm_online_sale($1,'approved')", [staleSale]);
+  assert.equal(
+    await scalar(`select status from sales where id='${staleSale}'`),
+    "cancelled",
+    "no debe revivir la venta: sumadas, las 2 lineas piden mas cupo del que queda"
+  );
+  assert.equal(
+    await scalar(`select count(*)::int from tickets where ticket_type_id='${ticketType}' and status <> 'cancelled'`),
+    2,
+    "no se debe haber emitido ninguna entrada de mas para esta tanda"
+  );
 
   await db.close();
 });
