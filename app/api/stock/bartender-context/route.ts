@@ -54,14 +54,24 @@ export async function GET() {
     : { data: [] as { id: string; name: string; category: string }[] };
   const productById = new Map((products ?? []).map((p) => [p.id, p]));
 
+  // Vender un trago suelto (efectivo/transferencia) NO descuenta
+  // bar_stock -- solo lo descuentan los canjes de combo y los ajustes
+  // manuales (ver supabase/migrations/20260935_venta_trago_no_descuenta_stock.sql).
+  // create_bartender_sale solo exige que exista una fila en bar_stock para
+  // esa barra/producto, sin importar la cantidad. Filtrar acá por
+  // "cantidad > 0" escondía del menú cualquier producto cuyo stock llegara
+  // a 0 por canjes de combo, aunque atrás de la barra siguieran quedando
+  // botellas para vender en efectivo -- se perdían ventas reales. El
+  // filtro correcto es "¿el organizador asignó este producto a esta
+  // barra?" (existe la fila), no "¿cuánto queda?".
   const drinks = (eventProducts ?? [])
+    .filter((ep) => stockByEventProduct.has(ep.id))
     .map((ep) => ({
       eventProductId: ep.id,
       name: productById.get(ep.product_id)?.name ?? "Producto",
       salePriceMinor: Number(ep.sale_price_minor),
       stock: stockByEventProduct.get(ep.id) ?? 0,
-    }))
-    .filter((d) => d.stock > 0);
+    }));
 
   return NextResponse.json({
     ok: true,
