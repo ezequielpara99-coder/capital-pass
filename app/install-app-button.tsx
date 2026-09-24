@@ -64,7 +64,13 @@ export default function InstallAppButton({ className }: { className?: string }) 
       (navigator as Navigator & { standalone?: boolean }).standalone === true;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsStandalone(standalone);
-    setIsIos(/iphone|ipad|ipod/i.test(navigator.userAgent));
+    // iPadOS 13+ manda un user-agent de Mac de escritorio (sin "iPad"),
+    // asi que el regex solo no lo detecta -- y Safari nunca dispara
+    // beforeinstallprompt, asi que sin esto el boton de instalar
+    // desaparecia por completo para la mayoria de usuarios de iPad.
+    const looksLikeIpadOS =
+      navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+    setIsIos(/iphone|ipad|ipod/i.test(navigator.userAgent) || looksLikeIpadOS);
 
     function handlePrompt(event: Event) {
       event.preventDefault();

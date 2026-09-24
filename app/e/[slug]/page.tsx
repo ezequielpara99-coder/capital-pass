@@ -139,11 +139,17 @@ export default async function PublicEventPage({
 
   const { data: mpAccount } = await admin
     .from("organization_mercadopago_accounts")
-    .select("organization_id")
+    .select("organization_id, processing_fee_percent")
     .eq("organization_id", event.organization_id)
     .maybeSingle();
 
   const canBuyOnline = Boolean(mpAccount);
+  // processing_fee_percent es numeric: PostgREST lo devuelve como string.
+  // El comprador tiene que ver el cargo por servicio ANTES de pagar --
+  // /api/e/[slug]/checkout ya lo suma al total real que cobra Mercado
+  // Pago, pero la pagina nunca lo mostraba, asi que el comprador veia un
+  // total en Capital Pass y le cobraban uno mayor en el checkout de MP.
+  const feePercent = Number(mpAccount?.processing_fee_percent ?? 0);
 
   const mappedTicketTypes = (ticketTypes ?? []).map((ticket) => ({
     id: ticket.id,
@@ -488,6 +494,7 @@ export default async function PublicEventPage({
             <EventCheckout
               slug={slug}
               canBuyOnline={canBuyOnline}
+              feePercent={feePercent}
               ticketTypes={mappedTicketTypes}
               packs={mappedPacks}
             />

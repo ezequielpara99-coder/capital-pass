@@ -248,7 +248,7 @@ export default function BartenderPage() {
               <Row label="Cantidad" value={String(receipt.quantity)} />
               <Row label="Bartender" value={receipt.bartenderName} />
               <Row label="Pago" value={receipt.paymentMethod === "efectivo" ? "Efectivo" : "Transferencia"} />
-              <Row label="Hora" value={new Date(receipt.createdAt).toLocaleTimeString("es-AR")} />
+              <Row label="Hora" value={new Date(receipt.createdAt).toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })} />
             </div>
             <div className="mt-4 border-t border-dashed border-white/20 pt-4 print:mt-2 print:border-black print:pt-2">
               <div className="flex items-center justify-between text-lg font-bold print:text-[13px]">

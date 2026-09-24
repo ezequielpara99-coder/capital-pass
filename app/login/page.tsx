@@ -2,6 +2,7 @@
 
 import {
   FormEvent,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -24,6 +25,15 @@ export default function LoginPage() {
     useState(false);
   const [error, setError] =
     useState("");
+
+  // La PWA abre siempre en /login (start_url del manifest). Sin esto,
+  // alguien con sesion activa que abre el icono de la app instalada cae
+  // en el formulario de login en vez de ir directo a su panel.
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) window.location.replace("/cuenta");
+    });
+  }, [supabase]);
 
   async function handleLogin(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();

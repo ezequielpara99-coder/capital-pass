@@ -885,7 +885,7 @@ function MovimientosTab({
             <tbody>
               {sales.map((s) => (
                 <tr key={s.id} className={`border-t border-white/5 ${s.cancelled_at ? "opacity-40" : ""}`}>
-                  <td className="py-2 text-white/50">{new Date(s.created_at).toLocaleTimeString("es-AR")}</td>
+                  <td className="py-2 text-white/50">{new Date(s.created_at).toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}</td>
                   <td className="py-2">{barById.get(s.bar_id)?.name ?? "—"}</td>
                   <td className="py-2">{eventProductById.get(s.event_product_id)?.product?.name ?? "—"}</td>
                   <td className="py-2 font-bold">{s.quantity}</td>
@@ -921,7 +921,7 @@ function MovimientosTab({
             <tbody>
               {mesaSales.map((s) => (
                 <tr key={s.id} className={`border-t border-white/5 ${s.status === "cancelled" ? "opacity-40" : ""}`}>
-                  <td className="py-2 text-white/50">{new Date(s.created_at).toLocaleTimeString("es-AR")}</td>
+                  <td className="py-2 text-white/50">{new Date(s.created_at).toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}</td>
                   <td className="py-2">{s.tableName}</td>
                   <td className="py-2">{s.buyerName}</td>
                   <td className="py-2 font-bold">{money(s.total_minor)}</td>
@@ -1138,7 +1138,7 @@ function CierreTab({
 
     setSavingBar(barId);
     try {
-      const today = new Date().toLocaleDateString("es-AR");
+      const today = new Date().toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
       for (const change of changes) {
         const response = await fetch("/api/stock/adjust", {
           method: "POST",

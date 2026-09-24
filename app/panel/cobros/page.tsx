@@ -123,7 +123,7 @@ export default async function CobrosPage({
             {account ? (
               <>
                 <p className="text-sm leading-6 text-white/50">
-                  Cuenta de Mercado Pago vinculada desde {new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "long", year: "numeric" }).format(new Date(account.connected_at))}.
+                  Cuenta de Mercado Pago vinculada desde {new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "long", year: "numeric", timeZone: "America/Argentina/Buenos_Aires" }).format(new Date(account.connected_at))}.
                 </p>
 
                 <form action={updateFee} className="mt-7 border-t border-white/[0.07] pt-6">

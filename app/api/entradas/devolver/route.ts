@@ -386,6 +386,32 @@ export async function POST(
       );
 
     // ========================================================
+    // CONSUMICIÓN DE COMBO YA ENTREGADA
+    //
+    // Si esta entrada incluía un combo (producto o crédito) y el
+    // comprador ya canjeó parte, esa plata ya se entregó en forma de
+    // bebida/consumición real -- no se puede reintegrar de vuelta.
+    // bar_sales.total_minor de cada canje activo (payment_method
+    // 'combo', no cancelado) ya refleja el valor entregado en ambos
+    // tipos de combo, así que sumarlo alcanza sin tener que
+    // distinguir 'producto' de 'credito'.
+    // ========================================================
+
+    const { data: comboRedemptions } = await admin
+      .from("bar_sales")
+      .select("total_minor")
+      .eq("ticket_id", ticket.id)
+      .eq("payment_method", "combo")
+      .is("cancelled_at", null);
+
+    const consumedComboValue = (comboRedemptions ?? []).reduce(
+      (sum, row) => sum + Number(row.total_minor ?? 0),
+      0
+    );
+
+    const maxRefund = Math.max(0, originalPrice - consumedComboValue);
+
+    // ========================================================
     // IMPORTE DEL REINTEGRO
     // ========================================================
 
@@ -400,7 +426,7 @@ export async function POST(
     ) {
       refundAmountMinor =
         requestedRefundAmount ??
-        originalPrice;
+        maxRefund;
     }
 
     if (
@@ -413,12 +439,14 @@ export async function POST(
 
     if (
       refundAmountMinor >
-      originalPrice
+      maxRefund
     ) {
       return NextResponse.json(
         {
           error:
-            "El reintegro no puede superar el precio original de la entrada.",
+            consumedComboValue > 0
+              ? `El reintegro no puede superar ${maxRefund / 100} (el precio original menos ${consumedComboValue / 100} ya consumidos del combo).`
+              : "El reintegro no puede superar el precio original de la entrada.",
         },
         {
           status: 400,

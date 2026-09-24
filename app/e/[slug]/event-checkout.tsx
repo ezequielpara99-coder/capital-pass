@@ -45,6 +45,7 @@ type Props = {
   canBuyOnline: boolean;
   ticketTypes: TicketType[];
   packs: Pack[];
+  feePercent: number;
 };
 
 // Clave de carrito: distingue una tanda suelta de un pack (viven en
@@ -70,7 +71,7 @@ function formatTicketStatus(ticket: TicketType) {
   return ticket.status;
 }
 
-export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }: Props) {
+export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs, feePercent }: Props) {
   const searchParams = useSearchParams();
   const returningSaleId = searchParams.get("venta");
 
@@ -110,9 +111,13 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }
     [packs, quantities]
   );
 
-  const total =
+  const subtotal =
     ticketCartItems.reduce((sum, item) => sum + item.ticket.priceMinor * item.quantity, 0) +
     packCartItems.reduce((sum, item) => sum + item.pack.priceMinor * item.quantity, 0);
+  // Mismo redondeo que /api/e/[slug]/checkout: si esto no coincide, el
+  // comprador ve un total distinto del que termina pagando en Mercado Pago.
+  const feeAmount = Math.round(subtotal * (feePercent / 100));
+  const total = subtotal + feeAmount;
   const hasItems = ticketCartItems.length > 0 || packCartItems.length > 0;
 
   function setQuantity(key: string, quantity: number) {
@@ -302,6 +307,11 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }
       {canBuyOnline && hasItems && !showForm && (
         <div className="mt-6 flex flex-col gap-4 rounded-[24px] border border-[#ff5a2a]/20 bg-[#ff3b24]/[0.06] p-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
+            {feeAmount > 0 && (
+              <p className="text-xs text-white/35">
+                Subtotal {formatMoney(subtotal)} + cargo por servicio {formatMoney(feeAmount)}
+              </p>
+            )}
             <p className="text-xs uppercase tracking-[0.15em] text-white/40">Total</p>
             <p className="mt-1 text-2xl font-black">{formatMoney(total)}</p>
           </div>
@@ -350,9 +360,23 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs }
             <Field label="Email (opcional)" type="email" value={email} onChange={setEmail} />
           </div>
 
-          <div className="mt-6 flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 p-5">
-            <p className="text-sm text-white/50">Total a pagar</p>
-            <p className="text-2xl font-black">{formatMoney(total)}</p>
+          <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-5">
+            {feeAmount > 0 && (
+              <div className="flex items-center justify-between text-xs text-white/40">
+                <p>Subtotal</p>
+                <p>{formatMoney(subtotal)}</p>
+              </div>
+            )}
+            {feeAmount > 0 && (
+              <div className="mt-1 flex items-center justify-between text-xs text-white/40">
+                <p>Cargo por servicio</p>
+                <p>{formatMoney(feeAmount)}</p>
+              </div>
+            )}
+            <div className="mt-2 flex items-center justify-between">
+              <p className="text-sm text-white/50">Total a pagar</p>
+              <p className="text-2xl font-black">{formatMoney(total)}</p>
+            </div>
           </div>
 
           {error && (

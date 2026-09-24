@@ -44,6 +44,7 @@ function formatDate(value: string) {
     day: "2-digit",
     month: "long",
     year: "numeric",
+    timeZone: "America/Argentina/Buenos_Aires",
   }).format(new Date(value));
 }
 

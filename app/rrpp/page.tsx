@@ -47,6 +47,7 @@ function formatDate(value: string | null) {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: "America/Argentina/Buenos_Aires",
   }).format(new Date(value));
 }
 
@@ -396,6 +397,7 @@ export default async function RRPPPage() {
                               year: "numeric",
                               hour: "2-digit",
                               minute: "2-digit",
+                              timeZone: "America/Argentina/Buenos_Aires",
                             }
                           ).format(
                             new Date(sale.created_at)

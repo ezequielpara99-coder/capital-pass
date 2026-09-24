@@ -109,7 +109,7 @@ function supportWhatsApp() {
 }
 
 function formatDate(value: Date) {
-  return new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "long", year: "numeric" }).format(value);
+  return new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "long", year: "numeric", timeZone: "America/Argentina/Buenos_Aires" }).format(value);
 }
 
 function fitSize(text: string, font: PDFFont, maxSize: number, minSize: number, maxWidth: number) {
