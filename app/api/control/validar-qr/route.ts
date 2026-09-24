@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { verifyTicketSignature } from "../../../../lib/tickets/signature";
+import { parseQRPayload } from "../../../../lib/tickets/qr-payload";
 import { verifyControllerForEvent } from "../../../../lib/control/auth";
 
 type QRRequestBody = {
@@ -14,42 +15,6 @@ type QRRequestBody = {
   // verificacion de firma/permisos es identica en ambos casos.
   offline?: boolean;
 };
-
-type QRPayloadResult =
-  | {
-      ok: true;
-      ticketId: string;
-      signature: string;
-    }
-  | {
-      ok: false;
-    };
-
-function parseQRPayload(value: string): QRPayloadResult {
-  const trimmed = value.trim();
-
-  const parts = trimmed.split(":");
-
-  if (parts.length !== 3) {
-    return { ok: false };
-  }
-
-  const [version, ticketId, signature] = parts;
-
-  if (version !== "CP1") {
-    return { ok: false };
-  }
-
-  if (!ticketId || !signature) {
-    return { ok: false };
-  }
-
-  return {
-    ok: true,
-    ticketId,
-    signature,
-  };
-}
 
 export async function POST(request: NextRequest) {
   try {

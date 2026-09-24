@@ -11,9 +11,32 @@ import {
 
 import { createClient } from "../../lib/supabase/client";
 import { friendlyErrorMessage } from "../../lib/errors/friendly-message";
+import { parseQRPayload } from "../../lib/tickets/qr-payload";
+import {
+  CachedTicket,
+  PendingScan,
+  clearOfflineCache,
+  enqueueScan,
+  getCacheMeta,
+  listPendingScans,
+  loadEventTickets,
+  lookupByManualCode,
+  lookupByTicketId,
+  markUsedLocally,
+  removePendingScan,
+} from "../../lib/offline/ticket-cache";
 
 type Membership = {
   id: string;
+};
+
+// Cada cuanto se refresca el cache offline en segundo plano mientras
+// hay conexion (para captar entradas nuevas vendidas en la puerta).
+const BACKGROUND_PRELOAD_INTERVAL_MS = 3 * 60 * 1000;
+
+type Conflict = PendingScan & {
+  realResult: string;
+  severity: "alta" | "normal";
 };
 
 type StaffAssignment = {
@@ -37,7 +60,20 @@ type ValidationResult = {
   manual_code?: string | null;
   used_at?: string | null;
   message?: string | null;
+  // true cuando esto se resolvio contra el cache local (sin conexion),
+  // no contra el servidor -- todavia no esta confirmado.
+  offline?: boolean;
 };
+
+function formatRelativeTime(iso: string | null) {
+  if (!iso) return "nunca";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return "recién";
+  if (minutes < 60) return `hace ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return `hace ${hours} h`;
+}
 
 function normalizeCode(value: string) {
   return value
@@ -102,6 +138,45 @@ export default function ControlPage() {
     useState<ValidationResult | null>(
       null
     );
+
+  const syncingRef = useRef(false);
+
+  const [isOnline, setIsOnline] = useState(
+    () => typeof navigator === "undefined" || navigator.onLine
+  );
+  const [syncedAt, setSyncedAt] = useState<string | null>(null);
+  const [preloading, setPreloading] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [conflicts, setConflicts] = useState<Conflict[]>([]);
+
+  async function refreshOfflineStatus() {
+    const [meta, pending] = await Promise.all([getCacheMeta(), listPendingScans()]);
+    setSyncedAt(meta.syncedAt);
+    setPendingCount(pending.length);
+  }
+
+  // =====================================================
+  // PRECARGAR ENTRADAS DEL EVENTO (MODO OFFLINE)
+  // =====================================================
+
+  async function preloadEventTickets(eventId: string, options?: { silent?: boolean }) {
+    if (!options?.silent) setPreloading(true);
+    try {
+      const response = await fetch(`/api/control/preload?eventId=${eventId}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error ?? "No se pudieron precargar las entradas.");
+      await loadEventTickets(eventId, data.tickets as CachedTicket[]);
+      await refreshOfflineStatus();
+    } catch (err) {
+      console.error("ERROR PRECARGA OFFLINE:", err);
+      if (!options?.silent) {
+        setError(friendlyErrorMessage(err, "No se pudieron precargar los datos para el modo offline."));
+      }
+    } finally {
+      if (!options?.silent) setPreloading(false);
+    }
+  }
 
   // =====================================================
   // CARGAR CONTROLADOR + EVENTO
@@ -233,6 +308,11 @@ export default function ControlPage() {
           eventData as EventRow
         );
 
+        await refreshOfflineStatus();
+        if (navigator.onLine) {
+          await preloadEventTickets((eventData as EventRow).id, { silent: true });
+        }
+
         setTimeout(() => {
           inputRef.current?.focus();
         }, 150);
@@ -254,7 +334,123 @@ export default function ControlPage() {
     }
 
     loadControl();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
+
+  // =====================================================
+  // SINCRONIZAR ESCANEOS PENDIENTES
+  //
+  // Repite exactamente la misma llamada que se haria en vivo por cada
+  // escaneo encolado, en el mismo orden en que se hicieron -- el lock
+  // que ya tiene validate_ticket_manual decide cual "gana" si dos
+  // escaneos offline (de este dispositivo u otro) validaron la misma
+  // entrada, igual que pasaria hoy con conexion.
+  // =====================================================
+
+  async function syncPendingScans() {
+    if (!event || syncingRef.current) return;
+    syncingRef.current = true;
+    setSyncing(true);
+
+    try {
+      const pending = await listPendingScans();
+      const newConflicts: Conflict[] = [];
+
+      for (const scan of pending) {
+        let realResult: string;
+
+        try {
+          if (scan.type === "qr") {
+            const response = await fetch("/api/control/validar-qr", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ eventId: event.id, qrPayload: scan.input, offline: true }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data?.error ?? "No se pudo sincronizar.");
+            realResult = data.result;
+          } else {
+            const { data, error: rpcError } = await supabase.rpc("validate_ticket_manual", {
+              p_event_id: event.id,
+              p_manual_code: scan.input,
+              p_method: "manual_offline",
+            });
+            if (rpcError) throw rpcError;
+            realResult = (data as { result: string }[] | null)?.[0]?.result ?? "invalid";
+          }
+        } catch (err) {
+          // Falla TECNICA (sesion vencida, se corto la red a mitad de
+          // la cola) -- el item se queda en la cola para reintentar en
+          // la proxima sincronizacion, no es un conflicto de negocio.
+          console.error("ERROR SINCRONIZANDO ESCANEO:", err);
+          break;
+        }
+
+        if (realResult !== scan.localResult) {
+          const isInvalidatedWhileOffline =
+            scan.localResult === "valid" && realResult === "cancelled";
+
+          newConflicts.push({
+            ...scan,
+            realResult,
+            severity: isInvalidatedWhileOffline ? "alta" : "normal",
+          });
+        }
+
+        await removePendingScan(scan.id);
+      }
+
+      if (newConflicts.length > 0) {
+        setConflicts((prev) => [...prev, ...newConflicts]);
+      }
+    } finally {
+      await refreshOfflineStatus();
+      setSyncing(false);
+      syncingRef.current = false;
+    }
+  }
+
+  // =====================================================
+  // ESTADO ONLINE/OFFLINE
+  // =====================================================
+
+  useEffect(() => {
+    function goOnline() {
+      setIsOnline(true);
+      if (event) {
+        syncPendingScans();
+        preloadEventTickets(event.id, { silent: true });
+      }
+    }
+
+    function goOffline() {
+      setIsOnline(false);
+    }
+
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event?.id]);
+
+  // Refresco periodico del cache mientras hay señal, para captar
+  // entradas nuevas vendidas en la puerta despues de la precarga inicial.
+  useEffect(() => {
+    if (!event) return;
+
+    const interval = setInterval(() => {
+      if (navigator.onLine) {
+        preloadEventTickets(event.id, { silent: true });
+      }
+    }, BACKGROUND_PRELOAD_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event?.id]);
 
   // =====================================================
   // DETENER CÁMARA
@@ -298,6 +494,73 @@ export default function ControlPage() {
   // ENVIAR QR A LA API
   // =====================================================
 
+  // =====================================================
+  // VALIDACIÓN OFFLINE (CONTRA EL CACHE LOCAL)
+  //
+  // Misma máquina de estados que el servidor, pero resuelta con lo
+  // que se precargó antes de perder la señal. Para QR, se saca el
+  // ticketId del payload sin verificar la firma -- no se puede sin el
+  // secret, que nunca sale del servidor -- confiando en que el
+  // ticketId está en la lista precargada (mismo nivel de confianza
+  // que ya tiene hoy el código manual, online, sin firma).
+  // =====================================================
+
+  async function runOfflineValidation(input: { type: "qr" | "manual"; raw: string }) {
+    let ticketId: string | null = null;
+    let manualCode: string | null = null;
+
+    if (input.type === "qr") {
+      const parsed = parseQRPayload(input.raw);
+      if (!parsed.ok) {
+        setValidation({ result: "invalid", message: "El QR no pertenece a Capital Pass.", offline: true });
+        return;
+      }
+      ticketId = parsed.ticketId;
+    } else {
+      manualCode = normalizeCode(input.raw);
+    }
+
+    const cached: CachedTicket | null = ticketId
+      ? await lookupByTicketId(ticketId)
+      : manualCode
+        ? await lookupByManualCode(manualCode)
+        : null;
+
+    let result: "valid" | "already_used" | "cancelled" | "invalid";
+
+    if (!cached) {
+      result = "invalid";
+    } else if (cached.status === "cancelled") {
+      result = "cancelled";
+    } else if (cached.status === "used") {
+      result = "already_used";
+    } else {
+      result = "valid";
+      await markUsedLocally(cached.ticketId);
+    }
+
+    await enqueueScan({
+      type: input.type,
+      input: input.raw,
+      ticketId: cached?.ticketId ?? ticketId,
+      localResult: result,
+      scannedAt: new Date().toISOString(),
+    });
+
+    setValidation({
+      result,
+      ticket_id: cached?.ticketId ?? null,
+      buyer_name: cached?.buyerName ?? null,
+      buyer_dni: cached?.buyerDni ?? null,
+      ticket_type: cached?.ticketType ?? null,
+      manual_code: cached?.manualCode ?? manualCode,
+      message: !cached ? "No encontramos esta entrada en los datos precargados." : null,
+      offline: true,
+    });
+
+    await refreshOfflineStatus();
+  }
+
   async function validateQR(
     qrPayload: string
   ) {
@@ -318,22 +581,35 @@ export default function ControlPage() {
 
       setScannerOpen(false);
 
-      const response = await fetch(
-        "/api/control/validar-qr",
-        {
-          method: "POST",
+      if (!isOnline) {
+        await runOfflineValidation({ type: "qr", raw: qrPayload });
+        return;
+      }
 
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
+      let response: Response;
+      try {
+        response = await fetch(
+          "/api/control/validar-qr",
+          {
+            method: "POST",
 
-          body: JSON.stringify({
-            eventId: event.id,
-            qrPayload,
-          }),
-        }
-      );
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body: JSON.stringify({
+              eventId: event.id,
+              qrPayload,
+            }),
+          }
+        );
+      } catch {
+        // Fetch fallido de red (no hubo respuesta del servidor) --
+        // validamos contra el cache local en vez de mostrar error.
+        await runOfflineValidation({ type: "qr", raw: qrPayload });
+        return;
+      }
 
       const data =
         await response.json();
@@ -575,6 +851,11 @@ export default function ControlPage() {
     setValidation(null);
 
     try {
+      if (!isOnline) {
+        await runOfflineValidation({ type: "manual", raw: normalized });
+        return;
+      }
+
       const {
         data,
         error: rpcError,
@@ -593,6 +874,17 @@ export default function ControlPage() {
       );
 
       if (rpcError) {
+        // Falla de red real (sin respuesta del servidor) -- validamos
+        // contra el cache local en vez de mostrar error. Un error de
+        // negocio real (ej. permiso) también cae acá porque
+        // supabase-js no distingue el motivo en el objeto error, pero
+        // la validación offline solo puede devolver lo que ya está en
+        // el cache, así que en la práctica el resultado sigue siendo
+        // correcto para el controlador.
+        if (!navigator.onLine) {
+          await runOfflineValidation({ type: "manual", raw: normalized });
+          return;
+        }
         throw rpcError;
       }
 
@@ -653,6 +945,11 @@ export default function ControlPage() {
 
   async function logout() {
     await stopScanner();
+
+    // El cache local tiene nombre/DNI de todas las entradas del
+    // evento -- no debe quedar en el celular despues de terminar el
+    // turno.
+    await clearOfflineCache();
 
     await supabase.auth.signOut();
 
@@ -791,6 +1088,12 @@ export default function ControlPage() {
                   ? "Entrada anulada"
                   : "Entrada no válida"}
           </h1>
+
+          {validation.offline && (
+            <p className="mt-4 inline-flex items-center gap-2 rounded-full border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] text-amber-200">
+              ⚠ Sin conexión — se confirma al reconectar
+            </p>
+          )}
 
           {(validation.buyer_name ||
             validation.buyer_dni ||
@@ -952,6 +1255,80 @@ export default function ControlPage() {
             Salir
           </button>
         </header>
+
+        {/* ESTADO ONLINE/OFFLINE */}
+
+        <section className="mt-5 flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span
+                className={`h-2 w-2 rounded-full ${isOnline ? "bg-emerald-400" : "bg-red-400"}`}
+              />
+              <span className="font-bold uppercase tracking-[0.12em] text-white/70">
+                {isOnline ? "Con conexión" : "Sin conexión"}
+              </span>
+              {syncing && <span className="text-white/35">· sincronizando…</span>}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => event && preloadEventTickets(event.id)}
+              disabled={!event || !isOnline || preloading}
+              className="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-white/60 transition hover:text-white disabled:opacity-30"
+            >
+              {preloading ? "Actualizando…" : "Actualizar datos offline"}
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-white/35">
+            <span>Última sincronización: {formatRelativeTime(syncedAt)}</span>
+            {pendingCount > 0 && (
+              <span className="font-bold text-amber-300">
+                {pendingCount} escaneo{pendingCount === 1 ? "" : "s"} sin sincronizar
+              </span>
+            )}
+          </div>
+        </section>
+
+        {/* CONFLICTOS AL SINCRONIZAR */}
+
+        {conflicts.length > 0 && (
+          <section className="mt-4 space-y-2">
+            {conflicts
+              .slice()
+              .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "alta" ? -1 : 1))
+              .map((conflict) => (
+                <div
+                  key={conflict.id}
+                  className={`rounded-2xl border p-4 text-xs ${
+                    conflict.severity === "alta"
+                      ? "border-rose-400/40 bg-rose-500/10 text-rose-100"
+                      : "border-amber-400/30 bg-amber-400/10 text-amber-100"
+                  }`}
+                >
+                  <p className="font-bold uppercase tracking-[0.1em]">
+                    {conflict.severity === "alta"
+                      ? "⚠ Entrada invalidada mientras estabas offline"
+                      : "Doble ingreso — otro dispositivo validó primero"}
+                  </p>
+                  <p className="mt-1 text-white/70">
+                    Código {conflict.input.startsWith("CP1:") ? "(QR)" : conflict.input} — se
+                    mostró &quot;{conflict.localResult}&quot;, el servidor dice &quot;
+                    {conflict.realResult}&quot;. Escaneado {formatRelativeTime(conflict.scannedAt)}.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setConflicts((prev) => prev.filter((c) => c.id !== conflict.id))
+                    }
+                    className="mt-2 text-[10px] font-bold uppercase tracking-[0.1em] underline underline-offset-2"
+                  >
+                    Marcar como revisado
+                  </button>
+                </div>
+              ))}
+          </section>
+        )}
 
         {/* EVENTO */}
 
