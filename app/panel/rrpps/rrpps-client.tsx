@@ -907,15 +907,23 @@ export default function RRPPsClient({
 
             </div>
 
-            <button
-              type="button"
-              onClick={
-                openCreate
-              }
-              className="inline-flex h-10 items-center justify-center bg-gradient-to-r from-[#ff2a1a] via-[#ff3b24] to-[#ff5a2a] px-5 text-[9px] font-black uppercase tracking-[0.15em] text-white shadow-[0_14px_40px_rgba(255,59,36,.16)] transition hover:brightness-110"
-            >
-              + Agregar RRPP
-            </button>
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/panel/rrpps/traslados?eventId=${event.id}`}
+                className="inline-flex h-10 items-center justify-center border border-white/[0.14] px-4 text-[9px] font-black uppercase tracking-[0.15em] text-white/60 transition hover:border-white/40 hover:text-white"
+              >
+                Traslados
+              </Link>
+              <button
+                type="button"
+                onClick={
+                  openCreate
+                }
+                className="inline-flex h-10 items-center justify-center bg-gradient-to-r from-[#ff2a1a] via-[#ff3b24] to-[#ff5a2a] px-5 text-[9px] font-black uppercase tracking-[0.15em] text-white shadow-[0_14px_40px_rgba(255,59,36,.16)] transition hover:brightness-110"
+              >
+                + Agregar RRPP
+              </button>
+            </div>
 
             </div>
           </header>

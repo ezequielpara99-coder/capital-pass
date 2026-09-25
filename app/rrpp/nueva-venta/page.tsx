@@ -45,6 +45,17 @@ type PackRow = {
   active: boolean;
 };
 
+type TransferRouteRow = {
+  id: string;
+  name: string;
+  departure_location: string | null;
+  is_paid: boolean;
+  price_minor: number;
+  active: boolean;
+};
+
+type TransferInfo = { routeName: string; manualCode: string; isPaid: boolean; priceMinor: number } | null;
+
 type SaleResult = {
   sale_id: string;
   buyer_id: string;
@@ -170,6 +181,10 @@ export default function NuevaVentaRRPPPage() {
   const [packs, setPacks] = useState<PackRow[]>([]);
   const [packId, setPackId] = useState("");
 
+  const [transferRoutes, setTransferRoutes] = useState<TransferRouteRow[]>([]);
+  const [transferRouteId, setTransferRouteId] = useState("");
+  const [transferResult, setTransferResult] = useState<TransferInfo>(null);
+
   const [quantity, setQuantity] =
     useState(1);
 
@@ -247,7 +262,7 @@ export default function NuevaVentaRRPPPage() {
     if (saving) return;
     saleAttemptKeyRef.current = crypto.randomUUID();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticketTypeId, packId, quantity, paymentMethod, firstName, lastName, dni, phone, email]);
+  }, [ticketTypeId, packId, quantity, paymentMethod, firstName, lastName, dni, phone, email, transferRouteId]);
 
   // =====================================================
   // CARGAR EVENTO + TANDAS
@@ -451,6 +466,17 @@ export default function NuevaVentaRRPPPage() {
         } catch {
           // silencioso
         }
+
+        // TRASLADOS -- best-effort, no todos los eventos tienen colectivos.
+        try {
+          const routesResponse = await fetch(`/api/rrpps/traslados?eventId=${selectedEvent.id}`, { cache: "no-store" });
+          if (routesResponse.ok) {
+            const routesResult = await routesResponse.json();
+            setTransferRoutes(((routesResult.routes ?? []) as TransferRouteRow[]).filter((r) => r.active));
+          }
+        } catch {
+          // silencioso
+        }
       } catch (err) {
         console.error(err);
 
@@ -496,7 +522,8 @@ export default function NuevaVentaRRPPPage() {
 
   async function loadGeneratedEntries(
     saleId: string,
-    waWindow: Window | null
+    waWindow: Window | null,
+    transferInfo: TransferInfo = null
   ) {
     setLoadingEntries(true);
     setEntryError("");
@@ -529,7 +556,8 @@ export default function NuevaVentaRRPPPage() {
       // vendedor solo tiene que apretar enviar, no buscar el botón.
       sendAllWhatsApp(
         result as EntriesResponse,
-        waWindow
+        waWindow,
+        transferInfo
       );
 
       // Best-effort: si el comprador cargó email, le llega la entrada
@@ -725,9 +753,39 @@ export default function NuevaVentaRRPPPage() {
 
       setSaleResult(result);
 
+      // TRASLADO -- best-effort: si el RRPP eligió sumar al comprador a su
+      // colectivo, se lo asigna ahora que ya existe la venta. Si falla, no
+      // se pierde la venta ya cobrada -- solo se avisa aparte.
+      let transferInfo: TransferInfo = null;
+      const selectedRoute = transferRoutes.find((r) => r.id === transferRouteId);
+      if (selectedRoute) {
+        try {
+          const { data: transferData, error: transferError } = await supabase.rpc("assign_transfer_ticket", {
+            p_route_id: selectedRoute.id,
+            p_passenger_name: `${firstName.trim()} ${lastName.trim()}`,
+            p_passenger_phone: phone.trim(),
+            p_sale_id: result.sale_id,
+          });
+          if (transferError) throw transferError;
+          const transferRow = (transferData ?? [])[0];
+          if (transferRow) {
+            transferInfo = {
+              routeName: selectedRoute.name,
+              manualCode: transferRow.manual_code,
+              isPaid: selectedRoute.is_paid,
+              priceMinor: selectedRoute.price_minor,
+            };
+            setTransferResult(transferInfo);
+          }
+        } catch (transferErr) {
+          console.error("ERROR ASIGNANDO TRASLADO:", transferErr);
+        }
+      }
+
       await loadGeneratedEntries(
         result.sale_id,
-        waWindow
+        waWindow,
+        transferInfo
       );
     } catch (err) {
       console.error(
@@ -753,7 +811,8 @@ export default function NuevaVentaRRPPPage() {
 
   function sendAllWhatsApp(
     result: EntriesResponse,
-    waWindow: Window | null
+    waWindow: Window | null,
+    transferInfo: TransferInfo = null
   ) {
     const number =
       normalizeWhatsAppNumber(
@@ -790,6 +849,15 @@ export default function NuevaVentaRRPPPage() {
         )}`,
         `Código: ${entry.manualCode}`,
         `${window.location.origin}${entry.url}`,
+        ""
+      );
+    }
+
+    if (transferInfo) {
+      lines.push(
+        `🚌 *Traslado: ${transferInfo.routeName}*`,
+        `Código: ${transferInfo.manualCode}`,
+        transferInfo.isPaid ? `Se paga aparte: ${money(transferInfo.priceMinor)}` : "Incluido, sin costo extra.",
         ""
       );
     }
@@ -887,6 +955,8 @@ export default function NuevaVentaRRPPPage() {
 
     setQuantity(1);
     setPackId("");
+    setTransferRouteId("");
+    setTransferResult(null);
 
     setSaleResult(null);
     setEntriesResult(null);
@@ -992,6 +1062,13 @@ export default function NuevaVentaRRPPPage() {
             <div className="mb-5 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-5 py-3.5 text-sm text-emerald-200">
               📲 Ya te abrimos WhatsApp con la entrada cargada — solo
               apretá enviar.
+            </div>
+          )}
+
+          {transferResult && (
+            <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.035] px-5 py-4 text-sm text-white/70">
+              🚌 Traslado: <b>{transferResult.routeName}</b> · Código <span className="font-mono">{transferResult.manualCode}</span>
+              {transferResult.isPaid && <span className="text-[#ff9b82]"> · Cobrale {money(transferResult.priceMinor)} aparte.</span>}
             </div>
           )}
 
@@ -1471,6 +1548,49 @@ export default function NuevaVentaRRPPPage() {
                 </div>
               </div>
             </section>
+
+            {/* TRASLADO */}
+            {transferRoutes.length > 0 && (
+              <section className="rounded-[28px] border border-white/10 bg-white/[0.035] p-6 backdrop-blur-xl">
+                <p className="mb-5 text-xs font-semibold uppercase tracking-[0.18em] text-white/35">
+                  Traslado (opcional)
+                </p>
+
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setTransferRouteId("")}
+                    className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition ${
+                      transferRouteId === "" ? "border-[#ff5a2a]/50 bg-[#ff3b24]/15 text-white" : "border-white/10 bg-black/20 text-white/50 hover:text-white"
+                    }`}
+                  >
+                    Sin traslado
+                  </button>
+                  {transferRoutes.map((route) => (
+                    <button
+                      key={route.id}
+                      type="button"
+                      onClick={() => setTransferRouteId(route.id)}
+                      className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition ${
+                        transferRouteId === route.id ? "border-[#ff5a2a]/50 bg-[#ff3b24]/15 text-white" : "border-white/10 bg-black/20 text-white/50 hover:text-white"
+                      }`}
+                    >
+                      <span>
+                        {route.name}
+                        {route.departure_location ? ` · ${route.departure_location}` : ""}
+                      </span>
+                      <span className="shrink-0 font-semibold">{route.is_paid ? money(route.price_minor) : "Gratis"}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {transferRouteId && transferRoutes.find((r) => r.id === transferRouteId)?.is_paid && (
+                  <p className="mt-3 text-xs text-[#ff9b82]">
+                    Cobrale el traslado aparte de la entrada, en el momento.
+                  </p>
+                )}
+              </section>
+            )}
 
             {error && (
               <div className="rounded-2xl border border-red-500/25 bg-red-500/10 px-5 py-4 text-sm text-red-300">

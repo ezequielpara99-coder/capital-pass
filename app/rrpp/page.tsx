@@ -359,6 +359,28 @@ export default async function RRPPPage() {
               </div>
             </section>
 
+            {/* TRASLADO */}
+            <section className="mb-7 rounded-[28px] border border-white/10 bg-white/[0.035] p-5 backdrop-blur-xl">
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-lg font-semibold">
+                    Traslado
+                  </p>
+
+                  <p className="mt-1 text-sm text-white/35">
+                    Escaneá a tu gente subiendo al colectivo.
+                  </p>
+                </div>
+
+                <a
+                  href="/rrpp/traslado"
+                  className="rounded-2xl border border-white/15 bg-white/[0.04] px-7 py-3.5 text-center text-sm font-bold text-white/80 transition hover:text-white"
+                >
+                  🚌 Traslado
+                </a>
+              </div>
+            </section>
+
             {/* ÚLTIMAS VENTAS */}
             <section className="overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.035] backdrop-blur-xl">
               <div className="border-b border-white/10 px-6 py-5">

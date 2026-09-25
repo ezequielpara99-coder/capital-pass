@@ -62,6 +62,7 @@ const catalogoHistorialPreciosMigration = readFileSync(new URL("../supabase/migr
 const packsMensualesMigration = readFileSync(new URL("../supabase/migrations/20260968_packs_mensuales.sql", import.meta.url), "utf8");
 const cierreMensualMigration = readFileSync(new URL("../supabase/migrations/20260969_cierre_mensual.sql", import.meta.url), "utf8");
 const fixEmailEntradaOnlineMigration = readFileSync(new URL("../supabase/migrations/20260970_fix_email_entrada_online_y_recibos_duplicados.sql", import.meta.url), "utf8");
+const sistemaTrasladosMigration = readFileSync(new URL("../supabase/migrations/20260971_sistema_traslados.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -172,6 +173,7 @@ async function database() {
   await db.exec(packsMensualesMigration);
   await db.exec(cierreMensualMigration);
   await db.exec(fixEmailEntradaOnlineMigration);
+  await db.exec(sistemaTrasladosMigration);
   return db;
 }
 
@@ -1626,6 +1628,69 @@ test("cierre mensual: no se puede cerrar el mismo mes 2 veces", async () => {
   await db.exec(`insert into monthly_closures(period, presupuestado_minor, facturado_minor, cobrado_minor, pendiente_minor, gastos_minor, resultado_minor)
     values ('2026-03-01', 600000, 500000, 500000, 0, 100000, 400000)`);
   assert.equal(await scalar(`select resultado_minor from monthly_closures where period='2026-03-01'`), 400000);
+
+  await db.close();
+});
+
+test("sistema de traslados: cupo, permisos y validacion de embarque", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "99999999-9999-4999-8999-999999999999";
+  const event = "aaaaaaaa-1111-4111-8111-111111111111";
+  const rrppUser = "aaaaaaaa-2222-4222-8222-222222222222";
+  const otherRrppUser = "aaaaaaaa-3333-4333-8333-333333333333";
+
+  await db.exec(`insert into auth.users values ('${rrppUser}','rrpp-traslado@example.test',now(),'{}'), ('${otherRrppUser}','otro-rrpp@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club Traslados','club-traslados');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${rrppUser}','rrpp','active'), ('${org}','${otherRrppUser}','rrpp','active');`);
+
+  const rrppMember = await scalar(`select id::text from organization_members where user_id='${rrppUser}'`);
+  const otherMember = await scalar(`select id::text from organization_members where user_id='${otherRrppUser}'`);
+  await db.exec(`insert into event_staff(event_id,organization_member_id,staff_role,active) values
+    ('${event}','${rrppMember}','rrpp',true), ('${event}','${otherMember}','rrpp',true)`);
+
+  const route = await scalar(
+    `insert into transfer_routes(event_id, organization_member_id, name, capacity) values ('${event}','${rrppMember}','Colectivo Once',1) returning id::text`
+  );
+
+  await db.exec(`select set_config('request.jwt.claim.sub','${rrppUser}',false)`);
+  const firstAssign = await db.query<{ transfer_ticket_id: string; manual_code: string }>(
+    `select * from assign_transfer_ticket('${route}','Juan Perez','3460000001')`
+  );
+  assert.equal(firstAssign.rows.length, 1, "el dueño del colectivo puede sumar un pasajero");
+  const code = firstAssign.rows[0].manual_code;
+
+  // Cupo lleno: el colectivo tiene capacidad 1 y ya tiene un pasajero.
+  await assert.rejects(
+    () => db.query(`select * from assign_transfer_ticket('${route}','Otro Pasajero','3460000002')`),
+    /completo/,
+    "no deja sumar un pasajero mas alla del cupo"
+  );
+
+  // Otro RRPP (no dueño de este colectivo) no puede sumarle pasajeros.
+  await db.exec(`select set_config('request.jwt.claim.sub','${otherRrppUser}',false)`);
+  await assert.rejects(
+    () => db.query(`select * from assign_transfer_ticket('${route}','Intruso','3460000003')`),
+    /permiso/,
+    "un RRPP que no es dueño del colectivo no puede sumarle pasajeros"
+  );
+
+  // El mismo RRPP dueño SI puede validar el embarque.
+  await db.exec(`select set_config('request.jwt.claim.sub','${rrppUser}',false)`);
+  const valid = await db.query<{ result: string; passenger_name: string }>(
+    `select * from validate_transfer_ticket('${route}','${code}')`
+  );
+  assert.equal(valid.rows[0].result, "valid");
+  assert.equal(valid.rows[0].passenger_name, "Juan Perez");
+
+  // Escanear el mismo codigo de nuevo: ya uso, no se vuelve a dejar pasar.
+  const reused = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','${code}')`);
+  assert.equal(reused.rows[0].result, "already_used");
+
+  // Codigo que no existe.
+  const invalid = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','ZZZZZZ')`);
+  assert.equal(invalid.rows[0].result, "invalid");
 
   await db.close();
 });
