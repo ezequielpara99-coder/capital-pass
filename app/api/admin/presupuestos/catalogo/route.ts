@@ -39,6 +39,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No se pudo guardar el item." }, { status: 500 });
     }
 
+    await admin.from("quote_catalog_price_history").insert({ catalog_id: data.id, unit_price_minor: data.unit_price_minor, changed_by: verification.userId });
+
     return NextResponse.json({ ok: true, item: data });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
@@ -66,6 +68,16 @@ export async function PATCH(request: NextRequest) {
     if (body.unitPrice !== undefined) updates.unit_price_minor = price(body.unitPrice);
 
     const admin = createAdminClient();
+
+    // Si cambia el precio, deja el punto anterior fijado en el historial
+    // antes de pisarlo -- así la línea de tiempo queda completa.
+    if (updates.unit_price_minor !== undefined) {
+      const { data: current } = await admin.from("quote_catalog").select("unit_price_minor").eq("id", id).maybeSingle();
+      if (current && Number(current.unit_price_minor) !== updates.unit_price_minor) {
+        await admin.from("quote_catalog_price_history").insert({ catalog_id: id, unit_price_minor: updates.unit_price_minor, changed_by: verification.userId });
+      }
+    }
+
     const { data, error } = await admin.from("quote_catalog").update(updates).eq("id", id).select(FIELDS).maybeSingle();
 
     if (error) {

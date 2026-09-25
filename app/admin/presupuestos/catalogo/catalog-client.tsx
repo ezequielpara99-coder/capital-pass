@@ -5,6 +5,12 @@ import { FormEvent, useState } from "react";
 import { formatMoney, KIND_LABEL, QUOTE_KINDS, UNITS, type QuoteKind } from "../../../../lib/quotes/totals";
 import type { CatalogItem } from "../quote-editor";
 
+type PriceHistoryEntry = { id: string; unit_price_minor: number; changed_at: string };
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "short", year: "numeric", timeZone: "America/Argentina/Buenos_Aires" }).format(new Date(value));
+}
+
 const INPUT =
   "mt-2 h-12 w-full border border-white/[0.12] bg-black/30 px-4 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-[#ff5a2a]/50";
 const LABEL = "block text-[9px] font-black uppercase tracking-[0.18em] text-white/40";
@@ -24,6 +30,27 @@ export default function CatalogClient({ items, missingSql }: { items: CatalogIte
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState(draftFrom());
+  const [historyOpenId, setHistoryOpenId] = useState<string | null>(null);
+  const [history, setHistory] = useState<PriceHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  async function toggleHistory(item: CatalogItem) {
+    if (historyOpenId === item.id) {
+      setHistoryOpenId(null);
+      return;
+    }
+    setHistoryOpenId(item.id);
+    setHistoryLoading(true);
+    try {
+      const response = await fetch(`/api/admin/presupuestos/catalogo/historial?catalogId=${item.id}`);
+      const result = await response.json();
+      setHistory(response.ok ? result.history : []);
+    } catch {
+      setHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
 
   function startEdit(item: CatalogItem) {
     setEditingId(item.id);
@@ -180,20 +207,45 @@ export default function CatalogClient({ items, missingSql }: { items: CatalogIte
         ) : (
           <div className="mt-6 space-y-2">
             {rows.map((item) => (
-              <div key={item.id} className="flex items-center gap-3 border border-white/[0.08] bg-white/[0.02] px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold">{item.description}</p>
-                  <p className="text-[10px] uppercase tracking-wide text-white/35">
-                    {KIND_LABEL[item.kind]} · {item.unit}
-                  </p>
+              <div key={item.id} className="border border-white/[0.08] bg-white/[0.02]">
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold">{item.description}</p>
+                    <p className="text-[10px] uppercase tracking-wide text-white/35">
+                      {KIND_LABEL[item.kind]} · {item.unit}
+                    </p>
+                  </div>
+                  <p className="text-sm font-black">{item.unit_price_minor ? formatMoney(item.unit_price_minor) : "—"}</p>
+                  <button type="button" onClick={() => toggleHistory(item)} className="h-9 border border-white/15 px-3 text-[10px] font-black uppercase tracking-wide text-white/60 hover:border-white/40 hover:text-white">
+                    {historyOpenId === item.id ? "Ocultar" : "Historial"}
+                  </button>
+                  <button type="button" onClick={() => startEdit(item)} className="h-9 border border-white/15 px-3 text-[10px] font-black uppercase tracking-wide text-white/60 hover:border-white/40 hover:text-white">
+                    Editar
+                  </button>
+                  <button type="button" onClick={() => remove(item)} className="h-9 border border-red-400/20 px-3 text-[10px] font-black uppercase tracking-wide text-red-300/70 hover:text-red-300">
+                    Quitar
+                  </button>
                 </div>
-                <p className="text-sm font-black">{item.unit_price_minor ? formatMoney(item.unit_price_minor) : "—"}</p>
-                <button type="button" onClick={() => startEdit(item)} className="h-9 border border-white/15 px-3 text-[10px] font-black uppercase tracking-wide text-white/60 hover:border-white/40 hover:text-white">
-                  Editar
-                </button>
-                <button type="button" onClick={() => remove(item)} className="h-9 border border-red-400/20 px-3 text-[10px] font-black uppercase tracking-wide text-red-300/70 hover:text-red-300">
-                  Quitar
-                </button>
+
+                {historyOpenId === item.id && (
+                  <div className="border-t border-white/[0.06] px-4 py-3">
+                    <p className="text-[9px] font-black uppercase tracking-[0.16em] text-white/35">Historial de precios</p>
+                    {historyLoading ? (
+                      <p className="mt-2 text-xs text-white/35">Cargando…</p>
+                    ) : history.length === 0 ? (
+                      <p className="mt-2 text-xs text-white/35">Sin historial todavía.</p>
+                    ) : (
+                      <div className="mt-2 space-y-1">
+                        {history.map((entry) => (
+                          <div key={entry.id} className="flex justify-between text-xs">
+                            <span className="text-white/40">{formatDate(entry.changed_at)}</span>
+                            <span className="font-bold text-white/70">{formatMoney(entry.unit_price_minor)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>

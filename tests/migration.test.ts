@@ -58,6 +58,7 @@ const cpPrepareCheckoutRespetaPlanMigration = readFileSync(new URL("../supabase/
 const evitaSpamPushSuscripcionMigration = readFileSync(new URL("../supabase/migrations/20260964_evita_spam_push_nueva_suscripcion.sql", import.meta.url), "utf8");
 const idempotenciaVentaMesaMigration = readFileSync(new URL("../supabase/migrations/20260965_idempotencia_venta_mesa.sql", import.meta.url), "utf8");
 const capitalFinanzasBaseMigration = readFileSync(new URL("../supabase/migrations/20260966_capital_finanzas_base.sql", import.meta.url), "utf8");
+const catalogoHistorialPreciosMigration = readFileSync(new URL("../supabase/migrations/20260967_catalogo_historial_precios.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -164,6 +165,7 @@ async function database() {
   await db.exec(evitaSpamPushSuscripcionMigration);
   await db.exec(idempotenciaVentaMesaMigration);
   await db.exec(capitalFinanzasBaseMigration);
+  await db.exec(catalogoHistorialPreciosMigration);
   return db;
 }
 
@@ -1545,6 +1547,27 @@ test("finanzas: cobros contra un presupuesto y gastos, con sus validaciones", as
   assert.equal(await scalar(`select count(*)::int from expenses`), 1);
   await assert.rejects(() => db.query(`insert into expenses(kind, description, amount_minor) values ('otro-tipo', 'X', 100)`), /violates check constraint|check/);
   await assert.rejects(() => db.query(`insert into expenses(kind, description, amount_minor) values ('general', 'X', 0)`), /violates check constraint|check/);
+
+  await db.close();
+});
+
+test("catalogo: historial de precios encadena por catalog_id y valida el monto", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const item = await db.query<{ id: string }>(`insert into quote_catalog(description, unit_price_minor) values ('Flyer preventa', 15000) returning id`);
+  const catalogId = item.rows[0].id;
+
+  await db.exec(`insert into quote_catalog_price_history(catalog_id, unit_price_minor) values ('${catalogId}', 15000)`);
+  await db.exec(`insert into quote_catalog_price_history(catalog_id, unit_price_minor) values ('${catalogId}', 18000)`);
+  assert.equal(await scalar(`select count(*)::int from quote_catalog_price_history where catalog_id='${catalogId}'`), 2);
+
+  await assert.rejects(() => db.query(`insert into quote_catalog_price_history(catalog_id, unit_price_minor) values ('${catalogId}', -1)`), /violates check constraint|check/);
+  await assert.rejects(() => db.query(`insert into quote_catalog_price_history(catalog_id, unit_price_minor) values (gen_random_uuid(), 1000)`), /violates foreign key constraint|foreign key/);
+
+  // Si se borra el item del catalogo, su historial se va con el.
+  await db.exec(`delete from quote_catalog where id='${catalogId}'`);
+  assert.equal(await scalar(`select count(*)::int from quote_catalog_price_history where catalog_id='${catalogId}'`), 0);
 
   await db.close();
 });
