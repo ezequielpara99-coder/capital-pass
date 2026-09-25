@@ -171,6 +171,12 @@ export default function FinanzasClient() {
             Presupuestado, facturado, cobrado, pendiente, gastos y resultado neto. Los pagos se registran desde cada{" "}
             <Link href="/admin/presupuestos" className="underline decoration-white/30 hover:text-white">presupuesto</Link>.
           </p>
+          <Link
+            href="/admin/finanzas/cobros"
+            className="mt-4 inline-flex h-10 items-center border border-amber-400/30 bg-amber-400/10 px-4 text-[9px] font-black uppercase tracking-[0.15em] text-amber-300 transition hover:bg-amber-400/20"
+          >
+            Ver centro de cobros →
+          </Link>
         </header>
 
         {missingSql && (
