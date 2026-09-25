@@ -6,9 +6,12 @@ type Context = { params: Promise<{ id: string }> };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// UTC (no hora local del servidor) -- mismo criterio que previousMonthPeriod
+// en /api/admin/finanzas/cierres, para que "el mes actual" sea siempre el
+// mismo mes sin importar la zona horaria del proceso.
 function currentPeriod() {
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
 }
 
 // POST: genera (o devuelve, si ya existe) la factura del mes actual para un
