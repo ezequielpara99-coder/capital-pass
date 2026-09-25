@@ -106,13 +106,27 @@ async function applyPayment(payment: ProviderPayment, signupId: string) {
         .eq("signup_id", signupId).eq("status", "approved").is("receipt_sent_at", null).order("paid_at", { ascending: false }).limit(1);
       const plan = await admin.from("subscription_plans").select("name").eq("id", signup.plan_id).single();
       for (const receipt of receipts.data ?? []) {
+        // Reclamo atomico ANTES de mandar -- mismo patron que
+        // new_subscription_notified_at mas abajo: si el polling de /cuenta
+        // y un reintento del webhook llaman a applyPayment casi al mismo
+        // tiempo, antes ambos veian receipt_sent_at IS NULL (el SELECT de
+        // arriba) y mandaban el recibo 2 veces antes de que cualquiera
+        // llegara al UPDATE. Con el UPDATE...WHERE...IS NULL de aca, solo
+        // uno gana la carrera y manda.
+        const claimed = await admin.from("subscription_payments")
+          .update({ receipt_sent_at: new Date().toISOString() })
+          .eq("payment_id", receipt.payment_id)
+          .is("receipt_sent_at", null)
+          .select("payment_id");
+        if ((claimed.data?.length ?? 0) === 0) continue;
+
         const sent = await sendSubscriptionReceipt({
           to: signup.email, customerName: `${signup.first_name} ${signup.last_name}`,
           organizationName: signup.organization_name, planName: plan.data?.name ?? "Capital Pass",
           amount: Number(receipt.amount), currency: receipt.currency,
           paidAt: receipt.paid_at, periodEnd: receipt.period_end, mercadoPagoPreapprovalId: String(payment.id), paymentId: receipt.payment_id,
         });
-        if (sent.ok) await admin.from("subscription_payments").update({ receipt_sent_at: new Date().toISOString() }).eq("payment_id", receipt.payment_id);
+        if (!sent.ok) console.error("BILLING: no se pudo mandar el recibo.", receipt.payment_id, sent.error);
       }
     } catch { console.error("BILLING: recibo pendiente de envio."); }
   }
@@ -183,8 +197,21 @@ async function applyUpgradeCharge(payment: ProviderPayment, chargeId: string) {
 async function sendOnlineSaleTicketEmail(saleId: string) {
   try {
     const admin = createAdminClient();
-    const { data: sale } = await admin.from("sales").select("id, event_id, buyer_id").eq("id", saleId).maybeSingle();
-    if (!sale) return;
+
+    // Reclamo atomico ANTES de armar/mandar nada: el webhook real de
+    // Mercado Pago y el "Verificar mi pago" del comprador (o un reintento
+    // de cualquiera de los dos) pueden llegar casi al mismo tiempo -- solo
+    // el que gane este UPDATE...WHERE...IS NULL manda el mail. Reemplaza
+    // el chequeo wasAlreadyConfirmed de applySalePayment, que leia el
+    // estado ANTES del RPC y por eso podia dejar pasar a dos llamadas
+    // concurrentes.
+    const claimed = await admin.from("sales")
+      .update({ ticket_email_sent_at: new Date().toISOString() })
+      .eq("id", saleId)
+      .is("ticket_email_sent_at", null)
+      .select("id, event_id, buyer_id");
+    if (!claimed.data || claimed.data.length === 0) return;
+    const sale = claimed.data[0];
 
     const { data: buyer } = await admin.from("buyers").select("first_name, last_name, email").eq("id", sale.buyer_id).maybeSingle();
     const email = buyer?.email?.trim();
@@ -232,10 +259,22 @@ async function sendOnlineSaleTicketEmail(saleId: string) {
   }
 }
 
-async function applySalePayment(payment: ProviderPayment, saleId: string) {
+// Aplica un pago verificado de Mercado Pago a una venta online: confirma la
+// venta (RPC, crea las entradas) y dispara el email con el/los QR. Lo llama
+// tanto el webhook real de Mercado Pago (unica notification_url configurada
+// para ventas online, ver checkout/route.ts) como reconcileOnlineSale (el
+// "Verificar mi pago" del comprador) -- antes el webhook llamaba al RPC
+// directo sin pasar por aca, asi que el email nunca salia en el camino real
+// (el webhook llega antes que el timer de 4s del checkout, asi que
+// reconcileOnlineSale casi nunca llegaba a disparar el envio). El email es
+// seguro de llamar en cada confirmacion/reintento: sendOnlineSaleTicketEmail
+// reclama el envio de forma atomica (ticket_email_sent_at), asi que aunque
+// esta funcion se llame 2 veces casi al mismo tiempo (webhook + polling) el
+// mail sale una sola vez.
+export async function applySalePayment(payment: ProviderPayment, saleId: string) {
   const admin = createAdminClient();
   const { data: sale, error } = await admin.from("sales")
-    .select("id, organization_id, status, total_charged_minor, currency")
+    .select("id, organization_id, total_charged_minor, currency")
     .eq("id", saleId).eq("channel", "online").maybeSingle();
   if (error) throw new Error("No se pudo consultar la venta.");
   if (!sale || sale.total_charged_minor == null) return false;
@@ -246,13 +285,9 @@ async function applySalePayment(payment: ProviderPayment, saleId: string) {
     amount: Number(sale.total_charged_minor), currency: sale.currency, collectorId: account.mp_user_id,
     live: process.env.MERCADOPAGO_ENV !== "sandbox",
   });
-  const wasAlreadyConfirmed = sale.status === "confirmed";
   const result = await admin.rpc("confirm_online_sale", { p_sale_id: saleId, p_status: verified.status });
   if (result.error) throw new Error("No se pudo confirmar la venta.");
-  // Solo la transicion que efectivamente confirma la venta dispara el
-  // email -- ni los reintentos del mismo webhook (que ya estaba
-  // confirmed) ni un status que todavia no es definitivo.
-  if (verified.status === "approved" && !wasAlreadyConfirmed) {
+  if (verified.status === "approved") {
     await sendOnlineSaleTicketEmail(saleId);
   }
   return true;

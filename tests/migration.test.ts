@@ -61,6 +61,7 @@ const capitalFinanzasBaseMigration = readFileSync(new URL("../supabase/migration
 const catalogoHistorialPreciosMigration = readFileSync(new URL("../supabase/migrations/20260967_catalogo_historial_precios.sql", import.meta.url), "utf8");
 const packsMensualesMigration = readFileSync(new URL("../supabase/migrations/20260968_packs_mensuales.sql", import.meta.url), "utf8");
 const cierreMensualMigration = readFileSync(new URL("../supabase/migrations/20260969_cierre_mensual.sql", import.meta.url), "utf8");
+const fixEmailEntradaOnlineMigration = readFileSync(new URL("../supabase/migrations/20260970_fix_email_entrada_online_y_recibos_duplicados.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -170,6 +171,7 @@ async function database() {
   await db.exec(catalogoHistorialPreciosMigration);
   await db.exec(packsMensualesMigration);
   await db.exec(cierreMensualMigration);
+  await db.exec(fixEmailEntradaOnlineMigration);
   return db;
 }
 
@@ -1624,6 +1626,30 @@ test("cierre mensual: no se puede cerrar el mismo mes 2 veces", async () => {
   await db.exec(`insert into monthly_closures(period, presupuestado_minor, facturado_minor, cobrado_minor, pendiente_minor, gastos_minor, resultado_minor)
     values ('2026-03-01', 600000, 500000, 500000, 0, 100000, 400000)`);
   assert.equal(await scalar(`select resultado_minor from monthly_closures where period='2026-03-01'`), 400000);
+
+  await db.close();
+});
+
+test("sales.ticket_email_sent_at se reclama una sola vez (evita mandar la entrada por mail 2 veces)", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const saleId = "88888888-8888-4888-8888-888888888888";
+
+  await db.exec(`insert into sales(id, channel) values ('${saleId}', 'online')`);
+  assert.equal(await scalar(`select ticket_email_sent_at from sales where id='${saleId}'`), null);
+
+  const claim = async (n: string) => {
+    const result = await db.query<{ id: string }>(
+      `update sales set ticket_email_sent_at = '${n}' where id='${saleId}' and ticket_email_sent_at is null returning id`
+    );
+    return result.rows;
+  };
+
+  // Simula el webhook real de Mercado Pago y el "Verificar mi pago" del
+  // comprador llegando casi al mismo tiempo -- solo el primero debe
+  // quedarse con el envio del mail.
+  assert.equal((await claim("2026-01-01T00:00:00Z")).length, 1, "la primera llamada reclama el envio");
+  assert.equal((await claim("2026-01-01T00:00:01Z")).length, 0, "la segunda no encuentra nada para reclamar -- no reenvia el mail");
 
   await db.close();
 });

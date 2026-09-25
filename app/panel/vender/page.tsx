@@ -7,7 +7,12 @@ import { pickSelectedEvent } from "../../../lib/panel/selected-event";
 
 import VenderClient, { type TicketTypeRow, type PackRow } from "./vender-client";
 
-export default async function VenderPage() {
+export default async function VenderPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ eventId?: string }>;
+}) {
+  const { eventId: requestedEventId } = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -43,7 +48,7 @@ export default async function VenderPage() {
     .order("starts_at", { ascending: false })
     .order("created_at", { ascending: false });
 
-  const event = await pickSelectedEvent(events ?? []);
+  const event = await pickSelectedEvent(events ?? [], requestedEventId);
 
   if (!event) {
     return (

@@ -26,28 +26,38 @@ type QuoteRow = {
 // sin rango de fechas. Con rango, "presupuestado"/"facturado" cuentan los
 // presupuestos CREADOS en ese rango (no hay un timestamp de "cuando pasó a
 // facturado" -- es la misma aproximación razonable que ya usaba el
-// dashboard) y "cobrado"/"gastos" usan sus propias fechas (paid_at /
-// expense_date, que sí son exactas). Se usa tanto para el dashboard como
-// para el cierre mensual, para no duplicar esta cuenta en dos lugares.
+// dashboard) y "gastos" usa su propia fecha (expense_date, que sí es
+// exacta). Se usa tanto para el dashboard como para el cierre mensual, para
+// no duplicar esta cuenta en dos lugares.
 export async function computeFinanzasSummary(
   admin: Admin,
   range: { from?: string | null; to?: string | null } = {}
 ): Promise<FinanzasResult | { error: "missing_table" }> {
   const { from, to } = range;
 
-  let quotesQuery = admin
+  // Se trae TODO sin filtrar por fecha en la query -- el filtro se aplica
+  // en memoria mas abajo, solo donde corresponde. Es a proposito: un pago
+  // puede caer dentro del rango pedido (paid_at) aunque el presupuesto se
+  // haya CREADO antes del rango -- si "facturadoIds" (contra el que se
+  // matchean los pagos) se armaba solo con los presupuestos creados DENTRO
+  // del rango, ese pago se perdia en silencio y "cobrado" quedaba
+  // subestimado (bug real: un cierre mensual podia mostrar $0 cobrado por
+  // una factura vieja pagada ese mes). "facturadoIds" ahora es siempre el
+  // conjunto completo, sin importar el rango.
+  const { data: quotesData, error: quotesError } = await admin
     .from("quotes")
     .select("id, status, kind, client_name, items, price_mode, package_price_minor, discount_type, discount_value, created_at");
-  if (from) quotesQuery = quotesQuery.gte("created_at", from);
-  if (to) quotesQuery = quotesQuery.lte("created_at", `${to} 23:59:59`);
-  const { data: quotesData, error: quotesError } = await quotesQuery;
 
   if (quotesError) {
     if (isMissingTable(quotesError)) return { error: "missing_table" };
     throw quotesError;
   }
 
-  const quotes = (quotesData ?? []) as QuoteRow[];
+  const allQuotes = (quotesData ?? []) as QuoteRow[];
+  const quotes =
+    from || to
+      ? allQuotes.filter((q) => (!from || q.created_at >= from) && (!to || q.created_at <= `${to} 23:59:59`))
+      : allQuotes;
 
   const quoteTotal = (quote: QuoteRow) =>
     computeTotals(
@@ -60,7 +70,7 @@ export async function computeFinanzasSummary(
   const presupuestado = quotes.filter((q) => q.status !== "rechazado").reduce((sum, q) => sum + quoteTotal(q), 0);
   const facturadas = quotes.filter((q) => q.status === "a_pagar" || q.status === "aceptado");
   const facturado = facturadas.reduce((sum, q) => sum + quoteTotal(q), 0);
-  const facturadoIds = new Set(facturadas.map((q) => q.id));
+  const allFacturadoIds = new Set(allQuotes.filter((q) => q.status === "a_pagar" || q.status === "aceptado").map((q) => q.id));
 
   let paymentsQuery = admin.from("quote_payments").select("quote_id, amount_minor, paid_at");
   if (from) paymentsQuery = paymentsQuery.gte("paid_at", from);
@@ -74,7 +84,7 @@ export async function computeFinanzasSummary(
 
   const cobradoPorQuote = new Map<string, number>();
   for (const payment of paymentsData ?? []) {
-    if (!facturadoIds.has(payment.quote_id)) continue;
+    if (!allFacturadoIds.has(payment.quote_id)) continue;
     cobradoPorQuote.set(payment.quote_id, (cobradoPorQuote.get(payment.quote_id) ?? 0) + Number(payment.amount_minor));
   }
   const cobrado = [...cobradoPorQuote.values()].reduce((sum, value) => sum + value, 0);

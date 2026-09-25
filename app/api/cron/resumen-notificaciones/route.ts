@@ -64,14 +64,29 @@ export async function GET(request: NextRequest) {
       const organizationIds = orgsByUser.get(item.user_id);
       if (!organizationIds || organizationIds.length === 0) continue;
 
-      const { data: events } = await admin.from("events").select("id").in("organization_id", organizationIds);
-      const eventIds = (events ?? []).map((e) => e.id);
       const nowIso = new Date().toISOString();
 
-      if (eventIds.length === 0) {
-        await admin.from("notification_settings").update({ last_summary_sent_at: nowIso }).eq("user_id", item.user_id);
-        continue;
-      }
+      // Reclamo atomico (compare-and-swap contra el last_summary_sent_at
+      // que se leyo mas arriba) ANTES de calcular ventas y mandar nada: el
+      // cron corre cada 5 minutos y el procesamiento de un organizador con
+      // mucha actividad puede tardar mas que eso, asi que dos corridas se
+      // pueden solapar -- antes se marcaba recien al final, asi que ambas
+      // corridas calculaban "due" con el mismo last_summary_sent_at viejo y
+      // mandaban el mismo resumen 2 veces.
+      const casCondition = item.last_summary_sent_at
+        ? `last_summary_sent_at.is.null,last_summary_sent_at.eq.${item.last_summary_sent_at}`
+        : "last_summary_sent_at.is.null";
+      const claimed = await admin.from("notification_settings")
+        .update({ last_summary_sent_at: nowIso })
+        .eq("user_id", item.user_id)
+        .or(casCondition)
+        .select("user_id");
+      if ((claimed.data?.length ?? 0) === 0) continue; // otra corrida ya lo reclamo
+
+      const { data: events } = await admin.from("events").select("id").in("organization_id", organizationIds);
+      const eventIds = (events ?? []).map((e) => e.id);
+
+      if (eventIds.length === 0) continue; // ya quedo marcado arriba
 
       const since = item.last_summary_sent_at ?? new Date(0).toISOString();
 
@@ -89,10 +104,7 @@ export async function GET(request: NextRequest) {
         (mesaSales ?? []).reduce((sum, s) => sum + Number(s.total_minor), 0) +
         (ticketSales ?? []).reduce((sum, s) => sum + Number(s.total_minor), 0);
 
-      if (barCount + mesaCount + ticketCount === 0) {
-        await admin.from("notification_settings").update({ last_summary_sent_at: nowIso }).eq("user_id", item.user_id);
-        continue;
-      }
+      if (barCount + mesaCount + ticketCount === 0) continue; // ya quedo marcado arriba
 
       const parts: string[] = [];
       if (ticketCount) parts.push(`${ticketCount} entrada${ticketCount !== 1 ? "s" : ""}`);
@@ -105,7 +117,6 @@ export async function GET(request: NextRequest) {
         url: "/panel/stock",
       });
 
-      await admin.from("notification_settings").update({ last_summary_sent_at: nowIso }).eq("user_id", item.user_id);
       sent++;
     } catch (error) {
       console.error("CRON RESUMEN: fallo procesando a un organizador, sigue con el resto.", item.user_id, error);

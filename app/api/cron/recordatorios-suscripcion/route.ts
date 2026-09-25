@@ -88,6 +88,20 @@ export async function GET(request: NextRequest) {
         }
       }
 
+      // Reclamo atomico ANTES de mandar: si esta corrida se solapa con otra
+      // (Vercel Cron reintenta, o el cron de ayer todavia no termino con el
+      // resto del lote), el UPDATE...WHERE deja pasar a una sola de las dos
+      // -- antes se mandaba el email primero y se marcaba despues, asi que
+      // dos corridas casi simultaneas podian ver reminder_sent_for_period_end
+      // desactualizado y mandar el mismo recordatorio 2 veces.
+      const claimed = await admin.from("organization_subscriptions")
+        .update({ reminder_sent_for_period_end: subscription.current_period_end })
+        .eq("id", subscription.id)
+        .or(`reminder_sent_for_period_end.is.null,reminder_sent_for_period_end.neq.${subscription.current_period_end}`)
+        .select("id");
+
+      if ((claimed.data?.length ?? 0) === 0) continue; // otra corrida ya lo reclamo
+
       const result = await sendRenewalReminder({
         to: subscription.payer_email,
         customerName,
@@ -98,16 +112,8 @@ export async function GET(request: NextRequest) {
       });
 
       if (!result.ok) {
-        console.error("CRON RECORDATORIOS: no se pudo enviar el recordatorio.", subscription.id, result.error);
+        console.error("CRON RECORDATORIOS: no se pudo enviar el recordatorio (ya quedo reclamado, no reintenta hasta el proximo vencimiento).", subscription.id, result.error);
         continue;
-      }
-
-      const updated = await admin.from("organization_subscriptions")
-        .update({ reminder_sent_for_period_end: subscription.current_period_end })
-        .eq("id", subscription.id);
-
-      if (updated.error) {
-        console.error("CRON RECORDATORIOS: se envio el email pero no se pudo marcar como enviado.", subscription.id);
       }
 
       sent++;

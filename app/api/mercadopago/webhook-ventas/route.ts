@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { WebhookSignatureValidator } from "mercadopago";
-import { createAdminClient } from "../../../../lib/supabase/admin";
 import { getPayment } from "../../../../lib/billing/provider";
-import { saleFromReference, validResourceId, verifiedPayment } from "../../../../lib/billing/rules";
+import { saleFromReference, validResourceId } from "../../../../lib/billing/rules";
+import { applySalePayment } from "../../../../lib/billing/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,21 +42,8 @@ export async function POST(request: NextRequest) {
     const saleId = saleFromReference(payment.external_reference);
     if (!saleId) return NextResponse.json({ ok: true, ignored: true });
 
-    const admin = createAdminClient();
-    const { data: sale } = await admin.from("sales").select("id, organization_id, total_charged_minor, currency")
-      .eq("id", saleId).eq("channel", "online").maybeSingle();
-    if (!sale || sale.total_charged_minor == null) return NextResponse.json({ ok: true, ignored: true });
-
-    const { data: account } = await admin.from("organization_mercadopago_accounts")
-      .select("mp_user_id").eq("organization_id", sale.organization_id).maybeSingle();
-    if (!account) return NextResponse.json({ ok: true, ignored: true });
-
-    const verified = verifiedPayment(payment, {
-      amount: Number(sale.total_charged_minor), currency: sale.currency, collectorId: account.mp_user_id,
-      live: process.env.MERCADOPAGO_ENV !== "sandbox",
-    });
-
-    await admin.rpc("confirm_online_sale", { p_sale_id: saleId, p_status: verified.status });
+    const applied = await applySalePayment(payment, saleId);
+    if (!applied) return NextResponse.json({ ok: true, ignored: true });
 
     return NextResponse.json({ ok: true });
   } catch {
