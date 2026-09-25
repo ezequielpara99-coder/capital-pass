@@ -138,6 +138,9 @@ export default function PresupuestosClient({ quotes, missingSql }: { quotes: Quo
             <Link href="/admin/presupuestos/paquetes" className="flex h-12 items-center justify-center border border-white/[0.12] px-5 text-[10px] font-black uppercase tracking-[0.16em] text-white/60 transition hover:text-white">
               Paquetes
             </Link>
+            <Link href="/admin/presupuestos/mensuales" className="flex h-12 items-center justify-center border border-white/[0.12] px-5 text-[10px] font-black uppercase tracking-[0.16em] text-white/60 transition hover:text-white">
+              Packs mensuales
+            </Link>
             <Link href="/admin/presupuestos/clientes" className="flex h-12 items-center justify-center border border-white/[0.12] px-5 text-[10px] font-black uppercase tracking-[0.16em] text-white/60 transition hover:text-white">
               Clientes
             </Link>

@@ -32,4 +32,4 @@ export function isMissingTable(error: { code?: string; message?: string } | null
 }
 
 export const QUOTE_FIELDS =
-  "id, number, kind, status, client_name, client_contact, client_phone, client_email, title, event_name, modality, items, price_mode, package_price_minor, discount_type, discount_value, discount_label, notes, valid_days, rental_inquiry_id, created_at, updated_at";
+  "id, number, kind, status, client_name, client_contact, client_phone, client_email, title, event_name, modality, items, price_mode, package_price_minor, discount_type, discount_value, discount_label, notes, valid_days, rental_inquiry_id, monthly_pack_id, pack_period, created_at, updated_at";

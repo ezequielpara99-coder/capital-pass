@@ -59,6 +59,7 @@ const evitaSpamPushSuscripcionMigration = readFileSync(new URL("../supabase/migr
 const idempotenciaVentaMesaMigration = readFileSync(new URL("../supabase/migrations/20260965_idempotencia_venta_mesa.sql", import.meta.url), "utf8");
 const capitalFinanzasBaseMigration = readFileSync(new URL("../supabase/migrations/20260966_capital_finanzas_base.sql", import.meta.url), "utf8");
 const catalogoHistorialPreciosMigration = readFileSync(new URL("../supabase/migrations/20260967_catalogo_historial_precios.sql", import.meta.url), "utf8");
+const packsMensualesMigration = readFileSync(new URL("../supabase/migrations/20260968_packs_mensuales.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -166,6 +167,7 @@ async function database() {
   await db.exec(idempotenciaVentaMesaMigration);
   await db.exec(capitalFinanzasBaseMigration);
   await db.exec(catalogoHistorialPreciosMigration);
+  await db.exec(packsMensualesMigration);
   return db;
 }
 
@@ -1568,6 +1570,35 @@ test("catalogo: historial de precios encadena por catalog_id y valida el monto",
   // Si se borra el item del catalogo, su historial se va con el.
   await db.exec(`delete from quote_catalog where id='${catalogId}'`);
   assert.equal(await scalar(`select count(*)::int from quote_catalog_price_history where catalog_id='${catalogId}'`), 0);
+
+  await db.close();
+});
+
+test("packs mensuales: un mismo pack no puede tener 2 facturas del mismo mes", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const pack = await db.query<{ id: string }>(
+    `insert into monthly_packs(client_name, kind, description, package_price_minor) values ('Bar Los Alamos', 'diseno', 'Flyers del mes', 150000) returning id`
+  );
+  const packId = pack.rows[0].id;
+
+  await db.exec(`insert into quotes(client_name, kind, status, monthly_pack_id, pack_period, price_mode, package_price_minor)
+    values ('Bar Los Alamos', 'diseno', 'a_pagar', '${packId}', '2026-03-01', 'package', 150000)`);
+  assert.equal(await scalar(`select count(*)::int from quotes where monthly_pack_id='${packId}'`), 1);
+
+  // El mismo pack, mismo mes: el indice unico lo frena (asi la ruta de
+  // generar puede confiar en que un 23505 significa "ya existe", no error real).
+  await assert.rejects(
+    () => db.query(`insert into quotes(client_name, kind, status, monthly_pack_id, pack_period, price_mode, package_price_minor)
+      values ('Bar Los Alamos', 'diseno', 'a_pagar', '${packId}', '2026-03-01', 'package', 150000)`),
+    /duplicate key value violates unique constraint/
+  );
+
+  // Un mes distinto para el mismo pack si es valido.
+  await db.exec(`insert into quotes(client_name, kind, status, monthly_pack_id, pack_period, price_mode, package_price_minor)
+    values ('Bar Los Alamos', 'diseno', 'a_pagar', '${packId}', '2026-04-01', 'package', 150000)`);
+  assert.equal(await scalar(`select count(*)::int from quotes where monthly_pack_id='${packId}'`), 2);
 
   await db.close();
 });
