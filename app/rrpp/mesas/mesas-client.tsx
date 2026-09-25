@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../../lib/supabase/client";
+import { friendlyErrorMessage } from "../../../lib/errors/friendly-message";
 
 type Table = { id: string; name: string; capacity: number | null; price_minor: number | null; status: string };
 
@@ -38,6 +39,21 @@ export default function MesasClient({ eventId, eventName }: { eventId: string; e
 
   const [result, setResult] = useState<{ tableName: string; totalMinor: number; phone: string } | null>(null);
 
+  // Se reusa en un reintento de la MISMA venta (ej. se corta la wifi justo
+  // cuando el servidor ya la registro) y se renueva si cambia algo del
+  // pedido -- mismo patron que ya usa /puerta y /bartender. No se
+  // regenera mientras hay una venta EN VUELO (selling=true): el request
+  // que ya salio quedo con la key vieja en el body, asi que renovarla acá
+  // mientras se espera la respuesta haría que un reintento posterior
+  // mandara una key que el servidor nunca vio, creando una reserva nueva
+  // en vez de deduplicar.
+  const saleAttemptKeyRef = useRef<string>(crypto.randomUUID());
+  useEffect(() => {
+    if (selling) return;
+    saleAttemptKeyRef.current = crypto.randomUUID();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableId, firstName, lastName, dni, phone, paymentMethod]);
+
   async function load() {
     if (!eventId) {
       setLoading(false);
@@ -51,7 +67,7 @@ export default function MesasClient({ eventId, eventName }: { eventId: string; e
       if (!response.ok) throw new Error(data.error ?? "No se pudieron cargar las mesas.");
       setTables(data.tables ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudieron cargar las mesas.");
+      setError(friendlyErrorMessage(err, "No se pudieron cargar las mesas."));
     } finally {
       setLoading(false);
     }
@@ -77,13 +93,22 @@ export default function MesasClient({ eventId, eventName }: { eventId: string; e
       const response = await fetch("/api/stock/tables/vender", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventId, tableId, firstName, lastName, dni, phone, paymentMethod }),
+        body: JSON.stringify({
+          eventId,
+          tableId,
+          firstName,
+          lastName,
+          dni,
+          phone,
+          paymentMethod,
+          idempotencyKey: saleAttemptKeyRef.current,
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "No se pudo vender la mesa.");
       setResult({ tableName: selectedTable?.name ?? "Mesa", totalMinor: Number(data.totalMinor ?? 0), phone });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo vender la mesa.");
+      setError(friendlyErrorMessage(err, "No se pudo vender la mesa."));
     } finally {
       setSelling(false);
     }

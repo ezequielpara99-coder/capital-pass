@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
         productName: row.product_name,
         quantity: row.quantity,
         remainingQuantity: row.remaining_quantity,
-        remainingCreditMinor: row.remaining_credit_minor,
+        remainingCreditMinor: row.remaining_credit_minor === null ? null : Number(row.remaining_credit_minor),
         buyerName: row.buyer_name,
       },
     });

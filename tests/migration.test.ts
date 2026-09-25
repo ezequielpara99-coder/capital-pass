@@ -56,6 +56,7 @@ const snapshotComisionRrppMigration = readFileSync(new URL("../supabase/migratio
 const processTicketReturnMigration = readFileSync(new URL("../supabase/migrations/20260962_process_ticket_return_sin_race_de_combo.sql", import.meta.url), "utf8");
 const cpPrepareCheckoutRespetaPlanMigration = readFileSync(new URL("../supabase/migrations/20260963_cp_prepare_checkout_respeta_plan_elegido.sql", import.meta.url), "utf8");
 const evitaSpamPushSuscripcionMigration = readFileSync(new URL("../supabase/migrations/20260964_evita_spam_push_nueva_suscripcion.sql", import.meta.url), "utf8");
+const idempotenciaVentaMesaMigration = readFileSync(new URL("../supabase/migrations/20260965_idempotencia_venta_mesa.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -160,6 +161,7 @@ async function database() {
   await db.exec(processTicketReturnMigration);
   await db.exec(cpPrepareCheckoutRespetaPlanMigration);
   await db.exec(evitaSpamPushSuscripcionMigration);
+  await db.exec(idempotenciaVentaMesaMigration);
   return db;
 }
 
@@ -463,6 +465,22 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
     () => db.query(`select sell_table('${event}','${table}','Otro','Cliente','30333444','3462333444','efectivo')`),
     /ya no esta disponible/
   );
+
+  // Idempotencia: un reintento con la MISMA clave (ej. el RRPP reintenta
+  // tras perder la respuesta por un corte de wifi) no debe reservar una
+  // mesa nueva ni crear una segunda venta.
+  const table2 = "88888888-8888-4888-8888-888888888888";
+  await db.exec(`insert into bar_tables(id,event_id,name,capacity,price_minor) values ('${table2}','${event}','Mesa 2',4,7000);`);
+  const tableSaleKey = "c0ffee00-0000-4000-8000-000000000042";
+  const tableSaleFirst = await scalar(
+    `select sale_id::text from sell_table('${event}','${table2}','Cliente','Idempotente','30777888','3462777888','efectivo','${tableSaleKey}')`
+  );
+  const tableSaleRetry = await scalar(
+    `select sale_id::text from sell_table('${event}','${table2}','Cliente','Idempotente','30777888','3462777888','efectivo','${tableSaleKey}')`
+  );
+  assert.equal(tableSaleRetry, tableSaleFirst, "el reintento devuelve la MISMA venta, no crea una nueva");
+  assert.equal(await scalar(`select count(*)::int from sales where table_id='${table2}'`), 1, "no se duplico la venta de la mesa");
+  assert.equal(await scalar(`select status from bar_tables where id='${table2}'`), "reserved");
 
   // Asignar la cuenta bartender a la barra (event_staff) para que pueda vender ahi.
   await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);

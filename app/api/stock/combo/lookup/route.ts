@@ -45,13 +45,24 @@ export async function GET(request: NextRequest) {
   // edita el combo de la tanda despues de vender, las entradas ya
   // emitidas tienen que seguir validando contra lo que el comprador
   // realmente pago, no contra la configuracion nueva.
-  const { data: ticket } = await admin
+  // Igualdad exacta (mismo criterio que redeem_combo_ticket, que compara
+  // upper(manual_code) = codigo) -- antes usaba ilike, que interpreta "%"
+  // y "_" como comodines de patron. Un codigo con alguno de esos
+  // caracteres (typo, autocorrector, copy-paste con caracteres raros)
+  // podia matchear una entrada DISTINTA a la que el bartender tipeo, o
+  // devolver un 404 enmascarando una coincidencia ambigua (ilike + error
+  // sin chequear tambien caia en el mismo mensaje generico).
+  const { data: ticket, error: ticketError } = await admin
     .from("tickets")
     .select("id, status, ticket_type_id, combo_type, combo_event_product_id, combo_remaining_quantity, combo_remaining_credit_minor, sale_id")
     .eq("event_id", staff.event_id)
-    .ilike("manual_code", manualCode)
+    .eq("manual_code", manualCode.toUpperCase())
     .maybeSingle();
 
+  if (ticketError) {
+    console.error("COMBO LOOKUP:", ticketError);
+    return NextResponse.json({ error: "No se pudo buscar la entrada." }, { status: 500 });
+  }
   if (!ticket) return NextResponse.json({ error: "No se encontró ninguna entrada con ese código." }, { status: 404 });
   if (!ticket.combo_type) {
     return NextResponse.json({ error: "Esta entrada no incluye consumición." }, { status: 400 });
@@ -94,7 +105,7 @@ export async function GET(request: NextRequest) {
       comboEventProductId: ticket.combo_event_product_id,
       includedProductName,
       remainingQuantity: ticket.combo_remaining_quantity,
-      remainingCreditMinor: ticket.combo_remaining_credit_minor,
+      remainingCreditMinor: ticket.combo_remaining_credit_minor === null ? null : Number(ticket.combo_remaining_credit_minor),
     },
   });
 }

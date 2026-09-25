@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
     const dni = String(body.dni ?? "").trim();
     const phone = String(body.phone ?? "").trim();
     const paymentMethod = String(body.paymentMethod ?? "").trim();
+    const idempotencyKey = String(body.idempotencyKey ?? "").trim() || null;
 
     if (!eventId || !tableId || !firstName || !lastName || !phone || !paymentMethod) {
       return NextResponse.json({ error: "Completá los datos del comprador." }, { status: 400 });
@@ -32,6 +33,7 @@ export async function POST(request: NextRequest) {
       p_buyer_dni: dni || null,
       p_buyer_phone: phone,
       p_payment_method: paymentMethod,
+      p_idempotency_key: idempotencyKey,
     });
 
     if (error) {
@@ -59,7 +61,7 @@ export async function POST(request: NextRequest) {
       console.error("PUSH mesa-sale:", pushError);
     }
 
-    return NextResponse.json({ ok: true, saleId: result?.sale_id, totalMinor: result?.total_minor });
+    return NextResponse.json({ ok: true, saleId: result?.sale_id, totalMinor: Number(result?.total_minor ?? 0) });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }

@@ -17,6 +17,7 @@ type EventData = {
   starts_at: string | null;
   venue_name: string | null;
   city: string | null;
+  status: string;
   door_sales_enabled: boolean;
   door_sales_start_at: string | null;
   door_sales_end_at: string | null;
@@ -176,9 +177,19 @@ export default function DoorSellerPage() {
   // algo del pedido -- sin esto, reintentar tras perder la respuesta
   // generaba una segunda venta y descontaba cupo dos veces por un cobro
   // que se hizo una sola vez.
+  //
+  // Mientras hay una venta EN VUELO (selling=true) no se puede regenerar:
+  // el request que ya salio quedo con la key vieja en el body, asi que
+  // renovarla aca mientras se espera la respuesta (ej. el vendedor toca
+  // la cantidad o corrige el DNI creyendo que no paso nada) hacia que un
+  // reintento posterior mandara una key que el servidor nunca vio,
+  // creando una venta nueva completa en vez de deduplicar -- exactamente
+  // el doble cobro que esta key existe para evitar.
   const saleAttemptKeyRef = useRef<string>(crypto.randomUUID());
   useEffect(() => {
+    if (selling) return;
     saleAttemptKeyRef.current = crypto.randomUUID();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketTypeId, packId, quantity, paymentMethod, firstName, lastName, dni, phone]);
 
   // =====================================================
@@ -300,6 +311,7 @@ export default function DoorSellerPage() {
             starts_at,
             venue_name,
             city,
+            status,
             door_sales_enabled,
             door_sales_start_at,
             door_sales_end_at
@@ -447,6 +459,16 @@ export default function DoorSellerPage() {
   const doorAvailable =
     useMemo(() => {
       if (!event) {
+        return false;
+      }
+
+      // create_sale exige ademas que el evento este 'active' para el
+      // canal puerta -- door_sales_enabled/la ventana horaria son
+      // controles independientes que el organizador puede dejar
+      // configurados de antemano sin haber activado todavia el evento el
+      // dia de la fecha. Sin este chequeo, el cartel mostraba "Venta
+      // habilitada" aunque el servidor fuera a rechazar la venta.
+      if (event.status !== "active") {
         return false;
       }
 
@@ -1078,6 +1100,7 @@ export default function DoorSellerPage() {
                 label="DNI"
                 value={dni}
                 onChange={setDni}
+                required
               />
 
               <Field
@@ -1264,6 +1287,7 @@ export default function DoorSellerPage() {
                   !doorAvailable ||
                   !firstName.trim() ||
                   !lastName.trim() ||
+                  !dni.trim() ||
                   !ticketTypeId ||
                   !paymentMethod
                 }
