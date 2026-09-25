@@ -60,6 +60,7 @@ const idempotenciaVentaMesaMigration = readFileSync(new URL("../supabase/migrati
 const capitalFinanzasBaseMigration = readFileSync(new URL("../supabase/migrations/20260966_capital_finanzas_base.sql", import.meta.url), "utf8");
 const catalogoHistorialPreciosMigration = readFileSync(new URL("../supabase/migrations/20260967_catalogo_historial_precios.sql", import.meta.url), "utf8");
 const packsMensualesMigration = readFileSync(new URL("../supabase/migrations/20260968_packs_mensuales.sql", import.meta.url), "utf8");
+const cierreMensualMigration = readFileSync(new URL("../supabase/migrations/20260969_cierre_mensual.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -168,6 +169,7 @@ async function database() {
   await db.exec(capitalFinanzasBaseMigration);
   await db.exec(catalogoHistorialPreciosMigration);
   await db.exec(packsMensualesMigration);
+  await db.exec(cierreMensualMigration);
   return db;
 }
 
@@ -1599,6 +1601,29 @@ test("packs mensuales: un mismo pack no puede tener 2 facturas del mismo mes", a
   await db.exec(`insert into quotes(client_name, kind, status, monthly_pack_id, pack_period, price_mode, package_price_minor)
     values ('Bar Los Alamos', 'diseno', 'a_pagar', '${packId}', '2026-04-01', 'package', 150000)`);
   assert.equal(await scalar(`select count(*)::int from quotes where monthly_pack_id='${packId}'`), 2);
+
+  await db.close();
+});
+
+test("cierre mensual: no se puede cerrar el mismo mes 2 veces", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  await db.exec(`insert into monthly_closures(period, presupuestado_minor, facturado_minor, cobrado_minor, pendiente_minor, gastos_minor, resultado_minor)
+    values ('2026-03-01', 500000, 400000, 300000, 100000, 50000, 250000)`);
+  assert.equal(await scalar(`select resultado_minor from monthly_closures where period='2026-03-01'`), 250000);
+
+  await assert.rejects(
+    () => db.query(`insert into monthly_closures(period, presupuestado_minor, facturado_minor, cobrado_minor, pendiente_minor, gastos_minor, resultado_minor)
+      values ('2026-03-01', 0, 0, 0, 0, 0, 0)`),
+    /duplicate key value violates unique constraint/
+  );
+
+  // Reabrir (borrar) permite volver a cerrar ese mismo mes despues.
+  await db.exec(`delete from monthly_closures where period='2026-03-01'`);
+  await db.exec(`insert into monthly_closures(period, presupuestado_minor, facturado_minor, cobrado_minor, pendiente_minor, gastos_minor, resultado_minor)
+    values ('2026-03-01', 600000, 500000, 500000, 0, 100000, 400000)`);
+  assert.equal(await scalar(`select resultado_minor from monthly_closures where period='2026-03-01'`), 400000);
 
   await db.close();
 });
