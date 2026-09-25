@@ -57,6 +57,7 @@ const processTicketReturnMigration = readFileSync(new URL("../supabase/migration
 const cpPrepareCheckoutRespetaPlanMigration = readFileSync(new URL("../supabase/migrations/20260963_cp_prepare_checkout_respeta_plan_elegido.sql", import.meta.url), "utf8");
 const evitaSpamPushSuscripcionMigration = readFileSync(new URL("../supabase/migrations/20260964_evita_spam_push_nueva_suscripcion.sql", import.meta.url), "utf8");
 const idempotenciaVentaMesaMigration = readFileSync(new URL("../supabase/migrations/20260965_idempotencia_venta_mesa.sql", import.meta.url), "utf8");
+const capitalFinanzasBaseMigration = readFileSync(new URL("../supabase/migrations/20260966_capital_finanzas_base.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -162,6 +163,7 @@ async function database() {
   await db.exec(cpPrepareCheckoutRespetaPlanMigration);
   await db.exec(evitaSpamPushSuscripcionMigration);
   await db.exec(idempotenciaVentaMesaMigration);
+  await db.exec(capitalFinanzasBaseMigration);
   return db;
 }
 
@@ -1514,6 +1516,35 @@ test("organizations.new_subscription_notified_at se reclama una sola vez (evita 
     Date.parse("2026-01-01T00:00:00Z") / 1000,
     "la marca queda fija en la primera reclamacion, la segunda no la pisa"
   );
+
+  await db.close();
+});
+
+test("finanzas: cobros contra un presupuesto y gastos, con sus validaciones", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const quote = await db.query<{ id: string }>(
+    `insert into quotes(client_name, kind, status, items) values ('Bar Los Alamos', 'rental', 'a_pagar', '[{"description":"Terminal","quantity":1,"unit":"mes","unit_price_minor":50000}]') returning id`
+  );
+  const quoteId = quote.rows[0].id;
+
+  await db.exec(`insert into quote_payments(quote_id, amount_minor, paid_at, method) values ('${quoteId}', 20000, '2026-01-05', 'efectivo')`);
+  assert.equal(Number(await scalar(`select sum(amount_minor)::text from quote_payments where quote_id='${quoteId}'`)), 20000);
+
+  // Un pago no puede quedar sin presupuesto ni sin monto positivo.
+  await assert.rejects(() => db.query(`insert into quote_payments(quote_id, amount_minor) values ('${quoteId}', -100)`), /violates check constraint|check/);
+  await assert.rejects(() => db.query(`insert into quote_payments(quote_id, amount_minor) values (gen_random_uuid(), 1000)`), /violates foreign key constraint|foreign key/);
+
+  // Si se borra el presupuesto, sus cobros se van con el (on delete cascade).
+  await db.exec(`delete from quotes where id='${quoteId}'`);
+  assert.equal(await scalar(`select count(*)::int from quote_payments where quote_id='${quoteId}'`), 0);
+
+  // Gastos: valida kind y amount_minor positivo.
+  await db.exec(`insert into expenses(kind, category, description, amount_minor, expense_date) values ('rental', 'insumos', 'Cinta para impresora', 5000, '2026-01-02')`);
+  assert.equal(await scalar(`select count(*)::int from expenses`), 1);
+  await assert.rejects(() => db.query(`insert into expenses(kind, description, amount_minor) values ('otro-tipo', 'X', 100)`), /violates check constraint|check/);
+  await assert.rejects(() => db.query(`insert into expenses(kind, description, amount_minor) values ('general', 'X', 0)`), /violates check constraint|check/);
 
   await db.close();
 });

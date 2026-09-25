@@ -9,6 +9,7 @@ import {
   removePendingSave,
   saveQuoteLocal,
 } from "../../../lib/offline/quote-cache";
+import QuotePayments from "./quote-payments";
 import {
   computeTotals,
   contentCount,
@@ -950,6 +951,11 @@ export default function QuoteEditor({
             )}
           </div>
         </section>
+
+        {/* Cobros: solo tiene sentido una vez guardado y facturado */}
+        {id && (status === "a_pagar" || status === "aceptado") && !localOnly && (
+          <QuotePayments quoteId={id} total={totals.total} />
+        )}
       </section>
 
       {/* Barra fija: total + acciones */}
