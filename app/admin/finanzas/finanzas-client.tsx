@@ -13,6 +13,9 @@ type Summary = {
   resultado: number;
 };
 
+type ByClient = { clientName: string; facturado: number; cobrado: number; pendiente: number; quotes: number };
+type ByKind = { kind: "diseno" | "rental" | "otro"; facturado: number; cobrado: number; pendiente: number };
+
 type Expense = {
   id: string;
   kind: "diseno" | "rental" | "general";
@@ -29,6 +32,7 @@ const INPUT =
   "mt-2 h-12 w-full border border-white/[0.12] bg-black/30 px-4 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-[#ff5a2a]/50";
 const LABEL = "block text-[9px] font-black uppercase tracking-[0.18em] text-white/40";
 const KIND_LABEL: Record<Expense["kind"], string> = { diseno: "Diseño", rental: "Rental", general: "General" };
+const AREA_LABEL: Record<ByKind["kind"], string> = { diseno: "Capital Design", rental: "Capital Rentals", otro: "Otro" };
 const METHOD_LABEL: Record<string, string> = {
   transferencia: "Transferencia",
   efectivo: "Efectivo",
@@ -56,6 +60,8 @@ function formatDate(value: string) {
 
 export default function FinanzasClient() {
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [byClient, setByClient] = useState<ByClient[]>([]);
+  const [byKind, setByKind] = useState<ByKind[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -89,6 +95,8 @@ export default function FinanzasClient() {
       }
 
       setSummary(summaryResult.summary);
+      setByClient(summaryResult.byClient ?? []);
+      setByKind(summaryResult.byKind ?? []);
       setExpenses(expensesResult.expenses);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo cargar.");
@@ -199,6 +207,45 @@ export default function FinanzasClient() {
                 </div>
               ))}
         </div>
+
+        {byKind.length > 0 && (
+          <section className="mt-10">
+            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Por área</p>
+            <div className="mt-3 grid gap-[1px] bg-white/[0.08] sm:grid-cols-2">
+              {byKind.map((row) => (
+                <div key={row.kind} className="bg-[#080706]/85 p-4">
+                  <p className={`text-[10px] font-black uppercase tracking-[0.16em] ${row.kind === "diseno" ? "text-violet-300" : "text-[#ff7354]"}`}>{AREA_LABEL[row.kind]}</p>
+                  <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs">
+                    <span className="text-white/50">Facturado <b className="text-white">{formatMoney(row.facturado)}</b></span>
+                    <span className="text-white/50">Cobrado <b className="text-emerald-300">{formatMoney(row.cobrado)}</b></span>
+                    <span className="text-white/50">Pendiente <b className="text-amber-300">{formatMoney(row.pendiente)}</b></span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {byClient.length > 0 && (
+          <section className="mt-10">
+            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Rentabilidad por cliente</p>
+            <div className="mt-3 space-y-2">
+              {byClient.map((row) => (
+                <div key={row.clientName} className="flex items-center gap-3 border border-white/[0.08] bg-white/[0.02] px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold">{row.clientName}</p>
+                    <p className="text-[11px] text-white/35">{row.quotes} {row.quotes === 1 ? "presupuesto facturado" : "presupuestos facturados"}</p>
+                  </div>
+                  <div className="flex shrink-0 gap-x-4 text-right text-xs">
+                    <span className="text-white/50">Fact. <b className="text-white">{formatMoney(row.facturado)}</b></span>
+                    <span className="text-white/50">Cobr. <b className="text-emerald-300">{formatMoney(row.cobrado)}</b></span>
+                    <span className="text-white/50">Pend. <b className="text-amber-300">{formatMoney(row.pendiente)}</b></span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="mt-10 border border-white/[0.08] bg-white/[0.02] p-5">
           <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Nuevo gasto</p>

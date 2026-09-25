@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
 
     const { data: quotesData, error: quotesError } = await admin
       .from("quotes")
-      .select("id, status, kind, items, price_mode, package_price_minor, discount_type, discount_value, created_at");
+      .select("id, status, kind, client_name, items, price_mode, package_price_minor, discount_type, discount_value, created_at");
 
     if (quotesError) {
       if (isMissingTable(quotesError)) return NextResponse.json({ error: "Falta aplicar la actualización de la base de datos (presupuestos)." }, { status: 503 });
@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
       id: string;
       status: QuoteStatus;
       kind: QuoteKind;
+      client_name: string;
       items: QuoteItem[];
       price_mode: PriceMode;
       package_price_minor: number | string;
@@ -65,9 +66,50 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "No se pudieron cargar los pagos." }, { status: 500 });
     }
 
-    const cobrado = (paymentsData ?? [])
-      .filter((p) => facturadoIds.has(p.quote_id))
-      .reduce((sum, p) => sum + Number(p.amount_minor), 0);
+    const cobradoPorQuote = new Map<string, number>();
+    for (const payment of paymentsData ?? []) {
+      if (!facturadoIds.has(payment.quote_id)) continue;
+      cobradoPorQuote.set(payment.quote_id, (cobradoPorQuote.get(payment.quote_id) ?? 0) + Number(payment.amount_minor));
+    }
+    const cobrado = [...cobradoPorQuote.values()].reduce((sum, value) => sum + value, 0);
+
+    // Por cliente: agrupa las facturadas por nombre (las quotes no guardan
+    // un client_id, solo el nombre -- mismo criterio que ya usa el resto
+    // del editor de presupuestos para reconocer un cliente repetido).
+    const byClientMap = new Map<string, { facturado: number; cobrado: number; quotes: number }>();
+    for (const quote of facturadas) {
+      const key = quote.client_name?.trim() || "Sin nombre";
+      const entry = byClientMap.get(key) ?? { facturado: 0, cobrado: 0, quotes: 0 };
+      entry.facturado += quoteTotal(quote);
+      entry.cobrado += cobradoPorQuote.get(quote.id) ?? 0;
+      entry.quotes += 1;
+      byClientMap.set(key, entry);
+    }
+    const byClient = [...byClientMap.entries()]
+      .map(([clientName, values]) => ({
+        clientName,
+        facturado: values.facturado,
+        cobrado: values.cobrado,
+        pendiente: Math.max(0, values.facturado - values.cobrado),
+        quotes: values.quotes,
+      }))
+      .sort((a, b) => b.facturado - a.facturado)
+      .slice(0, 100);
+
+    // Por área (diseño / rental): mismo criterio, agrupado por kind.
+    const byKindMap = new Map<QuoteKind, { facturado: number; cobrado: number }>();
+    for (const quote of facturadas) {
+      const entry = byKindMap.get(quote.kind) ?? { facturado: 0, cobrado: 0 };
+      entry.facturado += quoteTotal(quote);
+      entry.cobrado += cobradoPorQuote.get(quote.id) ?? 0;
+      byKindMap.set(quote.kind, entry);
+    }
+    const byKind = [...byKindMap.entries()].map(([kind, values]) => ({
+      kind,
+      facturado: values.facturado,
+      cobrado: values.cobrado,
+      pendiente: Math.max(0, values.facturado - values.cobrado),
+    }));
 
     let expensesQuery = admin.from("expenses").select("amount_minor, expense_date, kind");
     if (from) expensesQuery = expensesQuery.gte("expense_date", from);
@@ -87,6 +129,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       summary: { presupuestado, facturado, cobrado, pendiente, gastos, resultado },
+      byClient,
+      byKind,
     });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
