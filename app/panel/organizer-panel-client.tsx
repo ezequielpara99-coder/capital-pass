@@ -741,6 +741,11 @@ function Sidebar({
         section === "ingresos",
     },
     {
+      label: "Membresía",
+      href: "/panel/membresia",
+      active: false,
+    },
+    {
       label: "Notificaciones",
       href: withEvent(
         "/panel/notificaciones",

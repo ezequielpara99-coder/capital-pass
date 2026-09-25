@@ -63,6 +63,7 @@ const packsMensualesMigration = readFileSync(new URL("../supabase/migrations/202
 const cierreMensualMigration = readFileSync(new URL("../supabase/migrations/20260969_cierre_mensual.sql", import.meta.url), "utf8");
 const fixEmailEntradaOnlineMigration = readFileSync(new URL("../supabase/migrations/20260970_fix_email_entrada_online_y_recibos_duplicados.sql", import.meta.url), "utf8");
 const sistemaTrasladosMigration = readFileSync(new URL("../supabase/migrations/20260971_sistema_traslados.sql", import.meta.url), "utf8");
+const membresiaPremiumMigration = readFileSync(new URL("../supabase/migrations/20260972_membresia_premium.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -174,6 +175,7 @@ async function database() {
   await db.exec(cierreMensualMigration);
   await db.exec(fixEmailEntradaOnlineMigration);
   await db.exec(sistemaTrasladosMigration);
+  await db.exec(membresiaPremiumMigration);
   return db;
 }
 
@@ -1691,6 +1693,31 @@ test("sistema de traslados: cupo, permisos y validacion de embarque", async () =
   // Codigo que no existe.
   const invalid = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','ZZZZZZ')`);
   assert.equal(invalid.rows[0].result, "invalid");
+
+  await db.close();
+});
+
+test("membresia premium: codigo de socio unico por organizacion, no entre organizaciones distintas", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const orgA = "bbbbbbbb-1111-4111-8111-111111111111";
+  const orgB = "bbbbbbbb-2222-4222-8222-222222222222";
+
+  await db.exec(`insert into organizations(id,name,slug) values ('${orgA}','Club A','club-a'), ('${orgB}','Club B','club-b');
+    update organizations set premium_memberships_enabled = true where id in ('${orgA}','${orgB}');`);
+  assert.equal(await scalar(`select premium_memberships_enabled from organizations where id='${orgA}'`), true);
+
+  await db.exec(`insert into premium_members(organization_id, first_name, last_name, member_code) values ('${orgA}','Juan','Perez','ABC123')`);
+
+  await assert.rejects(
+    () => db.query(`insert into premium_members(organization_id, first_name, last_name, member_code) values ('${orgA}','Otro','Socio','ABC123')`),
+    /duplicate key value violates unique constraint/,
+    "el mismo codigo no se puede repetir dentro de la misma organizacion"
+  );
+
+  // El mismo codigo SI es valido en otra organizacion distinta.
+  await db.exec(`insert into premium_members(organization_id, first_name, last_name, member_code) values ('${orgB}','Maria','Lopez','ABC123')`);
+  assert.equal(await scalar(`select count(*)::int from premium_members where member_code='ABC123'`), 2);
 
   await db.close();
 });

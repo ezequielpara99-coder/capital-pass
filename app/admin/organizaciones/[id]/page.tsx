@@ -5,6 +5,7 @@ import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import CortesiaToggle from "./cortesia-toggle";
 import StockAccessToggle from "./stock-access-toggle";
+import PremiumMembershipToggle from "./premium-membership-toggle";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -81,6 +82,14 @@ export default async function AdminOrganizationDetailPage({
   const stockBlockAvailable = !stockBlockResult.error;
   const stockAccessBlocked = stockBlockAvailable
     ? Boolean((stockBlockResult.data as { stock_access_blocked?: boolean } | null)?.stock_access_blocked)
+    : false;
+
+  // Tolerante: si todavia no se corrio la migracion de membresia premium, no
+  // se muestra el toggle en vez de romper la pagina.
+  const premiumResult = await admin.from("organizations").select("premium_memberships_enabled").eq("id", id).maybeSingle();
+  const premiumAvailable = !premiumResult.error;
+  const premiumMembershipsEnabled = premiumAvailable
+    ? Boolean((premiumResult.data as { premium_memberships_enabled?: boolean } | null)?.premium_memberships_enabled)
     : false;
 
   const [membersResult, eventsResult, subscriptionResult, signupResult, complaintsResult] =
@@ -235,6 +244,10 @@ export default async function AdminOrganizationDetailPage({
 
           {stockBlockAvailable && (
             <StockAccessToggle organizationId={organization.id} initialBlocked={stockAccessBlocked} />
+          )}
+
+          {premiumAvailable && (
+            <PremiumMembershipToggle organizationId={organization.id} initialEnabled={premiumMembershipsEnabled} />
           )}
         </section>
 

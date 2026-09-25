@@ -123,6 +123,10 @@ export async function PATCH(request: NextRequest) {
       updates.stock_access_blocked = Boolean(body.stockBlocked);
     }
 
+    if (body.premiumMembershipsEnabled !== undefined) {
+      updates.premium_memberships_enabled = Boolean(body.premiumMembershipsEnabled);
+    }
+
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "No hay nada para actualizar." }, { status: 400 });
     }
@@ -139,6 +143,9 @@ export async function PATCH(request: NextRequest) {
       if ("stock_access_blocked" in updates && /stock_access_blocked/i.test(error.message ?? "")) {
         return NextResponse.json({ error: "Falta aplicar la actualización de bloqueo de stock (20260939)." }, { status: 503 });
       }
+      if ("premium_memberships_enabled" in updates && /premium_memberships_enabled/i.test(error.message ?? "")) {
+        return NextResponse.json({ error: "Falta aplicar la actualización de membresía premium (20260972)." }, { status: 503 });
+      }
       console.error("ADMIN CUENTAS PATCH:", error);
       return NextResponse.json({ error: "No se pudo actualizar la organización." }, { status: 500 });
     }
@@ -146,7 +153,11 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      organization: { ...data, stock_access_blocked: "stock_access_blocked" in updates ? updates.stock_access_blocked : undefined },
+      organization: {
+        ...data,
+        stock_access_blocked: "stock_access_blocked" in updates ? updates.stock_access_blocked : undefined,
+        premium_memberships_enabled: "premium_memberships_enabled" in updates ? updates.premium_memberships_enabled : undefined,
+      },
     });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
