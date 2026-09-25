@@ -27,6 +27,9 @@ export async function GET() {
       .eq("user_id", user.id)
       .eq("role", "organizer")
       .eq("status", "active")
+      // Sin order by, Postgres no garantiza que fila devuelve si el
+      // usuario es organizador activo de mas de una organizacion a la vez.
+      .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 

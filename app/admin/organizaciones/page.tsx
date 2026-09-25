@@ -75,7 +75,15 @@ export default async function AdminOrganizationsPage() {
         .limit(1000),
       admin
         .from("organization_subscriptions")
-        .select("organization_id, status, current_period_end"),
+        .select("organization_id, status, current_period_end, updated_at")
+        // Puede haber mas de una fila por organizacion (no hay constraint
+        // UNIQUE sobre organization_id -- una recontratacion deja la vieja
+        // sin borrar). Se ordena ascendente para que, al armar el Map mas
+        // abajo, la ULTIMA entrada por organizacion (la que sobrescribe) sea
+        // la mas reciente -- si no, quedaba la que Postgres devolviera
+        // primero sin garantia de orden, pudiendo mostrar el estado/
+        // vencimiento de una suscripcion vieja en vez de la vigente.
+        .order("updated_at", { ascending: true }),
       admin.from("events").select("organization_id, status, city"),
       admin
         .from("organization_members")

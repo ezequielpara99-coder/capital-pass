@@ -103,6 +103,30 @@ type ReturnRow = {
   refunded_at: string | null;
 };
 
+// PostgREST/supabase-js devuelve como maximo 1000 filas por consulta salvo
+// que se pagine explicitamente con .range() -- ninguna de las consultas de
+// este informe lo hacia, asi que una organizacion con mas de 1000 ventas
+// (o entradas, o devoluciones) confirmadas en su historial completo
+// (el informe no filtra por fecha) terminaba con TODOS los totales de
+// plata calculados sobre un subconjunto arbitrario, sin ningun aviso.
+async function fetchAllRows<T>(
+  queryFactory: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
+): Promise<T[]> {
+  const pageSize = 1000;
+  const rows: T[] = [];
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await queryFactory(offset, offset + pageSize - 1);
+    if (error || !data) break;
+    rows.push(...data);
+    if (data.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return rows;
+}
+
 export default async function InformesPage() {
   const supabase = await createClient();
 
@@ -238,24 +262,25 @@ export default async function InformesPage() {
   // VENTAS
   // =====================================================
 
-  const { data: salesData } = await supabase
-    .from("sales")
-    .select(`
-      id,
-      event_id,
-      buyer_id,
-      seller_member_id,
-      total_minor,
-      channel,
-      status,
-      created_at,
-      commission_percentage_snapshot
-    `)
-    .in("event_id", eventIds)
-    .eq("status", "confirmed");
-
-  const sales =
-    (salesData ?? []) as SaleRow[];
+  const sales = await fetchAllRows<SaleRow>((from, to) =>
+    supabase
+      .from("sales")
+      .select(`
+        id,
+        event_id,
+        buyer_id,
+        seller_member_id,
+        total_minor,
+        channel,
+        status,
+        created_at,
+        commission_percentage_snapshot
+      `)
+      .in("event_id", eventIds)
+      .eq("status", "confirmed")
+      .order("created_at", { ascending: true })
+      .range(from, to)
+  );
 
   const saleIds =
     sales.map((sale) => sale.id);
@@ -267,49 +292,51 @@ export default async function InformesPage() {
   let saleItems: SaleItemRow[] = [];
 
   if (saleIds.length > 0) {
-    const { data } = await supabase
-      .from("sale_items")
-      .select(`
-        id,
-        sale_id,
-        event_id,
-        ticket_type_id,
-        quantity,
-        unit_price_minor,
-        subtotal_minor
-      `)
-      .in("sale_id", saleIds);
-
-    saleItems =
-      (data ?? []) as SaleItemRow[];
+    saleItems = await fetchAllRows<SaleItemRow>((from, to) =>
+      supabase
+        .from("sale_items")
+        .select(`
+          id,
+          sale_id,
+          event_id,
+          ticket_type_id,
+          quantity,
+          unit_price_minor,
+          subtotal_minor
+        `)
+        .in("sale_id", saleIds)
+        .order("id", { ascending: true })
+        .range(from, to)
+    );
   }
 
   // =====================================================
   // TICKETS
   // =====================================================
 
-  const { data: ticketsData } = await supabase
-    .from("tickets")
-    .select(`
-      id,
-      event_id,
-      sale_id,
-      ticket_type_id,
-      status,
-      issued_at,
-      used_at
-    `)
-    .in("event_id", eventIds);
-
-  const tickets =
-    (ticketsData ?? []) as TicketRow[];
+  const tickets = await fetchAllRows<TicketRow>((from, to) =>
+    supabase
+      .from("tickets")
+      .select(`
+        id,
+        event_id,
+        sale_id,
+        ticket_type_id,
+        status,
+        issued_at,
+        used_at
+      `)
+      .in("event_id", eventIds)
+      .order("id", { ascending: true })
+      .range(from, to)
+  );
 
   // =====================================================
   // TANDAS
   // =====================================================
 
-  const { data: ticketTypesData } =
-    await supabase
+  const ticketTypes = await fetchAllRows<TicketTypeRow>((from, to) =>
+    supabase
       .from("ticket_types")
       .select(`
         id,
@@ -319,42 +346,33 @@ export default async function InformesPage() {
         status,
         active
       `)
-      .in("event_id", eventIds);
-
-  const ticketTypes =
-    (ticketTypesData ??
-      []) as TicketTypeRow[];
+      .in("event_id", eventIds)
+      .order("created_at", { ascending: true })
+      .range(from, to)
+  );
 
   // =====================================================
   // DEVOLUCIONES / REINTEGROS
   // =====================================================
 
-  const {
-    data: returnsData,
-  } = await admin
-    .from("ticket_returns")
-    .select(`
-      id,
-      event_id,
-      sale_id,
-      ticket_id,
-      refund_status,
-      refund_amount_minor,
-      returned_at,
-      refunded_at
-    `)
-    .eq(
-      "organization_id",
-      membership.organization_id
-    )
-    .in(
-      "event_id",
-      eventIds
-    );
-
-  const returns =
-    (returnsData ??
-      []) as ReturnRow[];
+  const returns = await fetchAllRows<ReturnRow>((from, to) =>
+    admin
+      .from("ticket_returns")
+      .select(`
+        id,
+        event_id,
+        sale_id,
+        ticket_id,
+        refund_status,
+        refund_amount_minor,
+        returned_at,
+        refunded_at
+      `)
+      .eq("organization_id", membership.organization_id)
+      .in("event_id", eventIds)
+      .order("id", { ascending: true })
+      .range(from, to)
+  );
 
   // =====================================================
   // MIEMBROS DE LA ORGANIZACIÓN

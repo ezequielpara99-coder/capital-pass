@@ -98,6 +98,16 @@ export default async function AdminOrganizationDetailPage({
         .from("organization_subscriptions")
         .select("status, plan_name, amount_minor, currency, current_period_start, current_period_end, payer_email")
         .eq("organization_id", id)
+        // organization_subscriptions no tiene constraint UNIQUE por
+        // organization_id -- una recontratacion (nuevo signup tras cancelar,
+        // o un cambio de plan) deja una fila nueva sin borrar la vieja. Sin
+        // order by, .maybeSingle() directamente fallaba con "multiple rows
+        // returned" para esas organizaciones, mostrando "Sin suscripcion ni
+        // solicitud registrada" aunque estuvieran pagando activamente.
+        // cp_org_has_stock_access ya resuelve esto mismo con
+        // order by updated_at desc -- mismo criterio acá.
+        .order("updated_at", { ascending: false })
+        .limit(1)
         .maybeSingle(),
       admin
         .from("subscription_signups")

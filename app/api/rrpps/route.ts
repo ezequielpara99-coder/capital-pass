@@ -181,7 +181,8 @@ function getCommission(
 }
 
 function getCoordinate(
-  value: unknown
+  value: unknown,
+  bound: number
 ): number | null {
   if (
     value === undefined ||
@@ -193,7 +194,7 @@ function getCoordinate(
 
   const number = Number(value);
 
-  return Number.isFinite(number)
+  return Number.isFinite(number) && Math.abs(number) <= bound
     ? number
     : null;
 }
@@ -244,24 +245,40 @@ async function resolveLocation({
       localityId,
     });
 
+  // Si el cliente mandó provincia Y localidad oficiales (los 2 ids, no
+  // texto libre) pero GeoRef no pudo resolver esa combinación, es porque
+  // la localidad no pertenece a esa provincia (resolveGeoRefLocality
+  // busca la localidad DENTRO de las de esa provincia puntual) -- no hay
+  // que caer en silencio al texto crudo que mandó el cliente, que podía
+  // terminar guardando "Buenos Aires" con una ciudad real de Córdoba.
+  if (provinceId && localityId && !georef) {
+    throw new Error(
+      "La ciudad seleccionada no pertenece a la provincia elegida."
+    );
+  }
+
   const resolvedCity =
-    city ??
     georef?.city ??
+    city ??
     null;
 
   const resolvedProvince =
-    province ??
     georef?.province ??
+    province ??
     null;
 
+  // El centroide oficial de GeoRef tiene prioridad -- las coordenadas que
+  // manda el cliente son solo un respaldo para cuando GeoRef no pudo
+  // resolver nada (antes era al revés: el valor del cliente pisaba
+  // siempre al oficial, incluso cuando la resolución sí había funcionado).
   const lat =
-    fallbackLat ??
     georef?.lat ??
+    fallbackLat ??
     null;
 
   const lng =
-    fallbackLng ??
     georef?.lng ??
+    fallbackLng ??
     null;
 
   const label =
@@ -307,6 +324,35 @@ async function getOrganizerContext(
   const admin =
     createAdminClient();
 
+  // Se resuelve primero la organización DUEÑA del evento, y recién
+  // después la membresía del usuario sobre ESA organización puntual -- un
+  // organizador que administra más de una organización podía toparse con
+  // la membresía de la organización equivocada (Postgres no garantiza el
+  // orden de filas sin ORDER BY) y recibir "El evento no pertenece a tu
+  // organización" para un evento que en realidad sí le pertenece.
+  const {
+    data: event,
+  } = await admin
+    .from("events")
+    .select(`
+      id,
+      organization_id,
+      name
+    `)
+    .eq(
+      "id",
+      eventId
+    )
+    .maybeSingle();
+
+  if (!event) {
+    return {
+      error:
+        "El evento no pertenece a tu organización.",
+      status: 404,
+    } as const;
+  }
+
   const {
     data: membership,
   } = await admin
@@ -322,6 +368,10 @@ async function getOrganizerContext(
     .eq(
       "user_id",
       user.id
+    )
+    .eq(
+      "organization_id",
+      event.organization_id
     )
     .eq(
       "role",
@@ -378,33 +428,6 @@ async function getOrganizerContext(
       error:
         "La organización necesita una suscripción activa.",
       status: 402,
-    } as const;
-  }
-
-  const {
-    data: event,
-  } = await admin
-    .from("events")
-    .select(`
-      id,
-      organization_id,
-      name
-    `)
-    .eq(
-      "id",
-      eventId
-    )
-    .eq(
-      "organization_id",
-      membership.organization_id
-    )
-    .maybeSingle();
-
-  if (!event) {
-    return {
-      error:
-        "El evento no pertenece a tu organización.",
-      status: 404,
     } as const;
   }
 
@@ -489,12 +512,14 @@ export async function POST(
 
     const selectedLat =
       getCoordinate(
-        body.assignedLat
+        body.assignedLat,
+        90
       );
 
     const selectedLng =
       getCoordinate(
-        body.assignedLng
+        body.assignedLng,
+        180
       );
 
     const commissionPercentage =
@@ -638,29 +663,44 @@ export async function POST(
     // RESOLVER UBICACIÓN
     // ========================================================
 
-    const location =
-      await resolveLocation({
-        province:
-          assignedProvince,
+    let location;
+    try {
+      location =
+        await resolveLocation({
+          province:
+            assignedProvince,
 
-        provinceId:
-          assignedProvinceId,
+          provinceId:
+            assignedProvinceId,
 
-        city:
-          assignedCity,
+          city:
+            assignedCity,
 
-        localityId:
-          assignedLocalityId,
+          localityId:
+            assignedLocalityId,
 
-        zone:
-          assignedZone,
+          zone:
+            assignedZone,
 
-        fallbackLat:
-          selectedLat,
+          fallbackLat:
+            selectedLat,
 
-        fallbackLng:
-          selectedLng,
-      });
+          fallbackLng:
+            selectedLng,
+        });
+    } catch (locationError) {
+      return NextResponse.json(
+        {
+          error:
+            locationError instanceof Error
+              ? locationError.message
+              : "No se pudo resolver la ubicación.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
     // ========================================================
     // USUARIO AUTH
@@ -1390,19 +1430,23 @@ export async function PATCH(
     const selectedLat =
       latWasProvided
         ? getCoordinate(
-            body.assignedLat
+            body.assignedLat,
+            90
           )
         : getCoordinate(
-            staff.assigned_lat
+            staff.assigned_lat,
+            90
           );
 
     const selectedLng =
       lngWasProvided
         ? getCoordinate(
-            body.assignedLng
+            body.assignedLng,
+            180
           )
         : getCoordinate(
-            staff.assigned_lng
+            staff.assigned_lng,
+            180
           );
 
     // --------------------------------------------------------
@@ -1548,29 +1592,44 @@ export async function PATCH(
         updates.location_label =
           null;
       } else {
-        const location =
-          await resolveLocation({
-            province:
-              nextProvince,
+        let location;
+        try {
+          location =
+            await resolveLocation({
+              province:
+                nextProvince,
 
-            provinceId:
-              nextProvinceId,
+              provinceId:
+                nextProvinceId,
 
-            city:
-              nextCity,
+              city:
+                nextCity,
 
-            localityId:
-              nextLocalityId,
+              localityId:
+                nextLocalityId,
 
-            zone:
-              nextZone,
+              zone:
+                nextZone,
 
-            fallbackLat:
-              selectedLat,
+              fallbackLat:
+                selectedLat,
 
-            fallbackLng:
-              selectedLng,
-          });
+              fallbackLng:
+                selectedLng,
+            });
+        } catch (locationError) {
+          return NextResponse.json(
+            {
+              error:
+                locationError instanceof Error
+                  ? locationError.message
+                  : "No se pudo resolver la ubicación.",
+            },
+            {
+              status: 400,
+            }
+          );
+        }
 
         updates.assigned_lat =
           location.lat;

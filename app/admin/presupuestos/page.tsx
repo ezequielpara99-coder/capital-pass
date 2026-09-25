@@ -17,5 +17,15 @@ export default async function AdminPresupuestosPage() {
 
   if (error && !isMissingTable(error)) console.error("ADMIN PRESUPUESTOS:", error);
 
-  return <PresupuestosClient quotes={(data ?? []) as QuoteRow[]} missingSql={isMissingTable(error)} />;
+  // package_price_minor es bigint y discount_value es numeric: PostgREST
+  // los serializa como string, no como number (mismo patron ya corregido
+  // en catalogo/paquetes/el editor) -- se normaliza aca para que el tipo
+  // declarado de QuoteRow sea cierto en runtime tambien.
+  const normalizedQuotes = (data ?? []).map((quote) => ({
+    ...quote,
+    package_price_minor: Number(quote.package_price_minor),
+    discount_value: Number(quote.discount_value),
+  }));
+
+  return <PresupuestosClient quotes={normalizedQuotes as QuoteRow[]} missingSql={isMissingTable(error)} />;
 }
