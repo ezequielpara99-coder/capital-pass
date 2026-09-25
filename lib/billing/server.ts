@@ -4,7 +4,11 @@ import { createAdminClient } from "../supabase/admin";
 import { destinationFor, saleFromReference, signupFromReference, upgradeChargeFromReference, verifiedPayment, type BillingMembership, type ProviderPayment } from "./rules";
 import { getPayment, getPlatformCollectorId, paymentsForReference } from "./provider";
 import { sendSubscriptionReceipt } from "../email/subscription-receipt";
+import { sendTicketDelivery } from "../email/ticket-delivery";
 import { sendPushToPlatformAdmins } from "../push/server";
+import { createTicketPublicPath } from "../tickets/signature";
+import { ticketQrPngBuffer } from "../tickets/qr-image";
+import { getAppBaseUrl } from "../mercadopago/server";
 
 export type Signup = {
   id: string; user_id: string | null; organization_id: string | null; plan_id: string;
@@ -167,10 +171,71 @@ async function applyUpgradeCharge(payment: ProviderPayment, chargeId: string) {
 // VENTA DE ENTRADAS ONLINE (checkout del comprador final)
 // =========================================================
 
+// La pantalla de "gracias por tu compra" (app/e/[slug]/event-checkout.tsx)
+// le dice al comprador que la entrada le va a llegar por WhatsApp o email
+// -- pero nunca existio ningun envio real para la compra online (a
+// diferencia de puerta/RRPP, que la mandan por WhatsApp a mano). Esto
+// hace cierta esa promesa para el email: apenas la venta queda confirmada
+// (pago aprobado), se manda un mail con el/los QR adjuntos si el
+// comprador cargo email (es opcional en el checkout, asi que puede no
+// haber nada que mandar). Best-effort: nunca debe poder revertir ni
+// bloquear la confirmacion de una venta ya cobrada.
+async function sendOnlineSaleTicketEmail(saleId: string) {
+  try {
+    const admin = createAdminClient();
+    const { data: sale } = await admin.from("sales").select("id, event_id, buyer_id").eq("id", saleId).maybeSingle();
+    if (!sale) return;
+
+    const { data: buyer } = await admin.from("buyers").select("first_name, last_name, email").eq("id", sale.buyer_id).maybeSingle();
+    const email = buyer?.email?.trim();
+    if (!email) return;
+
+    const { data: event } = await admin.from("events").select("name").eq("id", sale.event_id).maybeSingle();
+
+    const { data: tickets } = await admin
+      .from("tickets")
+      .select("id, manual_code, ticket_type_id, status")
+      .eq("sale_id", sale.id)
+      .eq("status", "issued")
+      .order("display_number", { ascending: true });
+    if (!tickets || tickets.length === 0) return;
+
+    const typeIds = [...new Set(tickets.map((t) => t.ticket_type_id).filter(Boolean))];
+    let typeNames = new Map<string, string>();
+    if (typeIds.length > 0) {
+      const { data: types } = await admin.from("ticket_types").select("id, name").in("id", typeIds);
+      typeNames = new Map((types ?? []).map((t) => [t.id, t.name]));
+    }
+
+    const baseUrl = getAppBaseUrl();
+    const ticketsForEmail = await Promise.all(
+      tickets.map(async (ticket) => ({
+        ticketId: ticket.id,
+        ticketType: typeNames.get(ticket.ticket_type_id) ?? "Entrada",
+        manualCode: ticket.manual_code,
+        qrPngBase64: (await ticketQrPngBuffer(ticket.id)).toString("base64"),
+        publicUrl: `${baseUrl}${createTicketPublicPath(ticket.id)}`,
+      }))
+    );
+
+    const result = await sendTicketDelivery({
+      to: email,
+      buyerName: `${buyer?.first_name ?? ""} ${buyer?.last_name ?? ""}`.trim(),
+      eventName: event?.name ?? "tu evento",
+      tickets: ticketsForEmail,
+    });
+    if (!result.ok && !result.skipped) {
+      console.error("BILLING: no se pudo mandar la entrada por email.", result.error);
+    }
+  } catch (error) {
+    console.error("BILLING: fallo inesperado mandando la entrada por email.", error);
+  }
+}
+
 async function applySalePayment(payment: ProviderPayment, saleId: string) {
   const admin = createAdminClient();
   const { data: sale, error } = await admin.from("sales")
-    .select("id, organization_id, total_charged_minor, currency")
+    .select("id, organization_id, status, total_charged_minor, currency")
     .eq("id", saleId).eq("channel", "online").maybeSingle();
   if (error) throw new Error("No se pudo consultar la venta.");
   if (!sale || sale.total_charged_minor == null) return false;
@@ -181,8 +246,15 @@ async function applySalePayment(payment: ProviderPayment, saleId: string) {
     amount: Number(sale.total_charged_minor), currency: sale.currency, collectorId: account.mp_user_id,
     live: process.env.MERCADOPAGO_ENV !== "sandbox",
   });
+  const wasAlreadyConfirmed = sale.status === "confirmed";
   const result = await admin.rpc("confirm_online_sale", { p_sale_id: saleId, p_status: verified.status });
   if (result.error) throw new Error("No se pudo confirmar la venta.");
+  // Solo la transicion que efectivamente confirma la venta dispara el
+  // email -- ni los reintentos del mismo webhook (que ya estaba
+  // confirmed) ni un status que todavia no es definitivo.
+  if (verified.status === "approved" && !wasAlreadyConfirmed) {
+    await sendOnlineSaleTicketEmail(saleId);
+  }
   return true;
 }
 

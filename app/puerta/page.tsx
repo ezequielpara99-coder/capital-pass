@@ -151,6 +151,9 @@ export default function DoorSellerPage() {
   const [phone, setPhone] =
     useState("");
 
+  const [email, setEmail] =
+    useState("");
+
   const [paymentMethod, setPaymentMethod] =
     useState<"efectivo" | "transferencia" | "">("");
 
@@ -190,7 +193,7 @@ export default function DoorSellerPage() {
     if (selling) return;
     saleAttemptKeyRef.current = crypto.randomUUID();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticketTypeId, packId, quantity, paymentMethod, firstName, lastName, dni, phone]);
+  }, [ticketTypeId, packId, quantity, paymentMethod, firstName, lastName, dni, phone, email]);
 
   // =====================================================
   // CARGAR VENDEDOR + EVENTO
@@ -581,6 +584,9 @@ export default function DoorSellerPage() {
           p_buyer_phone:
             phone.trim() || null,
 
+          p_buyer_email:
+            email.trim() || null,
+
           p_payment_method:
             paymentMethod,
 
@@ -636,6 +642,14 @@ export default function DoorSellerPage() {
         ticketData as SaleResult,
         waWindow
       );
+
+      // Best-effort: si el comprador cargó email, le llega la entrada
+      // (QR adjunto) ahí también, además del WhatsApp. No bloquea ni
+      // muestra error si falla -- la venta ya está confirmada.
+      fetch(
+        `/api/ventas/${result.sale_id}/enviar-email`,
+        { method: "POST" }
+      ).catch(() => {});
     } catch (err) {
       console.error(
         "ERROR CREANDO VENTA PUERTA:",
@@ -666,6 +680,7 @@ export default function DoorSellerPage() {
     setLastName("");
     setDni("");
     setPhone("");
+    setEmail("");
     setPaymentMethod("");
     setQuantity(1);
     setError("");
@@ -1110,6 +1125,14 @@ export default function DoorSellerPage() {
                 placeholder="Ej: 3462..."
               />
 
+              <Field
+                label="Email (opcional)"
+                value={email}
+                onChange={setEmail}
+                placeholder="Para mandarle la entrada también por mail"
+                type="email"
+              />
+
               <div>
                 <p className="text-xs text-white/35">
                   Método de pago
@@ -1315,6 +1338,7 @@ function Field({
   onChange,
   placeholder,
   required = false,
+  type = "text",
 }: {
   label: string;
   value: string;
@@ -1323,6 +1347,7 @@ function Field({
   ) => void;
   placeholder?: string;
   required?: boolean;
+  type?: string;
 }) {
   return (
     <label className="block">
@@ -1331,6 +1356,7 @@ function Field({
       </span>
 
       <input
+        type={type}
         value={value}
         required={required}
         placeholder={placeholder}

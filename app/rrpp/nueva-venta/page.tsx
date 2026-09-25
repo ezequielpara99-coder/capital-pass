@@ -185,6 +185,9 @@ export default function NuevaVentaRRPPPage() {
   const [phone, setPhone] =
     useState("");
 
+  const [email, setEmail] =
+    useState("");
+
   const [paymentMethod, setPaymentMethod] =
     useState<"efectivo" | "transferencia" | "">("");
 
@@ -231,10 +234,20 @@ export default function NuevaVentaRRPPPage() {
   // algo del pedido -- sin esto, reintentar tras perder la respuesta
   // generaba una segunda venta y descontaba cupo dos veces por un cobro
   // que se hizo una sola vez.
+  // Mientras hay una venta EN VUELO (saving=true) no se regenera: el
+  // request que ya salio quedo con la key vieja en el body, asi que
+  // renovarla aca mientras se espera la respuesta (ej. el vendedor toca
+  // algo del formulario creyendo que no paso nada, con la wifi tipica de
+  // un evento) haria que un reintento posterior mandara una key que el
+  // servidor nunca vio, creando una venta nueva completa en vez de
+  // deduplicar -- exactamente el doble cobro que esta key existe para
+  // evitar. Mismo bug ya encontrado y arreglado en app/puerta/page.tsx.
   const saleAttemptKeyRef = useRef<string>(crypto.randomUUID());
   useEffect(() => {
+    if (saving) return;
     saleAttemptKeyRef.current = crypto.randomUUID();
-  }, [ticketTypeId, packId, quantity, paymentMethod, firstName, lastName, dni, phone]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticketTypeId, packId, quantity, paymentMethod, firstName, lastName, dni, phone, email]);
 
   // =====================================================
   // CARGAR EVENTO + TANDAS
@@ -518,6 +531,14 @@ export default function NuevaVentaRRPPPage() {
         result as EntriesResponse,
         waWindow
       );
+
+      // Best-effort: si el comprador cargó email, le llega la entrada
+      // (QR adjunto) ahí también, además del WhatsApp. No bloquea ni
+      // muestra error si falla -- la venta ya está confirmada.
+      fetch(
+        `/api/ventas/${saleId}/enviar-email`,
+        { method: "POST" }
+      ).catch(() => {});
     } catch (err) {
       console.error(
         "ERROR CARGANDO ENTRADAS:",
@@ -660,6 +681,9 @@ export default function NuevaVentaRRPPPage() {
 
           p_buyer_phone:
             phone.trim(),
+
+          p_buyer_email:
+            email.trim() || null,
 
           p_payment_method:
             paymentMethod,
@@ -858,6 +882,7 @@ export default function NuevaVentaRRPPPage() {
     setLastName("");
     setDni("");
     setPhone("");
+    setEmail("");
     setPaymentMethod("");
 
     setQuantity(1);
@@ -1260,6 +1285,22 @@ export default function NuevaVentaRRPPPage() {
                   <p className="mt-2 text-xs leading-5 text-white/25">
                     Usaremos este número para enviar la entrada.
                   </p>
+                </Field>
+
+                <Field label="Email (opcional)">
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) =>
+                      setEmail(
+                        e.target.value
+                      )
+                    }
+                    placeholder="Para mandarle la entrada también por mail"
+                    className={
+                      inputClass
+                    }
+                  />
                 </Field>
               </div>
 

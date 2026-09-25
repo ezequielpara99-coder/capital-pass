@@ -6,6 +6,7 @@ import {
   createTicketQRPayload,
   verifyTicketSignature,
 } from "../../../lib/tickets/signature";
+import { TICKET_QR_OPTIONS } from "../../../lib/tickets/qr-image";
 import { normalizeAccent } from "../../../lib/tickets/design";
 import TicketPoster from "../ticket-poster";
 
@@ -220,22 +221,15 @@ export default async function EntradaPage({
 
   const qrDataUrl = await QRCode.toDataURL(
     qrPayload,
-    {
-      width: 900,
-      // El estandar QR recomienda un margen silencioso minimo de 4
-      // modulos. Con margin:1 el padding que compensaba esto vivia solo
-      // en el <div> del poster (React), no en la imagen en si -- si
-      // alguien guarda la imagen del QR sola (long-press en el celular)
-      // o la entrada se recorta/comprime al reenviarla por WhatsApp, se
-      // pierde ese padding y queda un margen real insuficiente, mas
-      // riesgo de que la camara de la puerta no lo lea bien.
-      margin: 4,
-      errorCorrectionLevel: "M",
-      color: {
-        dark: "#050505",
-        light: "#ffffff",
-      },
-    }
+    // El estandar QR recomienda un margen silencioso minimo de 4 modulos.
+    // Con margin:1 el padding que compensaba esto vivia solo en el <div>
+    // del poster (React), no en la imagen en si -- si alguien guarda la
+    // imagen del QR sola (long-press en el celular) o la entrada se
+    // recorta/comprime al reenviarla por WhatsApp, se pierde ese padding
+    // y queda un margen real insuficiente, mas riesgo de que la camara de
+    // la puerta no lo lea bien. Mismas opciones que usa el QR adjunto al
+    // email de la entrada (lib/tickets/qr-image.ts).
+    TICKET_QR_OPTIONS
   );
 
   const isUsed =
