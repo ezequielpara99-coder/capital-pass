@@ -147,6 +147,39 @@ export default function FinanzasClient() {
     }
   }
 
+  function downloadCsv(filename: string, headers: string[], rows: (string | number)[][]) {
+    const escape = (value: string | number) => {
+      const text = String(value);
+      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const csv = [headers, ...rows].map((row) => row.map(escape).join(",")).join("\n");
+    const blob = new Blob([`﻿${csv}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  function exportExpensesCsv() {
+    downloadCsv(
+      `gastos${from ? `_${from}` : ""}${to ? `_${to}` : ""}.csv`,
+      ["Fecha", "Área", "Categoría", "Descripción", "Monto", "Método", "Recurrente", "Notas"],
+      expenses.map((e) => [e.expense_date, KIND_LABEL[e.kind], e.category, e.description, e.amount_minor, METHOD_LABEL[e.payment_method] ?? e.payment_method, e.is_recurring ? "Sí" : "No", e.notes ?? ""])
+    );
+  }
+
+  function exportClientsCsv() {
+    downloadCsv(
+      "rentabilidad_por_cliente.csv",
+      ["Cliente", "Presupuestos facturados", "Facturado", "Cobrado", "Pendiente"],
+      byClient.map((row) => [row.clientName, row.quotes, row.facturado, row.cobrado, row.pendiente])
+    );
+  }
+
   const cards: { label: string; value: number; hint: string; tone: string }[] = summary
     ? [
         { label: "Presupuestado", value: summary.presupuestado, hint: "Presupuestos activos (no rechazados)", tone: "text-white" },
@@ -234,7 +267,12 @@ export default function FinanzasClient() {
 
         {byClient.length > 0 && (
           <section className="mt-10">
-            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Rentabilidad por cliente</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Rentabilidad por cliente</p>
+              <button type="button" onClick={exportClientsCsv} className="h-8 border border-white/[0.14] px-3 text-[9px] font-black uppercase tracking-[0.12em] text-white/60 hover:border-white/40 hover:text-white">
+                ⬇ Exportar CSV
+              </button>
+            </div>
             <div className="mt-3 space-y-2">
               {byClient.map((row) => (
                 <div key={row.clientName} className="flex items-center gap-3 border border-white/[0.08] bg-white/[0.02] px-4 py-3">
@@ -314,7 +352,14 @@ export default function FinanzasClient() {
         </section>
 
         <section className="mt-8">
-          <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Gastos registrados</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Gastos registrados</p>
+            {expenses.length > 0 && (
+              <button type="button" onClick={exportExpensesCsv} className="h-8 border border-white/[0.14] px-3 text-[9px] font-black uppercase tracking-[0.12em] text-white/60 hover:border-white/40 hover:text-white">
+                ⬇ Exportar CSV
+              </button>
+            )}
+          </div>
 
           {expenses.length === 0 ? (
             <div className="mt-4 border border-dashed border-white/[0.10] p-8 text-center text-sm text-white/35">
