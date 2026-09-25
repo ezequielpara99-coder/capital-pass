@@ -35,50 +35,6 @@ export async function GET(
       );
     }
 
-    // =====================================================
-    // MEMBRESÍAS DE RRPP
-    // =====================================================
-
-    const {
-      data: memberships,
-      error: membershipError,
-    } = await supabase
-      .from("organization_members")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("role", "rrpp")
-      .eq("status", "active");
-
-    if (membershipError) {
-      console.error(
-        "ERROR MEMBERSHIP VENTAS RRPP:",
-        membershipError
-      );
-
-      return NextResponse.json(
-        {
-          error: "No se pudo verificar tu cuenta.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    const memberIds =
-      memberships?.map((item) => item.id) ?? [];
-
-    if (memberIds.length === 0) {
-      return NextResponse.json(
-        {
-          error: "No tenés permisos de RRPP.",
-        },
-        {
-          status: 403,
-        }
-      );
-    }
-
     const admin = createAdminClient();
 
     // =====================================================
@@ -95,6 +51,7 @@ export async function GET(
         event_id,
         buyer_id,
         seller_member_id,
+        organization_id,
         channel,
         total_minor,
         status
@@ -113,9 +70,48 @@ export async function GET(
       );
     }
 
+    // =====================================================
+    // PERMISOS: quien vendió esta venta puntual (RRPP u organizador),
+    // o cualquier organizador activo de esa organización.
+    // =====================================================
+
+    const {
+      data: memberships,
+      error: membershipError,
+    } = await supabase
+      .from("organization_members")
+      .select("id, role")
+      .eq("user_id", user.id)
+      .eq("organization_id", sale.organization_id)
+      .eq("status", "active");
+
+    if (membershipError) {
+      console.error(
+        "ERROR MEMBERSHIP VENTAS:",
+        membershipError
+      );
+
+      return NextResponse.json(
+        {
+          error: "No se pudo verificar tu cuenta.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    const isSeller = (memberships ?? []).some(
+      (m) => m.id === sale.seller_member_id
+    );
+
+    const isOrganizer = (memberships ?? []).some(
+      (m) => m.role === "organizer"
+    );
+
     if (
-      sale.channel !== "rrpp" ||
-      !memberIds.includes(sale.seller_member_id)
+      (sale.channel !== "rrpp" && sale.channel !== "organizer") ||
+      (!isSeller && !isOrganizer)
     ) {
       return NextResponse.json(
         {

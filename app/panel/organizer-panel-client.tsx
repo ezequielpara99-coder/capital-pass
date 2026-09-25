@@ -716,6 +716,14 @@ function Sidebar({
         section === "ventas",
     },
     {
+      label: "Vender",
+      href: withEvent(
+        "/panel/vender",
+        eventId
+      ),
+      active: false,
+    },
+    {
       label: "Venta en puerta",
       href: withEvent(
         "/panel/puerta",
