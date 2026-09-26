@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/resumen-notificaciones",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/recordatorio-cobros",
+      "schedule": "0 14 * * *"
     }
   ]
 }

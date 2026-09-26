@@ -68,6 +68,7 @@ const carnetSocioPremiumMigration = readFileSync(new URL("../supabase/migrations
 const listaNegraMigration = readFileSync(new URL("../supabase/migrations/20260974_lista_negra.sql", import.meta.url), "utf8");
 const billeteraSocioMigration = readFileSync(new URL("../supabase/migrations/20260975_billetera_socio.sql", import.meta.url), "utf8");
 const idempotenciaPagosGastosMigration = readFileSync(new URL("../supabase/migrations/20260976_idempotencia_pagos_gastos.sql", import.meta.url), "utf8");
+const recordatorioCobrosMigration = readFileSync(new URL("../supabase/migrations/20260977_recordatorio_cobros.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -184,6 +185,7 @@ async function database() {
   await db.exec(listaNegraMigration);
   await db.exec(billeteraSocioMigration);
   await db.exec(idempotenciaPagosGastosMigration);
+  await db.exec(recordatorioCobrosMigration);
   return db;
 }
 
@@ -1852,6 +1854,25 @@ test("idempotencia de pagos y gastos: la misma key no puede insertarse 2 veces",
     () => db.query(`insert into expenses(description, amount_minor, idempotency_key) values ('Gasto idem', 2000, '${expenseKey}')`),
     /duplicate key value violates unique constraint/
   );
+
+  await db.close();
+});
+
+test("payment_reminders_log: un mismo dia solo se puede reclamar una vez (evita el spam del recordatorio de cobros)", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  await db.exec(`insert into payment_reminders_log(sent_date) values ('2026-03-01')`);
+  assert.equal(await scalar(`select count(*)::int from payment_reminders_log where sent_date='2026-03-01'`), 1);
+
+  await assert.rejects(
+    () => db.query(`insert into payment_reminders_log(sent_date) values ('2026-03-01')`),
+    /duplicate key value violates unique constraint/,
+    "una segunda corrida del cron el mismo dia no puede reclamar el aviso de nuevo"
+  );
+
+  await db.exec(`insert into payment_reminders_log(sent_date) values ('2026-03-02')`);
+  assert.equal(await scalar(`select count(*)::int from payment_reminders_log`), 2, "un dia distinto si puede reclamarse");
 
   await db.close();
 });
