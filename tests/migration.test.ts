@@ -67,6 +67,7 @@ const membresiaPremiumMigration = readFileSync(new URL("../supabase/migrations/2
 const carnetSocioPremiumMigration = readFileSync(new URL("../supabase/migrations/20260973_carnet_socio_premium.sql", import.meta.url), "utf8");
 const listaNegraMigration = readFileSync(new URL("../supabase/migrations/20260974_lista_negra.sql", import.meta.url), "utf8");
 const billeteraSocioMigration = readFileSync(new URL("../supabase/migrations/20260975_billetera_socio.sql", import.meta.url), "utf8");
+const idempotenciaPagosGastosMigration = readFileSync(new URL("../supabase/migrations/20260976_idempotencia_pagos_gastos.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -182,6 +183,7 @@ async function database() {
   await db.exec(carnetSocioPremiumMigration);
   await db.exec(listaNegraMigration);
   await db.exec(billeteraSocioMigration);
+  await db.exec(idempotenciaPagosGastosMigration);
   return db;
 }
 
@@ -1821,6 +1823,34 @@ test("billetera del socio: wallet_move mantiene el saldo sincronizado con el led
     () => db.query(`select * from wallet_move('${member}', 5000, 'topup', null)`),
     /permiso/,
     "un usuario sin rol de organizador en la organizacion del socio no puede mover su saldo"
+  );
+
+  await db.close();
+});
+
+test("idempotencia de pagos y gastos: la misma key no puede insertarse 2 veces", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const quote = await db.query<{ id: string }>(`insert into quotes(client_name, status) values ('Cliente Idem', 'a_pagar') returning id`);
+  const quoteId = quote.rows[0].id;
+  const key = "eeeeeeee-1111-4111-8111-111111111111";
+
+  await db.exec(`insert into quote_payments(quote_id, amount_minor, idempotency_key) values ('${quoteId}', 10000, '${key}')`);
+  await assert.rejects(
+    () => db.query(`insert into quote_payments(quote_id, amount_minor, idempotency_key) values ('${quoteId}', 10000, '${key}')`),
+    /duplicate key value violates unique constraint/,
+    "un reintento con la misma key no duplica el pago"
+  );
+  // Sin key (null), no hay restriccion -- varios pagos legitimos sin key conviven bien.
+  await db.exec(`insert into quote_payments(quote_id, amount_minor) values ('${quoteId}', 5000), ('${quoteId}', 5000)`);
+  assert.equal(await scalar(`select count(*)::int from quote_payments where quote_id='${quoteId}'`), 3);
+
+  const expenseKey = "eeeeeeee-2222-4222-8222-222222222222";
+  await db.exec(`insert into expenses(description, amount_minor, idempotency_key) values ('Gasto idem', 2000, '${expenseKey}')`);
+  await assert.rejects(
+    () => db.query(`insert into expenses(description, amount_minor, idempotency_key) values ('Gasto idem', 2000, '${expenseKey}')`),
+    /duplicate key value violates unique constraint/
   );
 
   await db.close();

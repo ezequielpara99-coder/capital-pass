@@ -39,7 +39,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No se pudo guardar el item." }, { status: 500 });
     }
 
-    await admin.from("quote_catalog_price_history").insert({ catalog_id: data.id, unit_price_minor: data.unit_price_minor, changed_by: verification.userId });
+    const historyInsert = await admin.from("quote_catalog_price_history").insert({ catalog_id: data.id, unit_price_minor: data.unit_price_minor, changed_by: verification.userId });
+    if (historyInsert.error) console.error("CATALOGO POST historial:", historyInsert.error);
 
     return NextResponse.json({ ok: true, item: data });
   } catch {
@@ -74,7 +75,8 @@ export async function PATCH(request: NextRequest) {
     if (updates.unit_price_minor !== undefined) {
       const { data: current } = await admin.from("quote_catalog").select("unit_price_minor").eq("id", id).maybeSingle();
       if (current && Number(current.unit_price_minor) !== updates.unit_price_minor) {
-        await admin.from("quote_catalog_price_history").insert({ catalog_id: id, unit_price_minor: updates.unit_price_minor, changed_by: verification.userId });
+        const historyInsert = await admin.from("quote_catalog_price_history").insert({ catalog_id: id, unit_price_minor: updates.unit_price_minor, changed_by: verification.userId });
+        if (historyInsert.error) console.error("CATALOGO PATCH historial:", historyInsert.error);
       }
     }
 

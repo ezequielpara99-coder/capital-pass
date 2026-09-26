@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { formatMoney } from "../../../lib/quotes/totals";
 
 type Summary = {
@@ -71,6 +71,13 @@ export default function FinanzasClient() {
   const [draft, setDraft] = useState(emptyDraft());
   const [saving, setSaving] = useState(false);
 
+  const expenseKeyRef = useRef<string>(crypto.randomUUID());
+  useEffect(() => {
+    if (saving) return;
+    expenseKeyRef.current = crypto.randomUUID();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
+
   const rangeQuery = useMemo(() => {
     const params = new URLSearchParams();
     if (from) params.set("from", from);
@@ -120,7 +127,7 @@ export default function FinanzasClient() {
       const response = await fetch("/api/admin/finanzas/gastos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
+        body: JSON.stringify({ ...draft, idempotencyKey: expenseKeyRef.current }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo guardar el gasto.");

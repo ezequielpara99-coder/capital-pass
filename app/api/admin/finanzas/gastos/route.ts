@@ -75,6 +75,8 @@ export async function POST(request: NextRequest) {
     const amountMinor = normalizeAmount(body.amountMinor);
     if (amountMinor <= 0) return NextResponse.json({ error: "Ingresá un monto válido." }, { status: 400 });
 
+    const idempotencyKey = typeof body.idempotencyKey === "string" && UUID.test(body.idempotencyKey) ? body.idempotencyKey : null;
+
     const admin = createAdminClient();
     const { data, error } = await admin
       .from("expenses")
@@ -88,9 +90,19 @@ export async function POST(request: NextRequest) {
         is_recurring: Boolean(body.isRecurring),
         notes: String(body.notes ?? "").trim().slice(0, 2000) || null,
         created_by: verification.userId,
+        idempotency_key: idempotencyKey,
       })
       .select("id, kind, category, description, amount_minor, expense_date, payment_method, is_recurring, notes, created_at")
       .single();
+
+    if (error?.code === "23505" && idempotencyKey) {
+      const { data: existing } = await admin
+        .from("expenses")
+        .select("id, kind, category, description, amount_minor, expense_date, payment_method, is_recurring, notes, created_at")
+        .eq("idempotency_key", idempotencyKey)
+        .maybeSingle();
+      if (existing) return NextResponse.json({ ok: true, expense: { ...existing, amount_minor: Number(existing.amount_minor) } });
+    }
 
     if (error) {
       if (isMissingTable(error)) return NextResponse.json({ error: "Falta aplicar la actualización de la base de datos (finanzas)." }, { status: 503 });

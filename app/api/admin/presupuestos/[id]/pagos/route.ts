@@ -77,6 +77,8 @@ export async function POST(request: NextRequest, context: Context) {
     const amountMinor = normalizeAmount(body.amountMinor);
     if (amountMinor <= 0) return NextResponse.json({ error: "Ingresá un monto válido." }, { status: 400 });
 
+    const idempotencyKey = typeof body.idempotencyKey === "string" && UUID.test(body.idempotencyKey) ? body.idempotencyKey : null;
+
     const { data, error } = await admin
       .from("quote_payments")
       .insert({
@@ -86,9 +88,15 @@ export async function POST(request: NextRequest, context: Context) {
         method: normalizeMethod(body.method),
         notes: String(body.notes ?? "").trim().slice(0, 2000) || null,
         created_by: verification.userId,
+        idempotency_key: idempotencyKey,
       })
       .select("id, amount_minor, paid_at, method, notes, created_at")
       .single();
+
+    if (error?.code === "23505" && idempotencyKey) {
+      const { data: existing } = await admin.from("quote_payments").select("id, amount_minor, paid_at, method, notes, created_at").eq("idempotency_key", idempotencyKey).maybeSingle();
+      if (existing) return NextResponse.json({ ok: true, payment: { ...existing, amount_minor: Number(existing.amount_minor) } });
+    }
 
     if (error) {
       console.error("PAGOS POST:", error);

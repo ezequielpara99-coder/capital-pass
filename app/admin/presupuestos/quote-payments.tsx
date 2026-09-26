@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { formatMoney } from "../../../lib/quotes/totals";
 
 type Payment = { id: string; amount_minor: number; paid_at: string; method: string; notes: string | null };
@@ -33,6 +33,15 @@ export default function QuotePayments({ quoteId, total }: { quoteId: string; tot
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Evita duplicar el pago si un reintento de red manda el mismo POST de
+  // vuelta -- mismo patron de idempotencia ya usado en el resto del sitio.
+  const idempotencyKeyRef = useRef<string>(crypto.randomUUID());
+  useEffect(() => {
+    if (saving) return;
+    idempotencyKeyRef.current = crypto.randomUUID();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
+
   async function load() {
     try {
       const response = await fetch(`/api/admin/presupuestos/${quoteId}/pagos`);
@@ -59,7 +68,7 @@ export default function QuotePayments({ quoteId, total }: { quoteId: string; tot
       const response = await fetch(`/api/admin/presupuestos/${quoteId}/pagos`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
+        body: JSON.stringify({ ...draft, idempotencyKey: idempotencyKeyRef.current }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo registrar el pago.");
