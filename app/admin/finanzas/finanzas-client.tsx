@@ -71,6 +71,63 @@ export default function FinanzasClient() {
   const [draft, setDraft] = useState(emptyDraft());
   const [saving, setSaving] = useState(false);
 
+  const [goalMinor, setGoalMinor] = useState<number | null>(null);
+  const [monthCobrado, setMonthCobrado] = useState(0);
+  const [goalDraft, setGoalDraft] = useState("");
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [savingGoal, setSavingGoal] = useState(false);
+
+  async function loadGoal() {
+    try {
+      const now = new Date();
+      const period = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
+      const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+
+      const [goalRes, summaryRes] = await Promise.all([
+        fetch(`/api/admin/finanzas/metas?period=${period}`),
+        fetch(`/api/admin/finanzas?from=${period}&to=${monthEnd}`),
+      ]);
+      const goalResult = await goalRes.json();
+      const summaryResult = await summaryRes.json();
+      if (goalRes.ok) setGoalMinor(goalResult.goal?.goalMinor ?? null);
+      if (summaryRes.ok) setMonthCobrado(summaryResult.summary?.cobrado ?? 0);
+    } catch {
+      // silencioso -- la meta es informativa, no bloquea el resto del dashboard
+    }
+  }
+
+  async function saveGoal() {
+    if (savingGoal) return;
+    const amount = Math.round(Number(goalDraft));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("Ingresá un monto válido para la meta.");
+      return;
+    }
+    setSavingGoal(true);
+    setError("");
+    try {
+      const response = await fetch("/api/admin/finanzas/metas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goalMinor: amount }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo guardar la meta.");
+      setGoalMinor(result.goal.goalMinor);
+      setEditingGoal(false);
+      setGoalDraft("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar la meta.");
+    } finally {
+      setSavingGoal(false);
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadGoal();
+  }, []);
+
   const expenseKeyRef = useRef<string>(crypto.randomUUID());
   useEffect(() => {
     if (saving) return;
@@ -233,6 +290,45 @@ export default function FinanzasClient() {
           </div>
         )}
         {error && <div className="mt-6 border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>}
+
+        <section className="mt-6 border border-white/[0.08] bg-white/[0.02] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Meta del mes</p>
+            {!editingGoal && (
+              <button type="button" onClick={() => { setEditingGoal(true); setGoalDraft(goalMinor ? String(goalMinor) : ""); }} className="h-8 border border-white/15 px-3 text-[9px] font-black uppercase tracking-wide text-white/60 hover:border-white/40 hover:text-white">
+                {goalMinor ? "Editar" : "+ Definir meta"}
+              </button>
+            )}
+          </div>
+
+          {editingGoal ? (
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="block">
+                <span className={LABEL}>Meta de cobrado ($)</span>
+                <input value={goalDraft} onChange={(e) => setGoalDraft(e.target.value)} inputMode="numeric" className="mt-2 h-11 w-40 border border-white/[0.12] bg-black/30 px-3 text-sm text-white outline-none focus:border-[#ff5a2a]/50" placeholder="1000000" />
+              </label>
+              <button type="button" disabled={savingGoal} onClick={saveGoal} className="h-11 border border-emerald-400/30 bg-emerald-400/10 px-4 text-[10px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-400/20 disabled:opacity-40">
+                {savingGoal ? "Guardando…" : "Guardar"}
+              </button>
+              <button type="button" onClick={() => setEditingGoal(false)} className="h-11 border border-white/[0.14] px-4 text-[10px] font-black uppercase tracking-wide text-white/60 hover:text-white">
+                Cancelar
+              </button>
+            </div>
+          ) : goalMinor ? (
+            <div className="mt-3">
+              <div className="flex items-baseline justify-between text-sm">
+                <span className="font-black text-emerald-300">{formatMoney(monthCobrado)}</span>
+                <span className="text-white/35">de {formatMoney(goalMinor)}</span>
+              </div>
+              <div className="mt-2 h-2 w-full bg-white/[0.06]">
+                <div className="h-2 bg-emerald-400" style={{ width: `${Math.min(100, (monthCobrado / goalMinor) * 100)}%` }} />
+              </div>
+              <p className="mt-2 text-[11px] text-white/30">{Math.round((monthCobrado / goalMinor) * 100)}% de la meta de este mes</p>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-white/35">Todavía no definiste una meta de cobrado para este mes.</p>
+          )}
+        </section>
 
         <div className="mt-6 flex flex-wrap items-end gap-4">
           <label className="block">

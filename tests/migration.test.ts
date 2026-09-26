@@ -69,6 +69,7 @@ const listaNegraMigration = readFileSync(new URL("../supabase/migrations/2026097
 const billeteraSocioMigration = readFileSync(new URL("../supabase/migrations/20260975_billetera_socio.sql", import.meta.url), "utf8");
 const idempotenciaPagosGastosMigration = readFileSync(new URL("../supabase/migrations/20260976_idempotencia_pagos_gastos.sql", import.meta.url), "utf8");
 const recordatorioCobrosMigration = readFileSync(new URL("../supabase/migrations/20260977_recordatorio_cobros.sql", import.meta.url), "utf8");
+const metasMigration = readFileSync(new URL("../supabase/migrations/20260978_metas_y_buscador.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -186,6 +187,7 @@ async function database() {
   await db.exec(billeteraSocioMigration);
   await db.exec(idempotenciaPagosGastosMigration);
   await db.exec(recordatorioCobrosMigration);
+  await db.exec(metasMigration);
   return db;
 }
 
@@ -1873,6 +1875,31 @@ test("payment_reminders_log: un mismo dia solo se puede reclamar una vez (evita 
 
   await db.exec(`insert into payment_reminders_log(sent_date) values ('2026-03-02')`);
   assert.equal(await scalar(`select count(*)::int from payment_reminders_log`), 2, "un dia distinto si puede reclamarse");
+
+  await db.close();
+});
+
+test("metas: un mes solo puede tener una meta (upsert por period)", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  await db.exec(`insert into finance_goals(period, goal_minor) values ('2026-04-01', 1000000)`);
+  assert.equal(await scalar(`select goal_minor::text from finance_goals where period='2026-04-01'`), "1000000");
+
+  await assert.rejects(
+    () => db.query(`insert into finance_goals(period, goal_minor) values ('2026-04-01', 500000)`),
+    /duplicate key value violates unique constraint/,
+    "un segundo insert para el mismo mes choca con el unique -- el API hace upsert (onConflict: period) en vez de insert plano"
+  );
+
+  await db.exec(`update finance_goals set goal_minor = 1500000 where period='2026-04-01'`);
+  assert.equal(await scalar(`select goal_minor::text from finance_goals where period='2026-04-01'`), "1500000");
+
+  await assert.rejects(
+    () => db.query(`insert into finance_goals(period, goal_minor) values ('2026-05-01', 0)`),
+    /violates check constraint/,
+    "la meta tiene que ser positiva"
+  );
 
   await db.close();
 });
