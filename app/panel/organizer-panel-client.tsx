@@ -746,6 +746,11 @@ function Sidebar({
       active: false,
     },
     {
+      label: "Lista negra",
+      href: "/panel/lista-negra",
+      active: false,
+    },
+    {
       label: "Notificaciones",
       href: withEvent(
         "/panel/notificaciones",

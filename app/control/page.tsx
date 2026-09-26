@@ -63,6 +63,11 @@ type ValidationResult = {
   // true cuando esto se resolvio contra el cache local (sin conexion),
   // no contra el servidor -- todavia no esta confirmado.
   offline?: boolean;
+  // Chequeo aparte (lista negra): no cambia el resultado de la entrada en
+  // si (valid/already_used/etc), solo suma una advertencia visual encima.
+  // No disponible sin conexion -- se omite en el camino offline.
+  blacklisted?: boolean;
+  blacklist_reason?: string | null;
 };
 
 // Resultado de escanear el carnet de un socio premium -- no es una entrada
@@ -577,6 +582,24 @@ export default function ControlPage() {
     await refreshOfflineStatus();
   }
 
+  // Lista negra: chequeo aparte, best-effort -- si falla o no hay DNI, se
+  // muestra igual el resultado de la entrada sin la advertencia. Solo
+  // online (no forma parte del cache/sync offline).
+  async function withBlacklistCheck(result: ValidationResult): Promise<ValidationResult> {
+    if (!event || !result.buyer_dni || !isOnline) return result;
+    try {
+      const { data } = await supabase.rpc("check_blacklist", {
+        p_event_id: event.id,
+        p_dni: result.buyer_dni,
+      });
+      const row = (data ?? [])[0] as { is_blacklisted?: boolean; reason?: string | null } | undefined;
+      if (row?.is_blacklisted) return { ...result, blacklisted: true, blacklist_reason: row.reason ?? null };
+    } catch {
+      // silencioso -- no bloquea mostrar el resultado del ticket
+    }
+    return result;
+  }
+
   // Carnet de socio premium (prefijo CPM1, distinto del CP1 de una entrada):
   // se resuelve aparte, sin tocar para nada la maquina de estados de
   // entradas de abajo.
@@ -959,7 +982,7 @@ export default function ControlPage() {
         );
       }
 
-      setValidation(result);
+      setValidation(await withBlacklistCheck(result));
     } catch (err) {
       console.error(
         "ERROR VALIDANDO ENTRADA:",
@@ -1152,6 +1175,13 @@ export default function ControlPage() {
         </div>
 
         <section className="relative z-10 w-full max-w-[480px] text-center">
+          {validation.blacklisted && (
+            <div className="mb-6 animate-pulse rounded-2xl border-2 border-red-500 bg-red-600/25 px-5 py-4">
+              <p className="text-sm font-black uppercase tracking-[0.2em] text-red-200">⚠ Persona restringida</p>
+              {validation.blacklist_reason && <p className="mt-1 text-xs text-red-200/80">{validation.blacklist_reason}</p>}
+            </div>
+          )}
+
           <div
             className={`mx-auto flex h-24 w-24 items-center justify-center rounded-full border text-5xl ${
               isValid

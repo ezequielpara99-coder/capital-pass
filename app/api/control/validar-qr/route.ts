@@ -186,6 +186,26 @@ export async function POST(request: NextRequest) {
     }
 
     // =====================================================
+    // 8.5 LISTA NEGRA (best-effort, no bloquea mostrar el resultado)
+    // =====================================================
+
+    if (validation.buyer_dni) {
+      try {
+        const { data: blacklistData } = await supabase.rpc("check_blacklist", {
+          p_event_id: eventId,
+          p_dni: validation.buyer_dni,
+        });
+        const blacklistRow = blacklistData?.[0];
+        if (blacklistRow?.is_blacklisted) {
+          validation.blacklisted = true;
+          validation.blacklist_reason = blacklistRow.reason ?? null;
+        }
+      } catch (blacklistError) {
+        console.error("ERROR LISTA NEGRA QR:", blacklistError);
+      }
+    }
+
+    // =====================================================
     // 9. RESPUESTA
     // =====================================================
 

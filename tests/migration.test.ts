@@ -65,6 +65,7 @@ const fixEmailEntradaOnlineMigration = readFileSync(new URL("../supabase/migrati
 const sistemaTrasladosMigration = readFileSync(new URL("../supabase/migrations/20260971_sistema_traslados.sql", import.meta.url), "utf8");
 const membresiaPremiumMigration = readFileSync(new URL("../supabase/migrations/20260972_membresia_premium.sql", import.meta.url), "utf8");
 const carnetSocioPremiumMigration = readFileSync(new URL("../supabase/migrations/20260973_carnet_socio_premium.sql", import.meta.url), "utf8");
+const listaNegraMigration = readFileSync(new URL("../supabase/migrations/20260974_lista_negra.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -178,6 +179,7 @@ async function database() {
   await db.exec(sistemaTrasladosMigration);
   await db.exec(membresiaPremiumMigration);
   await db.exec(carnetSocioPremiumMigration);
+  await db.exec(listaNegraMigration);
   return db;
 }
 
@@ -1720,6 +1722,54 @@ test("membresia premium: codigo de socio unico por organizacion, no entre organi
   // El mismo codigo SI es valido en otra organizacion distinta.
   await db.exec(`insert into premium_members(organization_id, first_name, last_name, member_code) values ('${orgB}','Maria','Lopez','ABC123')`);
   assert.equal(await scalar(`select count(*)::int from premium_members where member_code='ABC123'`), 2);
+
+  await db.close();
+});
+
+test("lista negra: check_blacklist normaliza el DNI, respeta permisos y el flag active", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const org = "cccccccc-1111-4111-8111-111111111111";
+  const event = "cccccccc-2222-4222-8222-222222222222";
+  const controllerUser = "cccccccc-3333-4333-8333-333333333333";
+  const outsiderUser = "cccccccc-4444-4444-8444-444444444444";
+
+  await db.exec(`insert into auth.users values ('${controllerUser}','controller-bn@example.test',now(),'{}'), ('${outsiderUser}','outsider-bn@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club Lista Negra','club-lista-negra');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${controllerUser}','controller','active');`);
+
+  const controllerMemberId = await scalar(`select id::text from organization_members where user_id='${controllerUser}'`);
+  await db.exec(`insert into event_staff(event_id,organization_member_id,staff_role,active) values ('${event}','${controllerMemberId}','controller',true);
+    insert into blacklist_entries(organization_id, dni, full_name, reason, active) values ('${org}', '40.123.456', 'Juan Restringido', 'Pelea en la puerta', true);
+    insert into blacklist_entries(organization_id, dni, full_name, active) values ('${org}', '40999999', 'Inactivo', false);`);
+
+  await db.exec(`select set_config('request.jwt.claim.sub','${controllerUser}',false)`);
+
+  // El DNI con puntos/espacios matchea igual que el guardado con puntos.
+  const matchDots = await db.query<{ is_blacklisted: boolean; reason: string }>(`select * from check_blacklist('${event}','40123456')`);
+  assert.equal(matchDots.rows[0].is_blacklisted, true);
+  assert.equal(matchDots.rows[0].reason, "Pelea en la puerta");
+
+  const matchSpaces = await db.query<{ is_blacklisted: boolean }>(`select * from check_blacklist('${event}','40 123 456')`);
+  assert.equal(matchSpaces.rows[0].is_blacklisted, true, "compara solo digitos, sin importar el formato");
+
+  // Una entrada inactiva no bloquea.
+  const inactive = await db.query<{ is_blacklisted: boolean }>(`select * from check_blacklist('${event}','40999999')`);
+  assert.equal(inactive.rows[0].is_blacklisted, false, "una entrada desactivada no cuenta");
+
+  // DNI que no esta en la lista.
+  const clean = await db.query<{ is_blacklisted: boolean }>(`select * from check_blacklist('${event}','11222333')`);
+  assert.equal(clean.rows[0].is_blacklisted, false);
+
+  // Un usuario sin ningun rol en el evento no puede ni consultar la lista.
+  await db.exec(`select set_config('request.jwt.claim.sub','${outsiderUser}',false)`);
+  await assert.rejects(
+    () => db.query(`select * from check_blacklist('${event}','40123456')`),
+    /permiso/,
+    "alguien sin rol de control en el evento no puede consultar la lista negra"
+  );
 
   await db.close();
 });
