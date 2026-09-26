@@ -64,6 +64,7 @@ const cierreMensualMigration = readFileSync(new URL("../supabase/migrations/2026
 const fixEmailEntradaOnlineMigration = readFileSync(new URL("../supabase/migrations/20260970_fix_email_entrada_online_y_recibos_duplicados.sql", import.meta.url), "utf8");
 const sistemaTrasladosMigration = readFileSync(new URL("../supabase/migrations/20260971_sistema_traslados.sql", import.meta.url), "utf8");
 const membresiaPremiumMigration = readFileSync(new URL("../supabase/migrations/20260972_membresia_premium.sql", import.meta.url), "utf8");
+const carnetSocioPremiumMigration = readFileSync(new URL("../supabase/migrations/20260973_carnet_socio_premium.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -176,6 +177,7 @@ async function database() {
   await db.exec(fixEmailEntradaOnlineMigration);
   await db.exec(sistemaTrasladosMigration);
   await db.exec(membresiaPremiumMigration);
+  await db.exec(carnetSocioPremiumMigration);
   return db;
 }
 

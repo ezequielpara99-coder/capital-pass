@@ -15,6 +15,7 @@ type Member = {
   starts_at: string;
   expires_at: string | null;
   notes: string | null;
+  cardUrl: string;
 };
 
 const INPUT =
@@ -228,6 +229,9 @@ export default function MembresiaClient() {
                         </p>
                       </div>
                       <div className="flex gap-2">
+                        <a href={member.cardUrl} target="_blank" rel="noopener noreferrer" className="h-8 border border-violet-400/25 px-3 text-[9px] font-black uppercase tracking-wide text-violet-300 hover:bg-violet-400/10">
+                          Ver carnet
+                        </a>
                         {member.status !== "active" && (
                           <button type="button" onClick={() => setStatus(member, "active")} className="h-8 border border-emerald-400/25 px-3 text-[9px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-400/10">
                             Reactivar

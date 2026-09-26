@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { createMemberPublicPath } from "../../../../lib/members/signature";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FIELDS = "id, first_name, last_name, dni, phone, email, member_code, status, starts_at, expires_at, notes, created_at";
@@ -64,7 +65,8 @@ export async function GET() {
       return NextResponse.json({ error: "No se pudieron cargar los socios." }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, members: data ?? [] });
+    const members = (data ?? []).map((m) => ({ ...m, cardUrl: createMemberPublicPath(m.id) }));
+    return NextResponse.json({ ok: true, members });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }
@@ -122,7 +124,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No se pudo agregar el socio." }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, member: data });
+    return NextResponse.json({ ok: true, member: { ...data, cardUrl: createMemberPublicPath((data as { id: string }).id) } });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }
@@ -162,7 +164,7 @@ export async function PATCH(request: NextRequest) {
     }
     if (!data) return NextResponse.json({ error: "No se encontró el socio." }, { status: 404 });
 
-    return NextResponse.json({ ok: true, member: data });
+    return NextResponse.json({ ok: true, member: { ...data, cardUrl: createMemberPublicPath((data as { id: string }).id) } });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }

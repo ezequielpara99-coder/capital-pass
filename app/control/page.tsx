@@ -65,6 +65,19 @@ type ValidationResult = {
   offline?: boolean;
 };
 
+// Resultado de escanear el carnet de un socio premium -- no es una entrada
+// (no se "usa" ni bloquea nada), es solo una identificacion para que el
+// controlador lo reconozca. Estado separado de ValidationResult a proposito:
+// no toca en nada la maquina de estados de entradas (online/offline, cache,
+// sync) que ya es compleja de por si.
+type MemberScanResult = {
+  status: "active" | "expired" | "cancelled" | "not_found" | "other_org";
+  firstName?: string;
+  lastName?: string;
+  memberCode?: string;
+  expiresAt?: string | null;
+};
+
 function formatRelativeTime(iso: string | null) {
   if (!iso) return "nunca";
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -138,6 +151,9 @@ export default function ControlPage() {
     useState<ValidationResult | null>(
       null
     );
+
+  const [memberResult, setMemberResult] =
+    useState<MemberScanResult | null>(null);
 
   const syncingRef = useRef(false);
 
@@ -561,6 +577,40 @@ export default function ControlPage() {
     await refreshOfflineStatus();
   }
 
+  // Carnet de socio premium (prefijo CPM1, distinto del CP1 de una entrada):
+  // se resuelve aparte, sin tocar para nada la maquina de estados de
+  // entradas de abajo.
+  async function validateMemberQR(qrPayload: string) {
+    if (!event) return;
+    processingQRRef.current = true;
+    setValidating(true);
+    setError("");
+    try {
+      await stopScanner();
+      setScannerOpen(false);
+
+      if (!isOnline) {
+        setError("Necesitás conexión para reconocer un carnet de socio.");
+        return;
+      }
+
+      const response = await fetch("/api/control/validar-socio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId: event.id, qrPayload }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error ?? "No se pudo reconocer el carnet.");
+      setMemberResult(data as MemberScanResult);
+    } catch (err) {
+      console.error("ERROR VALIDANDO SOCIO:", err);
+      setError(err instanceof Error ? err.message : "No se pudo reconocer el carnet.");
+    } finally {
+      setValidating(false);
+      processingQRRef.current = false;
+    }
+  }
+
   async function validateQR(
     qrPayload: string
   ) {
@@ -568,6 +618,11 @@ export default function ControlPage() {
       !event ||
       processingQRRef.current
     ) {
+      return;
+    }
+
+    if (qrPayload.trim().startsWith("CPM1:")) {
+      await validateMemberQR(qrPayload);
       return;
     }
 
@@ -655,6 +710,7 @@ export default function ControlPage() {
 
     setError("");
     setValidation(null);
+    setMemberResult(null);
     setScannerOpen(true);
     setCameraLoading(true);
 
@@ -760,6 +816,7 @@ export default function ControlPage() {
 
     setError("");
     setValidation(null);
+    setMemberResult(null);
     setImageLoading(true);
 
     try {
@@ -849,6 +906,7 @@ export default function ControlPage() {
     setValidating(true);
     setError("");
     setValidation(null);
+    setMemberResult(null);
 
     try {
       if (!isOnline) {
@@ -931,6 +989,7 @@ export default function ControlPage() {
 
     setCode("");
     setValidation(null);
+    setMemberResult(null);
     setError("");
     setScannerOpen(false);
 
@@ -989,6 +1048,58 @@ export default function ControlPage() {
           Preparando control de
           ingreso...
         </p>
+      </main>
+    );
+  }
+
+  // =====================================================
+  // RESULTADO -- SOCIO PREMIUM
+  // =====================================================
+
+  if (memberResult) {
+    const isActive = memberResult.status === "active";
+    const label =
+      memberResult.status === "active" ? "Socio premium" :
+      memberResult.status === "expired" ? "Membresía vencida" :
+      memberResult.status === "cancelled" ? "Membresía cancelada" :
+      memberResult.status === "other_org" ? "Socio de otra organización" :
+      "No es un socio premium";
+
+    return (
+      <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#050308] px-5 py-8 text-white">
+        <div className="pointer-events-none absolute inset-0">
+          <div className={`absolute left-1/2 top-1/2 h-[650px] w-[650px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-[170px] ${isActive ? "bg-violet-600/25" : "bg-amber-600/20"}`} />
+        </div>
+
+        <section className="relative z-10 w-full max-w-[480px] text-center">
+          <div className={`mx-auto flex h-20 w-20 items-center justify-center rounded-full border text-3xl ${isActive ? "border-violet-400/40 bg-violet-500/15" : "border-amber-400/30 bg-amber-500/10"}`}>
+            💳
+          </div>
+
+          <p className={`mt-6 text-sm font-bold uppercase tracking-[0.2em] ${isActive ? "text-violet-300" : "text-amber-300"}`}>{label}</p>
+
+          {memberResult.firstName && (
+            <h1 className="mt-3 text-3xl font-bold">{memberResult.firstName} {memberResult.lastName}</h1>
+          )}
+
+          {memberResult.memberCode && (
+            <p className="mt-4 font-mono text-lg tracking-[0.15em] text-white/60">{memberResult.memberCode}</p>
+          )}
+
+          {memberResult.expiresAt && (
+            <p className="mt-2 text-sm text-white/35">Vence: {new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${memberResult.expiresAt}T00:00:00Z`))}</p>
+          )}
+
+          <p className="mt-4 text-xs text-white/30">Esto es solo una identificación -- no reemplaza el control de la entrada.</p>
+
+          <button
+            type="button"
+            onClick={nextTicket}
+            className="mt-8 h-14 w-full rounded-2xl bg-white/10 text-base font-bold text-white transition hover:bg-white/15"
+          >
+            Escanear siguiente
+          </button>
+        </section>
       </main>
     );
   }
