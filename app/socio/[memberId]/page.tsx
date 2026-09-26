@@ -76,6 +76,11 @@ export default async function SocioPage({ params, searchParams }: PageProps) {
         </div>
 
         <p className="mt-5 text-center text-[11px] text-white/25">Presentá este QR en la puerta para que te reconozcan como socio.</p>
+        <p className="mt-3 text-center">
+          <a href="/mi" className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/35 underline underline-offset-4 hover:text-white/60">
+            Ver mi portal →
+          </a>
+        </p>
       </div>
     </main>
   );

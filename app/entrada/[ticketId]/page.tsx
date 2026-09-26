@@ -307,6 +307,12 @@ export default async function EntradaPage({
           Si el QR no puede escanearse, mostrale el código manual al personal de ingreso
         </p>
 
+        <p className="mt-4 text-center">
+          <a href="/mi" className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/35 underline underline-offset-4 hover:text-white/60">
+            Ver todas mis entradas →
+          </a>
+        </p>
+
         <footer className="mt-4 text-center">
           <p className="text-[9px] uppercase tracking-[0.3em] text-white/20">
             Capital Pass · Acceso digital
