@@ -17,6 +17,10 @@ function formatDate(value: string | null) {
   return new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`));
 }
 
+function formatMoney(minor: number) {
+  return `$ ${new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(minor)}`;
+}
+
 export default async function SocioPage({ params, searchParams }: PageProps) {
   const { memberId } = await params;
   const { s } = await searchParams;
@@ -27,7 +31,7 @@ export default async function SocioPage({ params, searchParams }: PageProps) {
   const admin = createAdminClient();
   const { data: member } = await admin
     .from("premium_members")
-    .select("id, organization_id, first_name, last_name, member_code, status, expires_at")
+    .select("id, organization_id, first_name, last_name, member_code, status, expires_at, balance_minor")
     .eq("id", memberId)
     .maybeSingle();
 
@@ -55,6 +59,11 @@ export default async function SocioPage({ params, searchParams }: PageProps) {
               isActive ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300" : "border-amber-400/30 bg-amber-400/10 text-amber-300"
             }`}>
               {STATUS_LABEL[member.status] ?? member.status}
+            </div>
+
+            <div className="mx-auto mt-4 w-fit border border-emerald-400/20 bg-emerald-400/[0.06] px-4 py-2">
+              <p className="text-[9px] font-black uppercase tracking-wide text-emerald-300/70">Saldo</p>
+              <p className="text-lg font-black text-emerald-300">{formatMoney(Number(member.balance_minor))}</p>
             </div>
 
             <div className="mx-auto mt-6 w-fit rounded-2xl bg-white p-3">

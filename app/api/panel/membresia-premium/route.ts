@@ -4,7 +4,7 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 import { createMemberPublicPath } from "../../../../lib/members/signature";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FIELDS = "id, first_name, last_name, dni, phone, email, member_code, status, starts_at, expires_at, notes, created_at";
+const FIELDS = "id, first_name, last_name, dni, phone, email, member_code, status, starts_at, expires_at, notes, balance_minor, created_at";
 
 function isMissingTable(error: { code?: string; message?: string } | null | undefined) {
   if (!error) return false;
@@ -65,7 +65,7 @@ export async function GET() {
       return NextResponse.json({ error: "No se pudieron cargar los socios." }, { status: 500 });
     }
 
-    const members = (data ?? []).map((m) => ({ ...m, cardUrl: createMemberPublicPath(m.id) }));
+    const members = (data ?? []).map((m) => ({ ...m, balance_minor: Number(m.balance_minor), cardUrl: createMemberPublicPath(m.id) }));
     return NextResponse.json({ ok: true, members });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No se pudo agregar el socio." }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, member: { ...data, cardUrl: createMemberPublicPath((data as { id: string }).id) } });
+    return NextResponse.json({ ok: true, member: { ...data, balance_minor: Number((data as { balance_minor: number }).balance_minor), cardUrl: createMemberPublicPath((data as { id: string }).id) } });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }
@@ -164,7 +164,7 @@ export async function PATCH(request: NextRequest) {
     }
     if (!data) return NextResponse.json({ error: "No se encontró el socio." }, { status: 404 });
 
-    return NextResponse.json({ ok: true, member: { ...data, cardUrl: createMemberPublicPath((data as { id: string }).id) } });
+    return NextResponse.json({ ok: true, member: { ...data, balance_minor: Number((data as { balance_minor: number }).balance_minor), cardUrl: createMemberPublicPath((data as { id: string }).id) } });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }

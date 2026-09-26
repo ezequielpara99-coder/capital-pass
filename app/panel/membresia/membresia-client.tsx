@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useMemo, useEffect, useState } from "react";
+import { createClient } from "../../../lib/supabase/client";
 
 type Member = {
   id: string;
@@ -15,8 +16,13 @@ type Member = {
   starts_at: string;
   expires_at: string | null;
   notes: string | null;
+  balance_minor: number;
   cardUrl: string;
 };
+
+function formatMoney(minor: number) {
+  return `$ ${new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(minor)}`;
+}
 
 const INPUT =
   "mt-2 h-12 w-full border border-white/[0.12] bg-black/30 px-4 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-[#ff5a2a]/50";
@@ -38,6 +44,7 @@ function formatDate(value: string | null) {
 }
 
 export default function MembresiaClient() {
+  const supabase = useMemo(() => createClient(), []);
   const [members, setMembers] = useState<Member[] | null>(null);
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState(emptyDraft());
@@ -45,6 +52,10 @@ export default function MembresiaClient() {
   const [error, setError] = useState("");
   const [missingSql, setMissingSql] = useState(false);
   const [notEnabled, setNotEnabled] = useState(false);
+  const [walletOpenId, setWalletOpenId] = useState<string | null>(null);
+  const [walletAmount, setWalletAmount] = useState("");
+  const [walletNote, setWalletNote] = useState("");
+  const [walletBusy, setWalletBusy] = useState(false);
 
   async function load() {
     try {
@@ -114,6 +125,42 @@ export default function MembresiaClient() {
       setMembers((prev) => (prev ?? []).filter((m) => m.id !== member.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo borrar.");
+    }
+  }
+
+  function openWallet(member: Member) {
+    setWalletOpenId(walletOpenId === member.id ? null : member.id);
+    setWalletAmount("");
+    setWalletNote("");
+    setError("");
+  }
+
+  async function moveWallet(member: Member, kind: "topup" | "spend") {
+    if (walletBusy) return;
+    const amount = Math.round(Number(walletAmount));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("Ingresá un monto válido.");
+      return;
+    }
+    setWalletBusy(true);
+    setError("");
+    try {
+      const { data, error: rpcError } = await supabase.rpc("wallet_move", {
+        p_member_id: member.id,
+        p_amount_minor: kind === "spend" ? -amount : amount,
+        p_kind: kind,
+        p_note: walletNote.trim() || null,
+      });
+      if (rpcError) throw rpcError;
+      const newBalance = Number((data ?? [])[0]?.new_balance_minor ?? member.balance_minor);
+      setMembers((prev) => (prev ?? []).map((m) => (m.id === member.id ? { ...m, balance_minor: newBalance } : m)));
+      setWalletOpenId(null);
+      setWalletAmount("");
+      setWalletNote("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo registrar el movimiento.");
+    } finally {
+      setWalletBusy(false);
     }
   }
 
@@ -228,7 +275,10 @@ export default function MembresiaClient() {
                           {formatDate(member.expires_at)}
                         </p>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button type="button" onClick={() => openWallet(member)} className="h-8 border border-emerald-400/25 px-3 text-[9px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-400/10">
+                          Saldo: {formatMoney(member.balance_minor)}
+                        </button>
                         <a href={member.cardUrl} target="_blank" rel="noopener noreferrer" className="h-8 border border-violet-400/25 px-3 text-[9px] font-black uppercase tracking-wide text-violet-300 hover:bg-violet-400/10">
                           Ver carnet
                         </a>
@@ -247,6 +297,38 @@ export default function MembresiaClient() {
                         </button>
                       </div>
                     </div>
+
+                    {walletOpenId === member.id && (
+                      <div className="mt-3 border-t border-white/[0.06] pt-3">
+                        <div className="flex flex-wrap items-end gap-2">
+                          <label className="block">
+                            <span className={LABEL}>Monto</span>
+                            <input
+                              value={walletAmount}
+                              onChange={(e) => setWalletAmount(e.target.value)}
+                              inputMode="numeric"
+                              placeholder="0"
+                              className="mt-2 h-11 w-32 border border-white/[0.12] bg-black/30 px-3 text-sm text-white outline-none focus:border-[#ff5a2a]/50"
+                            />
+                          </label>
+                          <label className="block flex-1 min-w-[160px]">
+                            <span className={LABEL}>Nota</span>
+                            <input
+                              value={walletNote}
+                              onChange={(e) => setWalletNote(e.target.value)}
+                              placeholder="Carga en puerta, consumo barra…"
+                              className="mt-2 h-11 w-full border border-white/[0.12] bg-black/30 px-3 text-sm text-white outline-none focus:border-[#ff5a2a]/50"
+                            />
+                          </label>
+                          <button type="button" disabled={walletBusy} onClick={() => moveWallet(member, "topup")} className="h-11 border border-emerald-400/30 bg-emerald-400/10 px-4 text-[10px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-400/20 disabled:opacity-40">
+                            + Cargar
+                          </button>
+                          <button type="button" disabled={walletBusy} onClick={() => moveWallet(member, "spend")} className="h-11 border border-amber-400/30 bg-amber-400/10 px-4 text-[10px] font-black uppercase tracking-wide text-amber-300 hover:bg-amber-400/20 disabled:opacity-40">
+                            − Consumo
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))
               )}

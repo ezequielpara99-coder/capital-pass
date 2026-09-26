@@ -66,6 +66,7 @@ const sistemaTrasladosMigration = readFileSync(new URL("../supabase/migrations/2
 const membresiaPremiumMigration = readFileSync(new URL("../supabase/migrations/20260972_membresia_premium.sql", import.meta.url), "utf8");
 const carnetSocioPremiumMigration = readFileSync(new URL("../supabase/migrations/20260973_carnet_socio_premium.sql", import.meta.url), "utf8");
 const listaNegraMigration = readFileSync(new URL("../supabase/migrations/20260974_lista_negra.sql", import.meta.url), "utf8");
+const billeteraSocioMigration = readFileSync(new URL("../supabase/migrations/20260975_billetera_socio.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -180,6 +181,7 @@ async function database() {
   await db.exec(membresiaPremiumMigration);
   await db.exec(carnetSocioPremiumMigration);
   await db.exec(listaNegraMigration);
+  await db.exec(billeteraSocioMigration);
   return db;
 }
 
@@ -1769,6 +1771,56 @@ test("lista negra: check_blacklist normaliza el DNI, respeta permisos y el flag 
     () => db.query(`select * from check_blacklist('${event}','40123456')`),
     /permiso/,
     "alguien sin rol de control en el evento no puede consultar la lista negra"
+  );
+
+  await db.close();
+});
+
+test("billetera del socio: wallet_move mantiene el saldo sincronizado con el ledger, no deja quedar negativo y respeta permisos", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const org = "dddddddd-1111-4111-8111-111111111111";
+  const organizerUser = "dddddddd-2222-4222-8222-222222222222";
+  const outsiderUser = "dddddddd-3333-4333-8333-333333333333";
+
+  await db.exec(`insert into auth.users values ('${organizerUser}','organizer-wallet@example.test',now(),'{}'), ('${outsiderUser}','outsider-wallet@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club Wallet','club-wallet');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${organizerUser}','organizer','active');`);
+
+  const member = await scalar(
+    `insert into premium_members(organization_id, first_name, last_name, member_code) values ('${org}','Ana','Socia','ZZZ999') returning id::text`
+  );
+
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false)`);
+
+  const topup = await db.query<{ new_balance_minor: string }>(`select * from wallet_move('${member}', 10000, 'topup', 'Carga en puerta')`);
+  assert.equal(Number(topup.rows[0].new_balance_minor), 10000);
+  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 10000, "balance_minor queda sincronizado con el movimiento");
+
+  const spend = await db.query<{ new_balance_minor: string }>(`select * from wallet_move('${member}', -3000, 'spend', 'Consumo barra')`);
+  assert.equal(Number(spend.rows[0].new_balance_minor), 7000);
+
+  assert.equal(
+    Number(await scalar(`select sum(amount_minor)::text from wallet_transactions where member_id='${member}'`)),
+    7000,
+    "balance_minor siempre es igual a la suma de wallet_transactions"
+  );
+
+  // No deja quedar en negativo.
+  await assert.rejects(
+    () => db.query(`select * from wallet_move('${member}', -999999, 'spend', null)`),
+    /insuficiente/,
+    "no permite gastar mas de lo que tiene cargado"
+  );
+  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 7000, "el intento rechazado no toco el balance");
+
+  // Alguien sin rol de organizador en esa organizacion no puede tocar la billetera.
+  await db.exec(`select set_config('request.jwt.claim.sub','${outsiderUser}',false)`);
+  await assert.rejects(
+    () => db.query(`select * from wallet_move('${member}', 5000, 'topup', null)`),
+    /permiso/,
+    "un usuario sin rol de organizador en la organizacion del socio no puede mover su saldo"
   );
 
   await db.close();
