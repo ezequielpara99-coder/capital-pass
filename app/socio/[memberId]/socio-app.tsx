@@ -402,7 +402,7 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
             {tab === "carnet" && <ColectivoTracker endpoint={`${base}/colectivo${query}`} />}
 
             {/* Premios del ranking mensual ganados y todavia sin retirar */}
-            {(data.wonPrizes ?? []).filter((p) => !p.claimed_at).map((prize) => (
+            {(tab === "carnet" || tab === "ranking") && (data.wonPrizes ?? []).filter((p) => !p.claimed_at).map((prize) => (
               <div key={prize.id} className="mt-5 border border-amber-400/40 bg-gradient-to-r from-amber-400/[0.14] to-transparent px-5 py-4">
                 <p className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-300">🏆 ¡Ganaste el ranking de {monthName(prize.period)}!</p>
                 <p className="mt-1 text-lg font-black">{MEDALS[prize.position - 1]} {prize.prize}</p>
