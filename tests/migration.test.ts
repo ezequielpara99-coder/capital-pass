@@ -74,6 +74,7 @@ const softDeleteMigration = readFileSync(new URL("../supabase/migrations/2026097
 const calendarioRentalMigration = readFileSync(new URL("../supabase/migrations/20260980_calendario_rental.sql", import.meta.url), "utf8");
 const softDeleteRpcFixesMigration = readFileSync(new URL("../supabase/migrations/20260981_soft_delete_rpc_fixes.sql", import.meta.url), "utf8");
 const appSocioMigration = readFileSync(new URL("../supabase/migrations/20260982_app_socio.sql", import.meta.url), "utf8");
+const rankingSociosMigration = readFileSync(new URL("../supabase/migrations/20260983_ranking_socios.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -196,6 +197,7 @@ async function database() {
   await db.exec(calendarioRentalMigration);
   await db.exec(softDeleteRpcFixesMigration);
   await db.exec(appSocioMigration);
+  await db.exec(rankingSociosMigration);
   return db;
 }
 
@@ -2056,6 +2058,56 @@ test("app del socio: pedidos con saldo y puntos, cancelacion con reembolso, mesa
   await db.query(`select * from member_order_set_status('${reserved.rows[0].order_id}', 'cancelled', '${org}', null)`);
   assert.equal(await scalar(`select status from bar_tables where id='${table}'`), "available");
   assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 4000, "cancelar la reserva devuelve el saldo");
+
+  await db.close();
+});
+
+test("ranking de socios: cuenta puntos ganados, ignora canjes y reembolsos, maneja empates y se puede apagar", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "adadadad-1111-4111-8111-111111111111";
+  const otherOrg = "adadadad-2222-4222-8222-222222222222";
+  await db.exec(`insert into organizations(id,name,slug) values ('${org}','Club Rank','club-rank'), ('${otherOrg}','Otro Rank','otro-rank')`);
+
+  const mk = (orgId: string, first: string, last: string, code: string) =>
+    scalar(`insert into premium_members(organization_id, first_name, last_name, member_code) values ('${orgId}','${first}','${last}','${code}') returning id::text`) as Promise<string>;
+  const ana = await mk(org, "Ana", "Lopez", "RK0001");
+  const beto = await mk(org, "Beto", "Garcia", "RK0002");
+  const cami = await mk(org, "Cami", "Diaz", "RK0003");
+  const nadie = await mk(org, "Nadie", "Suma", "RK0004");
+  const ajeno = await mk(otherOrg, "Ajeno", "Otro", "RK0005");
+
+  const tx = (member: string, delta: number, reason: string, when = "now()") =>
+    db.exec(`insert into member_points_transactions(member_id, delta, reason, created_at) values ('${member}', ${delta}, '${reason}', ${when})`);
+  await tx(ana, 100, "Pedido AAAA");
+  await tx(ana, -60, "Canje pedido BBBB"); // canjear no la baja
+  await tx(beto, 100, "Asistencia a la fiesta");
+  await tx(beto, 50, "Reembolso pedido CCCC"); // reembolso no cuenta
+  await tx(cami, 40, "Pedido DDDD");
+  await tx(cami, 500, "Pedido VIEJO", "now() - interval '90 days'"); // fuera del periodo
+  await tx(ajeno, 999, "Pedido AJENO");
+
+  const since = "now() - interval '30 days'";
+  const ranking = (await scalar(`select member_ranking('${cami}', ${since})`)) as {
+    enabled: boolean; participants: number; top: { position: number; name: string; points: number; isMe: boolean }[]; me: { position: number; points: number } | null;
+  };
+  assert.equal(ranking.enabled, true);
+  assert.equal(ranking.participants, 3, "solo entran los que sumaron en el periodo, de su propio boliche");
+  assert.deepEqual(ranking.top.map((r) => [r.position, r.name, r.points]), [[1, "Ana L.", 100], [1, "Beto G.", 100], [3, "Cami D.", 40]], "empate compartido y nombre con inicial");
+  assert.equal(ranking.me?.position, 3);
+  assert.equal(ranking.top[2].isMe, true);
+
+  const historic = (await scalar(`select member_ranking('${cami}', '2000-01-01')`)) as { top: { name: string; points: number }[] };
+  assert.equal(historic.top[0].name, "Cami D.", "en el historico cuenta lo de hace 90 dias");
+  assert.equal(historic.top[0].points, 540);
+
+  const outsider = (await scalar(`select member_ranking('${nadie}', ${since})`)) as { me: unknown };
+  assert.equal(outsider.me, null, "quien no sumo puntos no tiene posicion");
+
+  await db.exec(`update organizations set member_ranking_enabled = false where id='${org}'`);
+  const off = (await scalar(`select member_ranking('${ana}', ${since})`)) as { enabled: boolean; top: unknown[] };
+  assert.equal(off.enabled, false);
+  assert.equal(off.top.length, 0);
 
   await db.close();
 });

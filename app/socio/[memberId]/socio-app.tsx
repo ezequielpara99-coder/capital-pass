@@ -21,7 +21,13 @@ type AppData = {
 };
 
 type Props = { memberId: string; signature: string; qrDataUrl: string };
-type Tab = "carnet" | "carta" | "mesas" | "pedidos" | "puntos";
+type Tab = "carnet" | "carta" | "mesas" | "pedidos" | "puntos" | "ranking";
+type RankingData = {
+  enabled: boolean;
+  participants: number;
+  top: { position: number; name: string; points: number; isMe: boolean }[];
+  me: { position: number; points: number } | null;
+};
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "carnet", label: "Carnet" },
@@ -29,7 +35,10 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "mesas", label: "Mesas" },
   { id: "pedidos", label: "Pedidos" },
   { id: "puntos", label: "Puntos" },
+  { id: "ranking", label: "Ranking" },
 ];
+
+const MEDALS = ["🥇", "🥈", "🥉"];
 
 const STATUS_LABEL: Record<Order["status"], string> = { pending: "Preparando", ready: "Listo", delivered: "Entregado", cancelled: "Cancelado" };
 const STATUS_STYLE: Record<Order["status"], string> = {
@@ -92,6 +101,29 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  // Ranking: se carga al abrir la solapa y al cambiar de periodo.
+  const [rankingPeriod, setRankingPeriod] = useState<"month" | "all">("month");
+  const [ranking, setRanking] = useState<RankingData | null>(null);
+  const [rankingError, setRankingError] = useState("");
+  useEffect(() => {
+    if (tab !== "ranking") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(`${base}/ranking${query}&period=${rankingPeriod}`, { cache: "no-store" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "No se pudo cargar el ranking.");
+        if (!cancelled) {
+          setRanking(result.ranking as RankingData);
+          setRankingError("");
+        }
+      } catch (err) {
+        if (!cancelled) setRankingError(err instanceof Error ? err.message : "No se pudo cargar el ranking.");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tab, rankingPeriod, base, query]);
 
   // Mientras hay un pedido en curso, se refresca solo para ver cuando esta listo.
   const hasOpenOrder = (data?.orders ?? []).some((o) => o.status === "pending" || o.status === "ready");
@@ -398,6 +430,69 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
               </section>
             )}
 
+            {/* RANKING */}
+            {tab === "ranking" && (
+              <section className="mt-5">
+                <div className="grid grid-cols-2 gap-2">
+                  {(["month", "all"] as const).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => { setRanking(null); setRankingPeriod(p); }}
+                      className={`h-10 border text-[10px] font-black uppercase tracking-wide ${rankingPeriod === p ? "border-violet-400/60 bg-violet-400/15 text-violet-200" : "border-white/15 text-white/50"}`}
+                    >
+                      {p === "month" ? "Este mes" : "Histórico"}
+                    </button>
+                  ))}
+                </div>
+
+                {rankingError && <div className="mt-4 border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">{rankingError}</div>}
+                {!ranking && !rankingError && <div className="mt-8 text-center text-sm text-white/35">Cargando…</div>}
+
+                {ranking && !ranking.enabled && (
+                  <div className="mt-4 border border-dashed border-white/10 p-8 text-center text-sm text-white/35">El boliche no tiene activado el ranking.</div>
+                )}
+
+                {ranking && ranking.enabled && (
+                  <>
+                    {ranking.me ? (
+                      <div className="mt-4 border border-violet-400/30 bg-violet-400/[0.08] px-5 py-4 text-center">
+                        <p className="text-[9px] font-black uppercase tracking-[0.2em] text-violet-300/70">Tu posición</p>
+                        <p className="mt-1 text-4xl font-black text-violet-200">#{ranking.me.position}</p>
+                        <p className="mt-1 text-xs text-white/45">{ranking.me.points} puntos · {ranking.participants} {ranking.participants === 1 ? "socio compite" : "socios compiten"}</p>
+                      </div>
+                    ) : (
+                      <div className="mt-4 border border-white/10 px-5 py-4 text-center text-sm text-white/45">
+                        Todavía no sumaste puntos {rankingPeriod === "month" ? "este mes" : ""}. Pedí desde la carta o vení a la próxima fiesta para entrar al ranking.
+                      </div>
+                    )}
+
+                    {ranking.top.length > 0 && (
+                      <ol className="mt-4 space-y-1.5">
+                        {ranking.top.map((row) => (
+                          <li key={`${row.position}-${row.name}`} className={`flex items-center gap-3 border px-4 py-3 ${row.isMe ? "border-violet-400/50 bg-violet-400/10" : "border-white/[0.06] bg-white/[0.02]"}`}>
+                            <span className="w-8 shrink-0 text-center text-lg font-black">{row.position <= 3 ? MEDALS[row.position - 1] : `#${row.position}`}</span>
+                            <span className="min-w-0 flex-1 truncate text-sm font-bold">{row.name}{row.isMe ? " (vos)" : ""}</span>
+                            <span className="shrink-0 text-sm font-black text-violet-300">{row.points} pts</span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+
+                    {ranking.me && !ranking.top.some((r) => r.isMe) && (
+                      <div className="mt-2 flex items-center gap-3 border border-violet-400/50 bg-violet-400/10 px-4 py-3">
+                        <span className="w-8 shrink-0 text-center text-lg font-black">#{ranking.me.position}</span>
+                        <span className="flex-1 text-sm font-bold">Vos</span>
+                        <span className="text-sm font-black text-violet-300">{ranking.me.points} pts</span>
+                      </div>
+                    )}
+
+                    <p className="mt-4 text-center text-[11px] text-white/30">Se ordena por puntos ganados. Canjear premios no te baja de posición.</p>
+                  </>
+                )}
+              </section>
+            )}
+
             {/* PUNTOS */}
             {tab === "puntos" && (
               <section className="mt-5">
@@ -449,7 +544,7 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
               key={item.id}
               type="button"
               onClick={() => { setTab(item.id); setNotice(""); setError(""); }}
-              className={`relative h-[68px] flex-1 text-[10px] font-black uppercase tracking-wide transition ${tab === item.id ? "text-violet-300" : "text-white/40"}`}
+              className={`relative h-[68px] flex-1 text-[9px] font-black uppercase tracking-wide transition ${tab === item.id ? "text-violet-300" : "text-white/40"}`}
             >
               {item.label}
               {item.id === "pedidos" && hasOpenOrder && <span className="absolute right-[22%] top-3 h-2 w-2 rounded-full bg-emerald-400" />}

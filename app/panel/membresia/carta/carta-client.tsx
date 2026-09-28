@@ -13,6 +13,7 @@ export default function CartaClient() {
   const [items, setItems] = useState<Item[] | null>(null);
   const [checkinPoints, setCheckinPoints] = useState("0");
   const [savedCheckin, setSavedCheckin] = useState("0");
+  const [rankingEnabled, setRankingEnabled] = useState(true);
   const [error, setError] = useState("");
   const [blocked, setBlocked] = useState("");
   const [saving, setSaving] = useState(false);
@@ -38,8 +39,19 @@ export default function CartaClient() {
       setItems(result.items);
       setCheckinPoints(String(result.checkinPoints));
       setSavedCheckin(String(result.checkinPoints));
+      setRankingEnabled(result.rankingEnabled !== false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo cargar.");
+    }
+  }
+
+  async function toggleRanking() {
+    setError("");
+    try {
+      const result = await request("PATCH", { rankingEnabled: !rankingEnabled });
+      setRankingEnabled(result.rankingEnabled);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar.");
     }
   }
 
@@ -152,6 +164,16 @@ export default function CartaClient() {
                   Guardar
                 </button>
               </div>
+            </div>
+
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border border-white/[0.08] bg-white/[0.02] p-5">
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Ranking de socios</p>
+                <p className="mt-1 max-w-md text-xs text-white/35">Los socios ven una tabla de posiciones por puntos ganados (mensual e histórica), con nombre e inicial del apellido.</p>
+              </div>
+              <button type="button" onClick={toggleRanking} className={`h-11 border px-5 text-[10px] font-black uppercase tracking-[0.14em] ${rankingEnabled ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300" : "border-white/15 text-white/50"}`}>
+                {rankingEnabled ? "Visible" : "Oculto"}
+              </button>
             </div>
 
             <form onSubmit={add} className="mt-6 border border-white/[0.08] bg-white/[0.02] p-5">

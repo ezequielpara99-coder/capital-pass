@@ -24,7 +24,7 @@ export async function GET() {
 
     const [items, org] = await Promise.all([
       caller.admin.from("member_menu_items").select(FIELDS).eq("organization_id", caller.organizationId).is("deleted_at", null).order("kind").order("sort_order").order("created_at").limit(500),
-      caller.admin.from("organizations").select("member_checkin_points").eq("id", caller.organizationId).maybeSingle(),
+      caller.admin.from("organizations").select("member_checkin_points, member_ranking_enabled").eq("id", caller.organizationId).maybeSingle(),
     ]);
 
     const failure = items.error ?? org.error;
@@ -38,6 +38,7 @@ export async function GET() {
       ok: true,
       items: (items.data ?? []).map(serialize),
       checkinPoints: Number(org.data?.member_checkin_points ?? 0),
+      rankingEnabled: org.data?.member_ranking_enabled ?? true,
     });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
@@ -98,6 +99,16 @@ export async function PATCH(request: NextRequest) {
     if ("error" in caller) return NextResponse.json({ error: caller.error }, { status: caller.status });
 
     const body = await request.json();
+
+    if (body.rankingEnabled !== undefined) {
+      const enabled = Boolean(body.rankingEnabled);
+      const { error } = await caller.admin.from("organizations").update({ member_ranking_enabled: enabled }).eq("id", caller.organizationId);
+      if (error) {
+        console.error("MEMBRESIA CARTA RANKING:", error);
+        return NextResponse.json({ error: "No se pudo guardar." }, { status: 500 });
+      }
+      return NextResponse.json({ ok: true, rankingEnabled: enabled });
+    }
 
     if (body.checkinPoints !== undefined) {
       const points = parseAmount(body.checkinPoints);
