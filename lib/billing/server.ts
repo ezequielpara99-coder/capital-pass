@@ -5,7 +5,8 @@ import { destinationFor, saleFromReference, signupFromReference, topupFromRefere
 import { getPayment, getPlatformCollectorId, paymentsForReference } from "./provider";
 import { sendSubscriptionReceipt } from "../email/subscription-receipt";
 import { sendTicketDelivery } from "../email/ticket-delivery";
-import { sendPushToPlatformAdmins } from "../push/server";
+import { sendPushToPlatformAdmins, sendPushToMember } from "../push/server";
+import { createMemberPublicPath } from "../members/signature";
 import { createTicketPublicPath } from "../tickets/signature";
 import { ticketQrPngBuffer } from "../tickets/qr-image";
 import { getAppBaseUrl } from "../mercadopago/server";
@@ -318,7 +319,7 @@ export async function reconcileOnlineSale(saleId: string) {
 export async function applyTopupPayment(payment: ProviderPayment, topupId: string) {
   const admin = createAdminClient();
   const { data: topup, error } = await admin.from("wallet_topups")
-    .select("id, organization_id, amount_minor").eq("id", topupId).maybeSingle();
+    .select("id, organization_id, member_id, amount_minor").eq("id", topupId).maybeSingle();
   if (error) throw new Error("No se pudo consultar la recarga.");
   if (!topup) return false;
   const { data: account } = await admin.from("organization_mercadopago_accounts")
@@ -332,6 +333,18 @@ export async function applyTopupPayment(payment: ProviderPayment, topupId: strin
     p_topup_id: topupId, p_payment_id: String(payment.id), p_status: verified.status,
   });
   if (result.error) throw new Error("No se pudo acreditar la recarga.");
+
+  // Aviso al celular solo cuando ESTA llamada acredito (applied): el webhook y
+  // el "verificar" del socio pueden llegar juntos y la funcion SQL deja pasar
+  // a una sola, asi que el aviso tampoco se duplica.
+  const row = (result.data ?? [])[0] as { applied?: boolean; new_status?: string } | undefined;
+  if (row?.applied && row.new_status === "approved") {
+    await sendPushToMember(topup.member_id as string, {
+      title: "Recarga acreditada",
+      body: `Se acreditaron $ ${new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Number(topup.amount_minor))} en tu saldo.`,
+      url: createMemberPublicPath(topup.member_id as string),
+    });
+  }
   return true;
 }
 

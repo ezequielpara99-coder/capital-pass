@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { isMissingTable, resolveOrganizer, UUID_RE } from "../../../../lib/panel/organizer";
+import { sendPushToMember } from "../../../../lib/push/server";
+import { createMemberPublicPath } from "../../../../lib/members/signature";
 
 const MISSING = "Falta aplicar la actualización de la base de datos de la app del socio (20260982).";
 const BUSINESS_ERRORS = /ya esta listo|ya esta cerrado|Estado invalido|no existe|permiso/i;
@@ -69,6 +71,46 @@ export async function PATCH(request: NextRequest) {
       console.error("MEMBRESIA PEDIDOS PATCH:", error);
       return NextResponse.json({ error: "No se pudo actualizar el pedido." }, { status: 500 });
     }
+
+    // Aviso al celular del socio (despues de responder: el bartender no espera).
+    after(async () => {
+      try {
+        const { data: order } = await caller.admin
+          .from("member_orders")
+          .select("member_id, pickup_code, delivery, payment, total_minor, points_earned, points_cost")
+          .eq("id", id)
+          .eq("organization_id", caller.organizationId)
+          .maybeSingle();
+        if (!order) return;
+
+        const url = `${createMemberPublicPath(order.member_id as string)}&tab=pedidos`;
+        const code = order.pickup_code as string;
+        const toTable = String(order.delivery ?? "").startsWith("Mesa");
+
+        if (status === "ready") {
+          await sendPushToMember(order.member_id as string, {
+            title: "Tu pedido está listo",
+            body: toTable ? `Pedido ${code}. Te lo están llevando a tu mesa.` : `Pedido ${code}. Retiralo en la barra.`,
+            url,
+          });
+        } else if (status === "delivered" && Number(order.points_earned) > 0) {
+          await sendPushToMember(order.member_id as string, {
+            title: `Sumaste ${order.points_earned} puntos`,
+            body: `Gracias por tu pedido ${code}.`,
+            url,
+          });
+        } else if (status === "cancelled") {
+          const refunded = (order.payment === "wallet" && Number(order.total_minor) > 0) || Number(order.points_cost) > 0;
+          await sendPushToMember(order.member_id as string, {
+            title: "Cancelaron tu pedido",
+            body: refunded ? `Pedido ${code}. Te devolvimos el saldo y los puntos.` : `Pedido ${code}.`,
+            url,
+          });
+        }
+      } catch (err) {
+        console.error("AVISO PEDIDO:", err instanceof Error ? err.message : err);
+      }
+    });
 
     return NextResponse.json({ ok: true });
   } catch {

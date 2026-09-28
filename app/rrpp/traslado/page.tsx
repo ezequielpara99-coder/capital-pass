@@ -124,6 +124,17 @@ export default function TrasladoRRPPPage() {
     }
   }
 
+  // El colectivo cambio de parada: se avisa al celular de los socios que lo
+  // esperan. Sin esperar respuesta: si falla, el embarque sigue igual.
+  function notifyProgress() {
+    if (!routeId) return;
+    fetch("/api/rrpps/traslados/avisar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ routeId }),
+    }).catch(() => {});
+  }
+
   async function markStop(stopId: string | null) {
     if (!routeId || !event || stopBusy) return;
     if (stopId === null && !window.confirm("¿Reiniciar el recorrido? Se borra por dónde pasó el colectivo.")) return;
@@ -132,6 +143,7 @@ export default function TrasladoRRPPPage() {
     try {
       const { error: rpcError } = await supabase.rpc("transfer_mark_stop", { p_route_id: routeId, p_stop_id: stopId });
       if (rpcError) throw rpcError;
+      if (stopId) notifyProgress();
       await refreshRoutes(event.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo marcar la parada.");
@@ -155,7 +167,10 @@ export default function TrasladoRRPPPage() {
       if (row) setResult(row);
       setCode("");
       inputRef.current?.focus();
-      if (row?.result === "valid" && event) await refreshRoutes(event.id);
+      if (row?.result === "valid" && event) {
+        notifyProgress();
+        await refreshRoutes(event.id);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo validar el código.");
     } finally {

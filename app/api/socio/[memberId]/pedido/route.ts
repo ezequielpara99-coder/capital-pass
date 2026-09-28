@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
+import { sendPushToOrganizers } from "../../../../../lib/push/server";
 import { verifyMemberSignature } from "../../../../../lib/members/signature";
 import { checkRateLimit, getClientIp } from "../../../../../lib/http/rate-limit";
 import { UUID_RE } from "../../../../../lib/panel/organizer";
@@ -66,6 +67,30 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     const row = (data ?? [])[0];
+
+    // Aviso al organizador: nuevo pedido de un socio (respeta su preferencia
+    // de avisos de barra). Despues de responder, para no demorar al socio.
+    if (row && !row.already_existed) {
+      after(async () => {
+        try {
+          const { data: member } = await admin.from("premium_members").select("organization_id, first_name, last_name").eq("id", memberId).maybeSingle();
+          if (!member) return;
+          const who = `${member.first_name} ${String(member.last_name).slice(0, 1)}.`;
+          const count = items.reduce((sum: number, i: { qty: number }) => sum + i.qty, 0);
+          await sendPushToOrganizers(member.organization_id as string, "bar_sale", {
+            title: kind === "mesa" ? "Nueva reserva de mesa" : "Nuevo pedido de un socio",
+            body:
+              kind === "mesa"
+                ? `${who} reservó una mesa.`
+                : `${who}: ${count} ${count === 1 ? "producto" : "productos"}${body.delivery ? ` · ${String(body.delivery).slice(0, 40)}` : ""}.`,
+            url: "/panel/membresia/pedidos",
+          });
+        } catch (err) {
+          console.error("AVISO PEDIDO NUEVO:", err instanceof Error ? err.message : err);
+        }
+      });
+    }
+
     return NextResponse.json({
       ok: true,
       orderId: row?.order_id,

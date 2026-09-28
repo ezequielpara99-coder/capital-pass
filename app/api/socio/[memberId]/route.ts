@@ -1,4 +1,6 @@
+import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { verifySessionToken, CUSTOMER_SESSION_COOKIE } from "../../../../lib/customer/session";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { verifyMemberSignature } from "../../../../lib/members/signature";
 import { checkRateLimit, getClientIp } from "../../../../lib/http/rate-limit";
@@ -24,7 +26,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const admin = createAdminClient();
     const { data: member, error: memberError } = await admin
       .from("premium_members")
-      .select("id, organization_id, first_name, last_name, member_code, status, expires_at, balance_minor, points_balance")
+      .select("id, organization_id, first_name, last_name, member_code, status, expires_at, balance_minor, points_balance, email")
       .eq("id", memberId)
       .is("deleted_at", null)
       .maybeSingle();
@@ -37,6 +39,19 @@ export async function GET(request: NextRequest, context: RouteContext) {
     if (!member) return NextResponse.json({ error: "Socio no encontrado." }, { status: 404 });
 
     const orgId = member.organization_id as string;
+
+    // Estado de los avisos al celular: solo se pueden activar con sesion por
+    // email (la misma de /mi) y con el email de la membresia.
+    const cookieStore = await cookies();
+    const sessionCookie = cookieStore.get(CUSTOMER_SESSION_COOKIE)?.value ?? "";
+    const sessionEmail = sessionCookie ? verifySessionToken(sessionCookie) : null;
+    const alertsStatus: "no_email" | "login" | "mismatch" | "ready" = !member.email
+      ? "no_email"
+      : !sessionEmail
+        ? "login"
+        : sessionEmail.trim().toLowerCase() !== String(member.email).trim().toLowerCase()
+          ? "mismatch"
+          : "ready";
 
     // Premios del ranking mensual que ya gano este socio (tolerante: si la
     // tabla todavia no existe, simplemente no hay premios que mostrar).
@@ -118,6 +133,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       orders: (ordersRes.data ?? []).map((o) => ({ ...o, total_minor: Number(o.total_minor) })),
       points: pointsRes.data ?? [],
       wonPrizes: prizesRes.error ? [] : prizesRes.data ?? [],
+      alerts: { status: alertsStatus, vapidKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "" },
     });
   } catch (error) {
     console.error("SOCIO GET:", error);

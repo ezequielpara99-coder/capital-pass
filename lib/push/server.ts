@@ -19,9 +19,10 @@ type PushPayload = { title: string; body: string; url?: string };
 // Si Web Push devuelve que la suscripcion ya no es valida (410/404), la
 // borramos -- asi no se acumulan suscripciones muertas de celulares donde
 // se desinstalo la app.
-async function sendToSubscriptions(
+export async function sendToSubscriptions(
   subs: { id: string; endpoint: string; p256dh: string; auth_key: string }[],
-  payload: PushPayload
+  payload: PushPayload,
+  table: "push_subscriptions" | "member_push_subscriptions" = "push_subscriptions"
 ) {
   ensureConfigured();
   if (!configured || subs.length === 0) return;
@@ -47,7 +48,7 @@ async function sendToSubscriptions(
         // borrarlas de una hubiera vaciado la base entera de suscripciones
         // push por un problema de configuracion, no de los dispositivos.
         if (statusCode === 404 || statusCode === 410) {
-          await admin.from("push_subscriptions").delete().eq("id", sub.id);
+          await admin.from(table).delete().eq("id", sub.id);
         } else {
           // Solo el codigo/mensaje: el objeto completo del error incluye el
           // endpoint de la suscripcion, que funciona como identificador del
@@ -58,6 +59,23 @@ async function sendToSubscriptions(
       }
     })
   );
+}
+
+// Manda un aviso a los celulares de un socio premium (sus suscripciones
+// propias, separadas de las de los usuarios con login). Nunca lanza: un aviso
+// que falla no puede romper el pedido/pago que lo origino.
+export async function sendPushToMember(memberId: string, payload: PushPayload) {
+  try {
+    const admin = createAdminClient();
+    const { data: subs, error } = await admin
+      .from("member_push_subscriptions")
+      .select("id, endpoint, p256dh, auth_key")
+      .eq("member_id", memberId);
+    if (error) return; // p.ej. la migracion todavia no se aplico
+    await sendToSubscriptions(subs ?? [], payload, "member_push_subscriptions");
+  } catch (error) {
+    console.error("PUSH SOCIO: no se pudo avisar.", error instanceof Error ? error.message : error);
+  }
 }
 
 export async function sendPushToUser(userId: string, payload: PushPayload) {

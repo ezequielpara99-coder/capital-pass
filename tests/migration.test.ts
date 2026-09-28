@@ -78,6 +78,7 @@ const rankingSociosMigration = readFileSync(new URL("../supabase/migrations/2026
 const recargaSaldoMigration = readFileSync(new URL("../supabase/migrations/20260984_recarga_saldo.sql", import.meta.url), "utf8");
 const premioMensualMigration = readFileSync(new URL("../supabase/migrations/20260985_premio_mensual.sql", import.meta.url), "utf8");
 const seguimientoColectivoMigration = readFileSync(new URL("../supabase/migrations/20260986_seguimiento_colectivo.sql", import.meta.url), "utf8");
+const avisosSocioMigration = readFileSync(new URL("../supabase/migrations/20260987_avisos_socio.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -204,6 +205,7 @@ async function database() {
   await db.exec(recargaSaldoMigration);
   await db.exec(premioMensualMigration);
   await db.exec(seguimientoColectivoMigration);
+  await db.exec(avisosSocioMigration);
   return db;
 }
 
@@ -1792,6 +1794,97 @@ test("seguimiento del colectivo: el escaneo mueve la posicion sin retroceder, ma
   const reused = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','${codeB}')`);
   assert.equal(reused.rows[0].result, "already_used");
   assert.equal(await current(), stopB);
+
+  await db.close();
+});
+
+test("avisos: el colectivo avisa a quien todavia no subio, sin duplicar, y el reinicio vuelve a avisar", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "c1c1c1c1-1111-4111-8111-111111111111";
+  const event = "c1c1c1c1-2222-4222-8222-222222222222";
+  const ownerUser = "c1c1c1c1-3333-4333-8333-333333333333";
+
+  await db.exec(`insert into auth.users values ('${ownerUser}','owner-aviso@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club Avisos','club-avisos');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${ownerUser}','rrpp','active');`);
+  const owner = await scalar(`select id::text from organization_members where user_id='${ownerUser}'`);
+  const route = (await scalar(`insert into transfer_routes(event_id, organization_member_id, name) values ('${event}','${owner}','Ruta avisos') returning id::text`)) as string;
+  const stop = async (position: number, name: string) =>
+    (await scalar(`insert into transfer_route_stops(route_id, position, name) values ('${route}', ${position}, '${name}') returning id::text`)) as string;
+  const stopA = await stop(1, "Rosario");
+  const stopB = await stop(2, "Pergamino");
+  const stopC = await stop(3, "Salto");
+
+  const ticket = async (name: string, stopId: string, status = "issued") =>
+    (await scalar(`insert into transfer_tickets(route_id, passenger_name, manual_code, stop_id, status) values ('${route}','${name}','${name.slice(0, 3).toUpperCase()}${Math.floor(Math.random() * 900 + 100)}','${stopId}','${status}') returning id::text`)) as string;
+  const pA = await ticket("Ana", stopA);
+  const pB = await ticket("Beto", stopB);
+  const pC = await ticket("Cami", stopC);
+  await ticket("Cancelado", stopA, "cancelled");
+
+  const claim = async () =>
+    (await db.query<{ ticket_id: string; kind: string; stop_name: string; current_stop_name: string }>(`select * from transfer_claim_notifications('${route}')`)).rows;
+  const setCurrent = (stopId: string) => db.exec(`update transfer_routes set current_stop_id='${stopId}', current_stop_at=now() where id='${route}'`);
+
+  assert.equal((await claim()).length, 0, "sin posicion del colectivo no hay avisos");
+
+  // El colectivo esta en la 1: Ana esta en su parada (arrived), Beto es el siguiente (approaching), Cami todavia no.
+  await setCurrent(stopA);
+  const first = await claim();
+  const byTicket = (rows: typeof first) => Object.fromEntries(rows.map((r) => [r.ticket_id, r.kind]));
+  assert.deepEqual(byTicket(first), { [pA]: "arrived", [pB]: "approaching" });
+  assert.equal(first.find((r) => r.ticket_id === pB)?.current_stop_name, "Rosario");
+  assert.equal(first.find((r) => r.ticket_id === pB)?.stop_name, "Pergamino");
+  assert.equal((await claim()).length, 0, "reclamar de nuevo no duplica los avisos");
+
+  // Avanza a la 2: Beto llego, Cami es la siguiente. Ana (que no subio) ya quedo atras y no recibe nada nuevo.
+  await setCurrent(stopB);
+  assert.deepEqual(byTicket(await claim()), { [pB]: "arrived", [pC]: "approaching" });
+
+  // Quien ya subio (used) no recibe avisos.
+  await db.exec(`update transfer_tickets set status='used' where id='${pC}'`);
+  await setCurrent(stopC);
+  assert.equal((await claim()).length, 0);
+
+  // Reiniciar el recorrido borra los avisos: un recorrido nuevo vuelve a avisar.
+  await db.exec(`select set_config('request.jwt.claim.sub','${ownerUser}',false)`);
+  await db.query(`select * from transfer_mark_stop('${route}', null)`);
+  assert.equal(Number(await scalar(`select count(*)::int from transfer_notifications`)), 0);
+  await setCurrent(stopA);
+  assert.deepEqual(byTicket(await claim()), { [pA]: "arrived", [pB]: "approaching" });
+
+  await db.close();
+});
+
+test("avisos: suscripcion push unica por dispositivo y aviso de premio que se reclama una sola vez", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "c2c2c2c2-1111-4111-8111-111111111111";
+  await db.exec(`insert into organizations(id,name,slug) values ('${org}','Club Push','club-push')`);
+  const mk = (code: string) => scalar(`insert into premium_members(organization_id, first_name, last_name, member_code) values ('${org}','S','${code}','${code}') returning id::text`) as Promise<string>;
+  const ana = await mk("PS0001");
+  const beto = await mk("PS0002");
+
+  // Un mismo celular (endpoint) pasa de un socio a otro, no queda duplicado.
+  const upsert = (member: string) =>
+    db.exec(`insert into member_push_subscriptions(member_id, endpoint, p256dh, auth_key) values ('${member}','https://push.example.test/abc123','k','a')
+      on conflict (endpoint) do update set member_id = excluded.member_id`);
+  await upsert(ana);
+  await upsert(beto);
+  assert.equal(Number(await scalar(`select count(*)::int from member_push_subscriptions`)), 1);
+  assert.equal(await scalar(`select member_id::text from member_push_subscriptions`), beto);
+
+  // Borrar al socio borra sus suscripciones.
+  await db.exec(`delete from premium_members where id='${beto}'`);
+  assert.equal(Number(await scalar(`select count(*)::int from member_push_subscriptions`)), 0);
+
+  // El aviso del premio se reclama una sola vez.
+  await db.exec(`insert into member_monthly_winners(organization_id, member_id, period, position, points, prize) values ('${org}','${ana}','2026-08',1,100,'Mesa VIP')`);
+  const claim = () => db.query(`update member_monthly_winners set notified_at = now() where period='2026-08' and notified_at is null returning id`);
+  assert.equal((await claim()).rows.length, 1);
+  assert.equal((await claim()).rows.length, 0, "el segundo intento no vuelve a avisar");
 
   await db.close();
 });

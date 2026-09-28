@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { previousMonthRange } from "../../../../lib/panel/period";
+import { sendPushToMember } from "../../../../lib/push/server";
+import { createMemberPublicPath } from "../../../../lib/members/signature";
 
 export const dynamic = "force-dynamic";
 
@@ -49,5 +51,37 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, period, organizations: orgs?.length ?? 0, newWinners: winners, failed });
+  // Aviso al celular de cada ganador. Cada aviso se reclama de forma atomica
+  // (notified_at) antes de mandarse: si el cron se reintenta, no se repite.
+  let notified = 0;
+  const { data: pending, error: pendingError } = await admin
+    .from("member_monthly_winners")
+    .select("id, member_id, position, prize")
+    .eq("period", period)
+    .is("notified_at", null)
+    .limit(500);
+
+  if (pendingError) {
+    if (!/notified_at|schema cache|does not exist/i.test(pendingError.message ?? "")) console.error("CIERRE RANKING avisos:", pendingError);
+  } else {
+    for (const winner of pending ?? []) {
+      const claimed = await admin
+        .from("member_monthly_winners")
+        .update({ notified_at: new Date().toISOString() })
+        .eq("id", winner.id)
+        .is("notified_at", null)
+        .select("id");
+      if (claimed.error || (claimed.data?.length ?? 0) === 0) continue;
+
+      const monthName = new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${period}-01T00:00:00Z`));
+      await sendPushToMember(winner.member_id as string, {
+        title: winner.position === 1 ? "Ganaste el ranking" : `Quedaste en el puesto ${winner.position} del ranking`,
+        body: `${monthName}: ${winner.prize}. Mostrá tu carnet para retirarlo.`,
+        url: createMemberPublicPath(winner.member_id as string),
+      });
+      notified++;
+    }
+  }
+
+  return NextResponse.json({ ok: true, period, organizations: orgs?.length ?? 0, newWinners: winners, failed, notified });
 }

@@ -20,6 +20,7 @@ type AppData = {
   orders: Order[];
   points: PointsRow[];
   wonPrizes: WonPrize[];
+  alerts: { status: "no_email" | "login" | "mismatch" | "ready"; vapidKey: string };
 };
 
 type Props = { memberId: string; signature: string; qrDataUrl: string };
@@ -61,6 +62,17 @@ function money(minor: number) {
 function formatDate(value: string | null) {
   if (!value) return "";
   return new Intl.DateTimeFormat("es-AR", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires" }).format(new Date(value));
+}
+
+// La clave VAPID puede traer espacios o saltos de linea si se pego mal: se
+// limpia antes de decodificarla (mismo criterio que el perfil del organizador).
+function urlBase64ToUint8Array(base64String: string) {
+  const cleaned = base64String.trim().replace(/[^A-Za-z0-9_-]/g, "");
+  const padding = "=".repeat((4 - (cleaned.length % 4)) % 4);
+  const raw = window.atob((cleaned + padding).replace(/-/g, "+").replace(/_/g, "/"));
+  const output = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i);
+  return output;
 }
 
 function monthName(period: string) {
@@ -130,6 +142,101 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  // Al tocar un aviso del celular se abre directo en la solapa que corresponde (?tab=pedidos).
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("tab");
+    if (wanted && TABS.some((t) => t.id === wanted)) {
+      Promise.resolve().then(() => setTab(wanted as Tab));
+    }
+  }, []);
+
+  // Avisos al celular (solo con sesion por email, ver /api/socio/[id]/push).
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushError, setPushError] = useState("");
+  const alertsStatus = data?.alerts?.status;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+      if (cancelled) return;
+      setPushSupported(supported);
+      if (!supported || alertsStatus !== "ready") return;
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const existing = await registration.pushManager.getSubscription();
+        if (cancelled) return;
+        setPushSubscribed(Boolean(existing));
+        // Si este celular ya estaba suscripto, se reclama de nuevo para este socio
+        // (un celular compartido recibe los avisos de quien inicio sesion).
+        if (existing) {
+          const json = existing.toJSON();
+          await fetch(`${base}/push${query}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
+          });
+        }
+      } catch {
+        // No bloquea la app.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [alertsStatus, base, query]);
+
+  async function enableAlerts() {
+    if (pushBusy) return;
+    setPushBusy(true);
+    setPushError("");
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") throw new Error("Necesitamos tu permiso para poder avisarte.");
+      const vapidKey = data?.alerts.vapidKey;
+      if (!vapidKey) throw new Error("Los avisos todavía no están configurados.");
+
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidKey) });
+      const json = subscription.toJSON();
+      const response = await fetch(`${base}/push${query}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudieron activar los avisos.");
+      setPushSubscribed(true);
+    } catch (err) {
+      setPushError(err instanceof Error ? err.message : "No se pudieron activar los avisos.");
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
+  async function disableAlerts() {
+    if (pushBusy) return;
+    setPushBusy(true);
+    setPushError("");
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const existing = await registration.pushManager.getSubscription();
+      if (existing) {
+        await fetch(`${base}/push${query}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: existing.endpoint }),
+        });
+        await existing.unsubscribe();
+      }
+      setPushSubscribed(false);
+    } catch (err) {
+      setPushError(err instanceof Error ? err.message : "No se pudieron desactivar los avisos.");
+    } finally {
+      setPushBusy(false);
+    }
+  }
 
   // Recarga de saldo con Mercado Pago.
   const [topupOpen, setTopupOpen] = useState(false);
@@ -444,6 +551,54 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                     Presentá este QR en la puerta{data.organization.checkinPoints > 0 ? ` y sumá ${data.organization.checkinPoints} puntos por cada fiesta` : ""}.
                   </p>
                 </div>
+              </section>
+            )}
+
+            {/* AVISOS AL CELULAR */}
+            {tab === "carnet" && alertsStatus && (
+              <section className="mt-4 border border-white/[0.08] bg-white/[0.02] px-5 py-4">
+                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/40">Avisos al celular</p>
+
+                {alertsStatus === "no_email" && (
+                  <p className="mt-2 text-sm text-white/55">Para recibir avisos (pedido listo, colectivo, premios) pedile al boliche que cargue tu email en tu membresía.</p>
+                )}
+
+                {(alertsStatus === "login" || alertsStatus === "mismatch") && (
+                  <>
+                    <p className="mt-2 text-sm text-white/55">
+                      {alertsStatus === "login"
+                        ? "Enterate cuando tu pedido está listo, cuando llega tu colectivo y cuando ganás un premio. Para activarlo, primero ingresá con tu email."
+                        : "Estás ingresado con otro email. Ingresá con el email de tu membresía para activar los avisos."}
+                    </p>
+                    <a href="/mi" className="mt-3 inline-flex h-11 items-center border border-violet-400/40 bg-violet-400/10 px-5 text-[10px] font-black uppercase tracking-[0.14em] text-violet-200">
+                      Ingresar con mi email
+                    </a>
+                  </>
+                )}
+
+                {alertsStatus === "ready" && !pushSupported && (
+                  <p className="mt-2 text-sm text-white/55">Este celular o navegador no permite avisos. En iPhone, abrí esta página desde el ícono agregado a la pantalla de inicio.</p>
+                )}
+
+                {alertsStatus === "ready" && pushSupported && !pushSubscribed && (
+                  <>
+                    <p className="mt-2 text-sm text-white/55">Te avisamos cuando tu pedido está listo, cuando llega tu colectivo, cuando ganás un premio y cuando se acredita tu saldo.</p>
+                    <button type="button" disabled={pushBusy} onClick={enableAlerts} className="mt-3 h-11 border border-emerald-400/40 bg-emerald-400/10 px-5 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-300 disabled:opacity-40">
+                      {pushBusy ? "Activando…" : "Activar avisos"}
+                    </button>
+                  </>
+                )}
+
+                {alertsStatus === "ready" && pushSupported && pushSubscribed && (
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm font-bold text-emerald-300">Avisos activados en este celular</p>
+                    <button type="button" disabled={pushBusy} onClick={disableAlerts} className="text-[11px] text-white/40 underline underline-offset-4 hover:text-white/70 disabled:opacity-40">
+                      Desactivar
+                    </button>
+                  </div>
+                )}
+
+                {pushError && <p className="mt-3 text-xs text-red-300">{pushError}</p>}
               </section>
             )}
 
