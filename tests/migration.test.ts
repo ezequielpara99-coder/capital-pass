@@ -1802,6 +1802,107 @@ test("seguimiento del colectivo: el escaneo mueve la posicion sin retroceder, ma
   await db.close();
 });
 
+test("script de borrado de eventos de prueba: borra el arbol completo de los eventos elegidos y nada mas", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const count = async (table: string, where = "true") => Number(await scalar(`select count(*)::int from ${table} where ${where}`));
+
+  const org = "f1f1f1f1-1111-4111-8111-111111111111";
+  const user = "f1f1f1f1-2222-4222-8222-222222222222";
+  const evA = "f1f1f1f1-aaaa-4aaa-8aaa-aaaaaaaaaaaa"; // se borra
+  const evB = "f1f1f1f1-bbbb-4bbb-8bbb-bbbbbbbbbbbb"; // se borra
+  const evKeep = "f1f1f1f1-cccc-4ccc-8ccc-cccccccccccc"; // se conserva
+
+  await db.exec(`insert into auth.users values ('${user}','purge@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Org Prueba','org-prueba');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${user}','organizer','active');`);
+  await db.exec(`alter table events add column if not exists slug text;
+    insert into events(id,organization_id,status,slug) values ('${evA}','${org}','active','purga-a'), ('${evB}','${org}','active','purga-b'), ('${evKeep}','${org}','active','conservar');`);
+
+  // La base real tiene claves foraneas entre estas tablas (los stubs de los tests no): se agregan para probar el recorrido.
+  await db.exec(`alter table ticket_types add constraint tt_ev_fk foreign key (event_id) references events(id);
+    alter table sales add constraint s_ev_fk foreign key (event_id) references events(id);
+    alter table sales add constraint s_buyer_fk foreign key (buyer_id) references buyers(id);
+    alter table sale_items add constraint si_sale_fk foreign key (sale_id) references sales(id);
+    alter table sale_items add constraint si_tt_fk foreign key (ticket_type_id) references ticket_types(id);
+    alter table tickets add constraint t_sale_fk foreign key (sale_id) references sales(id);
+    alter table tickets add constraint t_si_fk foreign key (sale_item_id) references sale_items(id);
+    alter table tickets add constraint t_tt_fk foreign key (ticket_type_id) references ticket_types(id);
+    alter table entry_scans add constraint es_t_fk foreign key (ticket_id) references tickets(id);`);
+
+  const seedTree = async (event: string, tag: string) => {
+    const tt = await scalar(`insert into ticket_types(event_id,name,price_minor,capacity) values ('${event}','General ${tag}',1000,10) returning id::text`);
+    const buyer = await scalar(`insert into buyers(organization_id,first_name,last_name,dni) values ('${org}','C','${tag}','${tag}') returning id::text`);
+    const sale = await scalar(`insert into sales(organization_id,event_id,buyer_id,total_minor) values ('${org}','${event}','${buyer}',1000) returning id::text`);
+    const item = await scalar(`insert into sale_items(sale_id,event_id,ticket_type_id,quantity,unit_price_minor) values ('${sale}','${event}','${tt}',1,1000) returning id::text`);
+    const ticket = await scalar(`insert into tickets(sale_item_id,sale_id,event_id,ticket_type_id,manual_code) values ('${item}','${sale}','${event}','${tt}','${tag.toUpperCase()}1') returning id::text`);
+    await db.exec(`insert into entry_scans(event_id,ticket_id,result) values ('${event}','${ticket}','valid')`);
+    const bar = await scalar(`insert into bars(event_id,name) values ('${event}','Barra ${tag}') returning id::text`);
+    const product = await scalar(`insert into products(name,category) values ('Prod ${tag}','bebida') returning id::text`);
+    const ep = await scalar(`insert into event_products(event_id,product_id) values ('${event}','${product}') returning id::text`);
+    await db.exec(`insert into bar_stock(bar_id,event_product_id,quantity) values ('${bar}','${ep}',5);
+      insert into stock_movements(event_id,event_product_id,bar_id,type,quantity) values ('${event}','${ep}','${bar}','ingreso',5)`);
+    const table = await scalar(`insert into bar_tables(event_id,name,price_minor) values ('${event}','Mesa ${tag}',100) returning id::text`);
+    await db.exec(`insert into bar_sales(event_id,bar_id,bartender_member_id,table_id,event_product_id,quantity,unit_price_minor,total_minor,payment_method)
+      values ('${event}','${bar}',(select id from organization_members limit 1),'${table}','${ep}',1,100,100,'efectivo')`);
+    const route = await scalar(`insert into transfer_routes(event_id,name) values ('${event}','Ruta ${tag}') returning id::text`);
+    const stop = await scalar(`insert into transfer_route_stops(route_id,position,name) values ('${route}',1,'P1') returning id::text`);
+    await db.exec(`insert into transfer_tickets(route_id,sale_id,passenger_name,manual_code,stop_id) values ('${route}','${sale}','Pax','${tag.toUpperCase()}X','${stop}')`);
+    return { buyer, sale, ticket };
+  };
+
+  const a = await seedTree(evA, "aa");
+  await seedTree(evB, "bb");
+  const keep = await seedTree(evKeep, "kk");
+  // Un comprador compartido: compro en un evento a borrar Y en el que se conserva -> tiene que sobrevivir.
+  const shared = await scalar(`select buyer_id::text from sales where event_id='${evA}'`);
+  await db.exec(`update sales set buyer_id='${shared}' where id='${keep.sale}'`);
+
+  // Se corre el script REAL (con la lista de eventos y el "11" reemplazados por los de esta prueba).
+  const script = readFileSync(new URL("../scripts/sql/purgar-eventos-de-prueba.sql", import.meta.url), "utf8");
+  const body = script.slice(script.indexOf("\nbegin;\n") + 1);
+  const testBody = body
+    .replace(/slug in \(\s*'qa-control[\s\S]*?\);/, "slug in ('purga-a','purga-b');")
+    .replace("cantidad <> 11", "cantidad <> 2")
+    .replace(/\(select count\(\*\) from public\.events where slug like 'qa-%' or slug = 'primavera-2026'\)/, "(select count(*) from public.events where slug like 'purga-%')");
+  assert.notEqual(testBody, body, "el reemplazo de la lista tiene que haber funcionado");
+  await db.exec(testBody);
+
+  // Se fueron los dos eventos y todo su arbol...
+  assert.equal(await count("events", `id in ('${evA}','${evB}')`), 0);
+  for (const table of ["ticket_types", "sales", "sale_items", "tickets", "entry_scans", "bars", "event_products", "stock_movements", "bar_tables", "bar_sales", "transfer_routes"]) {
+    assert.equal(await count(table, `event_id in ('${evA}','${evB}')`), 0, `${table} de los eventos borrados`);
+  }
+  assert.equal(await count("bar_stock"), 1, "solo queda el stock de la barra del evento conservado");
+  assert.equal(await count("transfer_route_stops"), 1);
+  assert.equal(await count("transfer_tickets"), 1);
+
+  // ...y el evento que no estaba en la lista quedo completo.
+  assert.equal(await count("events", `id='${evKeep}'`), 1);
+  for (const table of ["ticket_types", "sales", "sale_items", "tickets", "entry_scans", "bars", "event_products", "stock_movements", "bar_tables", "bar_sales", "transfer_routes"]) {
+    assert.equal(await count(table, `event_id='${evKeep}'`), 1, `${table} del evento conservado`);
+  }
+  assert.equal(await count("tickets", `id='${keep.ticket}'`), 1);
+
+  // La organizacion y sus miembros no se tocan.
+  assert.equal(await count("organizations", `id='${org}'`), 1);
+  assert.equal(await count("organization_members", `organization_id='${org}'`), 1);
+
+  // Compradores: el de un solo evento borrado se va; el compartido con un evento que se conserva, no.
+  assert.equal(await count("buyers", `id='${a.buyer}'`), 1, "el comprador compartido sobrevive porque otra venta lo usa");
+  assert.equal(await count("buyers"), 2, "quedan el compartido y el del evento conservado; se fue el del evento borrado 'bb'");
+
+  // Si la lista no coincide con lo esperado, no borra nada (protege contra un error de tipeo).
+  await assert.rejects(
+    () => db.exec(`begin; create temp table _eventos_a_borrar on commit drop as select id from events where slug = 'no-existe'; do $$ begin if (select count(*) from _eventos_a_borrar) <> 11 then raise exception 'Se esperaban 11'; end if; end $$; commit;`),
+    /Se esperaban 11/
+  );
+  await db.exec("rollback");
+  assert.equal(await count("events", `id='${evKeep}'`), 1);
+
+  await db.close();
+});
+
 test("mesas online: la mesa se reserva al pagar, se libera si no se paga o se reembolsa y no se vende dos veces", async () => {
   const db = await database();
   const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
