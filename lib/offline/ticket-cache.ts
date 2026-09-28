@@ -6,10 +6,23 @@
 // archivo.
 
 const DB_NAME = "capital-pass-control-offline";
-const DB_VERSION = 1;
+// v2: agrega socios premium y lista negra para funcionar sin señal.
+const DB_VERSION = 2;
 const STORE_TICKETS = "tickets";
 const STORE_PENDING = "pendingScans";
 const STORE_META = "meta";
+const STORE_MEMBERS = "members";
+const STORE_BLACKLIST = "blacklist";
+
+export type CachedMember = {
+  id: string;
+  name: string;
+  code: string;
+  status: "active" | "expired" | "cancelled" | string;
+  expiresAt: string | null;
+};
+
+export type CachedBlacklistEntry = { dni: string; reason: string | null };
 
 export type CachedTicketStatus = "issued" | "used" | "cancelled" | string;
 
@@ -57,6 +70,14 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_META)) {
         db.createObjectStore(STORE_META, { keyPath: "key" });
       }
+
+      if (!db.objectStoreNames.contains(STORE_MEMBERS)) {
+        db.createObjectStore(STORE_MEMBERS, { keyPath: "id" });
+      }
+
+      if (!db.objectStoreNames.contains(STORE_BLACKLIST)) {
+        db.createObjectStore(STORE_BLACKLIST, { keyPath: "dni" });
+      }
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -90,6 +111,45 @@ export async function loadEventTickets(eventId: string, tickets: CachedTicket[])
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+}
+
+// Socios premium y lista negra de la organizacion del evento, para reconocer
+// un carnet o advertir una persona restringida sin conexion. Reemplaza lo
+// anterior (siempre es una foto completa y fresca).
+export async function loadEventPeople(members: CachedMember[], blacklist: CachedBlacklistEntry[]): Promise<void> {
+  const db = await openDb();
+  const tx = db.transaction([STORE_MEMBERS, STORE_BLACKLIST], "readwrite");
+  const membersStore = tx.objectStore(STORE_MEMBERS);
+  const blacklistStore = tx.objectStore(STORE_BLACKLIST);
+
+  await promisifyRequest(membersStore.clear());
+  await promisifyRequest(blacklistStore.clear());
+  for (const member of members) membersStore.put(member);
+  for (const entry of blacklist) blacklistStore.put(entry);
+
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function lookupMemberById(id: string): Promise<CachedMember | null> {
+  const db = await openDb();
+  const tx = db.transaction(STORE_MEMBERS, "readonly");
+  const result = await promisifyRequest(tx.objectStore(STORE_MEMBERS).get(id));
+  return (result as CachedMember | undefined) ?? null;
+}
+
+// Devuelve el motivo (o "" si no tiene) cuando el DNI esta en la lista negra
+// guardada, y null si no esta. El DNI se compara solo por digitos.
+export async function lookupBlacklistedDni(dni: string): Promise<{ reason: string | null } | null> {
+  const digits = dni.replace(/\D/g, "");
+  if (!digits) return null;
+  const db = await openDb();
+  const tx = db.transaction(STORE_BLACKLIST, "readonly");
+  const result = await promisifyRequest(tx.objectStore(STORE_BLACKLIST).get(digits));
+  const entry = result as CachedBlacklistEntry | undefined;
+  return entry ? { reason: entry.reason } : null;
 }
 
 export async function getCacheMeta(): Promise<{ eventId: string | null; syncedAt: string | null }> {

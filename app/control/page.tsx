@@ -19,11 +19,16 @@ import {
   enqueueScan,
   getCacheMeta,
   listPendingScans,
+  loadEventPeople,
   loadEventTickets,
+  lookupBlacklistedDni,
   lookupByManualCode,
   lookupByTicketId,
+  lookupMemberById,
   markUsedLocally,
   removePendingScan,
+  type CachedBlacklistEntry,
+  type CachedMember,
 } from "../../lib/offline/ticket-cache";
 
 type Membership = {
@@ -82,6 +87,8 @@ type MemberScanResult = {
   memberCode?: string;
   expiresAt?: string | null;
   pointsAwarded?: number;
+  // Resuelto con los socios precargados (sin conexion): no suma puntos de asistencia.
+  offline?: boolean;
 };
 
 function formatRelativeTime(iso: string | null) {
@@ -189,6 +196,20 @@ export default function ControlPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error ?? "No se pudieron precargar las entradas.");
       await loadEventTickets(eventId, data.tickets as CachedTicket[]);
+
+      // Socios premium y lista negra para reconocer/advertir sin señal. Es un
+      // complemento: si falla (o la migracion todavia no esta), el resto del
+      // modo offline funciona igual.
+      try {
+        const peopleResponse = await fetch(`/api/control/preload-socios?eventId=${eventId}`, { cache: "no-store" });
+        if (peopleResponse.ok) {
+          const people = await peopleResponse.json();
+          await loadEventPeople((people.members ?? []) as CachedMember[], (people.blacklist ?? []) as CachedBlacklistEntry[]);
+        }
+      } catch (peopleError) {
+        console.error("ERROR PRECARGA SOCIOS:", peopleError);
+      }
+
       await refreshOfflineStatus();
     } catch (err) {
       console.error("ERROR PRECARGA OFFLINE:", err);
@@ -569,6 +590,16 @@ export default function ControlPage() {
       scannedAt: new Date().toISOString(),
     });
 
+    // Lista negra guardada en el celular: advierte igual sin conexion.
+    let blacklist: { reason: string | null } | null = null;
+    if (cached?.buyerDni) {
+      try {
+        blacklist = await lookupBlacklistedDni(cached.buyerDni);
+      } catch {
+        // Sin lista guardada: se muestra el resultado de la entrada igual.
+      }
+    }
+
     setValidation({
       result,
       ticket_id: cached?.ticketId ?? null,
@@ -578,6 +609,7 @@ export default function ControlPage() {
       manual_code: cached?.manualCode ?? manualCode,
       message: !cached ? "No encontramos esta entrada en los datos precargados." : null,
       offline: true,
+      ...(blacklist ? { blacklisted: true, blacklist_reason: blacklist.reason } : {}),
     });
 
     await refreshOfflineStatus();
@@ -614,7 +646,23 @@ export default function ControlPage() {
       setScannerOpen(false);
 
       if (!isOnline) {
-        setError("Necesitás conexión para reconocer un carnet de socio.");
+        // Sin señal: se reconoce contra los socios precargados. No se puede
+        // verificar la firma del QR (el secreto nunca sale del servidor), igual
+        // que con las entradas offline; solo identifica, no deja pasar ni bloquea.
+        const memberId = qrPayload.trim().split(":")[1] ?? "";
+        const cachedMember = memberId ? await lookupMemberById(memberId) : null;
+        if (!cachedMember) {
+          setMemberResult({ status: "not_found", offline: true });
+          return;
+        }
+        const expired = Boolean(cachedMember.expiresAt) && `${cachedMember.expiresAt}` < new Date().toISOString().slice(0, 10);
+        setMemberResult({
+          status: (expired && cachedMember.status === "active" ? "expired" : cachedMember.status) as MemberScanResult["status"],
+          firstName: cachedMember.name,
+          memberCode: cachedMember.code,
+          expiresAt: cachedMember.expiresAt,
+          offline: true,
+        });
         return;
       }
 
@@ -1108,6 +1156,10 @@ export default function ControlPage() {
 
           {memberResult.memberCode && (
             <p className="mt-4 font-mono text-lg tracking-[0.15em] text-white/60">{memberResult.memberCode}</p>
+          )}
+
+          {memberResult.offline && (
+            <p className="mt-3 text-xs text-amber-300/80">Reconocido sin conexión con los socios precargados. No suma puntos de asistencia.</p>
           )}
 
           {Number(memberResult.pointsAwarded ?? 0) > 0 && (

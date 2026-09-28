@@ -113,7 +113,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     // enseguida: el trigger libera la mesa (no hace falta esperar 30 minutos).
     if (saleIdForRollback) {
       try {
-        await createAdminClient().from("sales").update({ status: "cancelled" }).eq("id", saleIdForRollback).eq("status", "pending_approval");
+        // Por funcion de la base: el usuario de servicio no puede modificar sales directamente.
+        const rolledBack = await createAdminClient().rpc("cp_cancel_online_sale", { p_sale_id: saleIdForRollback });
+        if (rolledBack.error) console.error("MESA ONLINE: no se pudo liberar la mesa.", rolledBack.error.message);
       } catch (rollbackError) {
         console.error("MESA ONLINE: no se pudo liberar la mesa.", rollbackError);
       }

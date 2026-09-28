@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { verifyControllerForEvent } from "../../../../lib/control/auth";
+import { fetchAllRows } from "../../../../lib/supabase/fetch-all";
+
+// Un .in() con cientos de UUID se pasa del largo maximo de la URL: se consulta
+// de a tandas.
+const CHUNK = 100;
+function chunks<T>(values: T[], size = CHUNK) {
+  const out: T[][] = [];
+  for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+  return out;
+}
 
 // Devuelve todas las entradas de un evento para que el control de
 // ingreso las precargue en el celular (modo offline): mismos datos que
@@ -11,6 +21,10 @@ import { verifyControllerForEvent } from "../../../../lib/control/auth";
 // no versionado), asi que no se puede usar el embed anidado de
 // PostgREST -- se resuelve con consultas separadas, mismo patron que
 // ya usan app/api/rrpps/mapa|cobertura/route.ts.
+//
+// Las entradas se leen paginadas: PostgREST corta en 1000 filas, y un evento
+// con mas entradas que eso quedaba con el cache offline INCOMPLETO (las que
+// faltaban se rechazaban como "no encontradas" sin señal).
 export async function GET(request: NextRequest) {
   const eventId = request.nextUrl.searchParams.get("eventId")?.trim();
   if (!eventId) {
@@ -24,38 +38,45 @@ export async function GET(request: NextRequest) {
 
   const admin = createAdminClient();
 
-  const { data: tickets, error } = await admin
-    .from("tickets")
-    .select("id, manual_code, status, sale_id, ticket_type_id")
-    .eq("event_id", eventId)
-    .not("manual_code", "is", null);
+  const { data: rows, error } = await fetchAllRows<{ id: string; manual_code: string | null; status: string; sale_id: string | null; ticket_type_id: string | null }>(
+    (from, to) =>
+      admin
+        .from("tickets")
+        .select("id, manual_code, status, sale_id, ticket_type_id")
+        .eq("event_id", eventId)
+        .not("manual_code", "is", null)
+        .order("id", { ascending: true })
+        .range(from, to)
+  );
 
   if (error) {
     console.error("ERROR PRELOAD CONTROL:", error);
     return NextResponse.json({ error: "No se pudieron cargar las entradas del evento." }, { status: 500 });
   }
 
-  const rows = tickets ?? [];
   const saleIds = [...new Set(rows.map((t) => t.sale_id).filter((id): id is string => Boolean(id)))];
   const ticketTypeIds = [...new Set(rows.map((t) => t.ticket_type_id).filter((id): id is string => Boolean(id)))];
 
-  const [{ data: sales }, { data: ticketTypes }] = await Promise.all([
-    saleIds.length
-      ? admin.from("sales").select("id, buyer_id").in("id", saleIds)
-      : Promise.resolve({ data: [] as { id: string; buyer_id: string | null }[] }),
-    ticketTypeIds.length
-      ? admin.from("ticket_types").select("id, name").in("id", ticketTypeIds)
-      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-  ]);
+  const sales: { id: string; buyer_id: string | null }[] = [];
+  for (const group of chunks(saleIds)) {
+    const { data } = await admin.from("sales").select("id, buyer_id").in("id", group);
+    sales.push(...((data ?? []) as { id: string; buyer_id: string | null }[]));
+  }
 
-  const saleById = new Map((sales ?? []).map((s) => [s.id, s]));
+  const { data: ticketTypes } = ticketTypeIds.length
+    ? await admin.from("ticket_types").select("id, name").in("id", ticketTypeIds)
+    : { data: [] as { id: string; name: string }[] };
+
+  const saleById = new Map(sales.map((s) => [s.id, s]));
   const ticketTypeNameById = new Map((ticketTypes ?? []).map((tt) => [tt.id, tt.name]));
 
-  const buyerIds = [...new Set((sales ?? []).map((s) => s.buyer_id).filter((id): id is string => Boolean(id)))];
-  const { data: buyers } = buyerIds.length
-    ? await admin.from("buyers").select("id, first_name, last_name, dni").in("id", buyerIds)
-    : { data: [] as { id: string; first_name: string; last_name: string; dni: string | null }[] };
-  const buyerById = new Map((buyers ?? []).map((b) => [b.id, b]));
+  const buyerIds = [...new Set(sales.map((s) => s.buyer_id).filter((id): id is string => Boolean(id)))];
+  const buyers: { id: string; first_name: string; last_name: string; dni: string | null }[] = [];
+  for (const group of chunks(buyerIds)) {
+    const { data } = await admin.from("buyers").select("id, first_name, last_name, dni").in("id", group);
+    buyers.push(...((data ?? []) as typeof buyers));
+  }
+  const buyerById = new Map(buyers.map((b) => [b.id, b]));
 
   const items = rows.map((ticket) => {
     const sale = ticket.sale_id ? saleById.get(ticket.sale_id) : null;

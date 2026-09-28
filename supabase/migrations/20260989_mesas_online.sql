@@ -135,6 +135,62 @@ $function$;
 revoke all on function public.create_online_table_sale(uuid, uuid, text, text, text, text, text) from public, anon, authenticated;
 grant execute on function public.create_online_table_sale(uuid, uuid, text, text, text, text, text) to service_role;
 
+-- =============================================================
+-- 3. Cancelar una venta online pendiente (p. ej. si el pago no pudo
+--    iniciarse): el usuario de servicio no puede modificar sales
+--    directamente, solo a traves de funciones. El trigger libera la mesa.
+-- =============================================================
+
+create or replace function public.cp_cancel_online_sale(p_sale_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path to ''
+as $function$
+begin
+  update public.sales set status = 'cancelled', updated_at = now()
+  where id = p_sale_id and channel = 'online' and status = 'pending_approval';
+  return found;
+end;
+$function$;
+
+revoke all on function public.cp_cancel_online_sale(uuid) from public, anon, authenticated;
+grant execute on function public.cp_cancel_online_sale(uuid) to service_role;
+
+-- =============================================================
+-- 4. Limpieza de datos de prueba (solo organizaciones cuyo nombre empieza
+--    con "ZZ QA"): borra ventas, entradas y compradores que el usuario de
+--    servicio no puede borrar directamente. Rechaza cualquier otra
+--    organizacion, asi no puede tocar datos reales.
+-- =============================================================
+
+create or replace function public.cp_qa_purge_org(p_org_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path to ''
+as $function$
+declare
+  v_sales integer;
+begin
+  if not exists (select 1 from public.organizations where id = p_org_id and name like 'ZZ QA%') then
+    raise exception 'Solo se pueden limpiar organizaciones de prueba (nombre que empieza con ZZ QA).';
+  end if;
+
+  delete from public.tickets where sale_id in (select id from public.sales where organization_id = p_org_id);
+  delete from public.sale_items where sale_id in (select id from public.sales where organization_id = p_org_id);
+  update public.member_orders set sale_id = null where organization_id = p_org_id;
+  with removed as (delete from public.sales where organization_id = p_org_id returning 1)
+  select count(*)::integer into v_sales from removed;
+  delete from public.buyers where organization_id = p_org_id;
+  delete from public.audit_logs where organization_id = p_org_id;
+  return v_sales;
+end;
+$function$;
+
+revoke all on function public.cp_qa_purge_org(uuid) from public, anon, authenticated;
+grant execute on function public.cp_qa_purge_org(uuid) to service_role;
+
 commit;
 
 notify pgrst, 'reload schema';

@@ -1862,6 +1862,18 @@ test("mesas online: la mesa se reserva al pagar, se libera si no se paga o se re
   assert.equal(await scalar(`select status from sales where id='${s2.sale_id}'`), "confirmed");
   assert.equal(await status(t2), "reserved");
 
+  // Si el pago no pudo iniciarse, cp_cancel_online_sale cancela la venta pendiente y libera la mesa al instante.
+  const t4 = await mkTable("Mesa 4", "3500");
+  const sRollback = (await create(t4, "888888")).rows[0];
+  assert.equal(await status(t4), "reserved");
+  assert.equal(await scalar(`select cp_cancel_online_sale('${sRollback.sale_id}')`), true);
+  assert.equal(await scalar(`select status from sales where id='${sRollback.sale_id}'`), "cancelled");
+  assert.equal(await status(t4), "available");
+  assert.equal(await scalar(`select cp_cancel_online_sale('${sRollback.sale_id}')`), false, "cancelar de nuevo no hace nada");
+
+  // La limpieza de datos de prueba rechaza organizaciones reales (solo 'ZZ QA...').
+  await assert.rejects(() => db.query(`select cp_qa_purge_org('${org}')`), /organizaciones de prueba/);
+
   // Pago aprobado tarde pero otra persona ya tomo la mesa: no se vende dos veces, queda cancelada (reintegro manual).
   const s3 = (await create(t3, "666666")).rows[0];
   await db.exec(`update sales set created_at = now() - interval '1 hour' where id='${s3.sale_id}'`);
