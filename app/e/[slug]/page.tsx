@@ -5,6 +5,7 @@ import { createAdminClient } from "../../../lib/supabase/admin";
 import { getAppBaseUrl } from "../../../lib/mercadopago/server";
 import EventCheckout from "./event-checkout";
 import FallbackImage from "./fallback-image";
+import { Countdown, EventActions, StickyBuyBar } from "./event-extras";
 
 // Esta pagina se comparte activamente por WhatsApp/Instagram (es el flujo
 // de venta principal) -- sin esto, todos los eventos indexaban con el
@@ -20,13 +21,16 @@ export async function generateMetadata({
 
   const { data: event } = await admin
     .from("events")
-    .select("name, description, starts_at, venue_name, city, banner_horizontal_path, banner_square_path")
+    .select("name, description, starts_at, venue_name, city, status, banner_horizontal_path, banner_square_path")
     .eq("slug", slug)
     .maybeSingle();
 
   if (!event) {
     return { title: "Evento no encontrado · Capital Pass" };
   }
+
+  // Un borrador (todavia no publicado) no tiene que aparecer en Google.
+  const robots = event.status === "draft" ? { index: false, follow: false } : undefined;
 
   const dateLabel = new Intl.DateTimeFormat("es-AR", {
     day: "2-digit",
@@ -47,6 +51,7 @@ export async function generateMetadata({
   return {
     title: `${event.name} · Capital Pass`,
     description,
+    robots,
     alternates: { canonical: pageUrl },
     openGraph: {
       title: event.name,
@@ -89,6 +94,7 @@ export default async function PublicEventPage({
       name,
       description,
       starts_at,
+      ends_at,
       venue_name,
       city,
       status,
@@ -114,13 +120,67 @@ export default async function PublicEventPage({
         status,
         active,
         sales_start_at,
-        sales_end_at
+        sales_end_at,
+        combo_type,
+        combo_quantity,
+        combo_credit_minor,
+        combo_event_product_id
       `)
       .eq("event_id", event.id)
       .eq("active", true)
       .order("created_at", {
         ascending: true,
       });
+
+  // Nombre de los productos incluidos en las entradas con combo.
+  const comboProductIds = [
+    ...new Set(
+      (ticketTypes ?? [])
+        .map((t) => t.combo_event_product_id as string | null)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  const productNames = new Map<string, string>();
+  if (comboProductIds.length > 0) {
+    const { data: productRows } = await admin
+      .from("event_products")
+      .select("id, products ( name )")
+      .in("id", comboProductIds);
+    for (const row of productRows ?? []) {
+      const product = Array.isArray(row.products) ? row.products[0] : row.products;
+      if (product?.name) productNames.set(row.id as string, product.name as string);
+    }
+  }
+
+  // Colectivos del evento con su recorrido (solo informacion publica).
+  const { data: routeRows } = await admin
+    .from("transfer_routes")
+    .select("id, name, departure_at, departure_location, is_paid, price_minor")
+    .eq("event_id", event.id)
+    .eq("active", true)
+    .is("deleted_at", null)
+    .order("departure_at", { ascending: true, nullsFirst: false })
+    .limit(12);
+  const routeIds = (routeRows ?? []).map((r) => r.id as string);
+  const stopsByRoute = new Map<string, string[]>();
+  if (routeIds.length > 0) {
+    const { data: stopRows } = await admin
+      .from("transfer_route_stops")
+      .select("route_id, position, name")
+      .in("route_id", routeIds)
+      .order("position", { ascending: true });
+    for (const stop of stopRows ?? []) {
+      const list = stopsByRoute.get(stop.route_id as string) ?? [];
+      list.push(stop.name as string);
+      stopsByRoute.set(stop.route_id as string, list);
+    }
+  }
+
+  const { data: organization } = await admin
+    .from("organizations")
+    .select("name")
+    .eq("id", event.organization_id)
+    .maybeSingle();
 
   const { data: packRows } = await admin
     .from("ticket_packs")
@@ -160,6 +220,7 @@ export default async function PublicEventPage({
     active: ticket.active,
     salesStartAt: ticket.sales_start_at,
     salesEndAt: ticket.sales_end_at,
+    includes: comboText(ticket, productNames),
   }));
 
   // El chequeo de fecha (sales_start_at/sales_end_at contra "ahora") se
@@ -240,8 +301,53 @@ export default async function PublicEventPage({
         bannerVerticalUrl
     );
 
+  const pageUrl = `${getAppBaseUrl()}/e/${slug}`;
+  const heroForSearch = [bannerHorizontalUrl, bannerSquareUrl, bannerVerticalUrl].filter(Boolean) as string[];
+
+  // Datos estructurados para Google (aparece como evento con fecha, lugar y precio).
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Event",
+    name: event.name,
+    startDate: event.starts_at,
+    ...(event.ends_at ? { endDate: event.ends_at } : {}),
+    eventStatus: event.status === "cancelled" ? "https://schema.org/EventCancelled" : "https://schema.org/EventScheduled",
+    eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
+    location: {
+      "@type": "Place",
+      name: event.venue_name || event.city || "Lugar a confirmar",
+      address: { "@type": "PostalAddress", addressLocality: event.city ?? undefined, addressCountry: "AR" },
+    },
+    ...(heroForSearch.length > 0 ? { image: heroForSearch } : {}),
+    ...(event.description ? { description: event.description } : {}),
+    ...(organization?.name ? { organizer: { "@type": "Organization", name: organization.name } } : {}),
+    offers: mappedTicketTypes.map((ticket) => ({
+      "@type": "Offer",
+      name: ticket.name,
+      price: ticket.priceMinor,
+      priceCurrency: "ARS",
+      url: pageUrl,
+      availability:
+        ticket.status === "sold_out"
+          ? "https://schema.org/SoldOut"
+          : ticket.status === "available"
+            ? "https://schema.org/InStock"
+            : "https://schema.org/PreOrder",
+    })),
+  };
+
+  const isOpenForSales = canBuyOnline && (event.status === "upcoming" || event.status === "active") && mappedTicketTypes.length > 0;
+
   return (
-    <main className="relative min-h-screen overflow-hidden bg-black text-white">
+    <main className="relative min-h-screen overflow-hidden bg-black pb-24 text-white md:pb-0">
+
+      {/* Datos estructurados (SEO): < escapado para que nada cierre el script. */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
+      />
+
+      {isOpenForSales && <StickyBuyBar label="Comprar entradas" />}
 
       {/* ======================================================
           FONDO — luz arriba-izquierda, hereda el lenguaje de la marca
@@ -395,8 +501,8 @@ export default async function PublicEventPage({
                   {event.name}
                 </h1>
 
-                <p className="mt-5 text-base capitalize text-white/55 md:text-lg">
-                  {date}
+                <p className="mt-5 text-base text-white/55 md:text-lg">
+                  {date.charAt(0).toUpperCase() + date.slice(1)}
                 </p>
 
                 <p className="mt-2 text-xs font-medium uppercase tracking-[0.13em] text-white/30">
@@ -416,6 +522,29 @@ export default async function PublicEventPage({
                     }
                   </p>
 
+                )}
+
+                {organization?.name && (
+                  <p className="mt-5 text-xs text-white/35">
+                    Organiza <span className="font-semibold text-white/60">{organization.name}</span>
+                  </p>
+                )}
+
+                {event.status !== "cancelled" && event.status !== "finished" && (
+                  <div className="mt-6">
+                    <Countdown startsAt={event.starts_at} endsAt={event.ends_at ?? null} />
+                  </div>
+                )}
+
+                {event.status !== "cancelled" && (
+                  <EventActions
+                    name={event.name}
+                    startsAt={event.starts_at}
+                    endsAt={event.ends_at ?? null}
+                    venueName={event.venue_name}
+                    city={event.city}
+                    description={event.description}
+                  />
                 )}
 
               </div>
@@ -469,7 +598,7 @@ export default async function PublicEventPage({
               ENTRADAS
           ================================================== */}
 
-          <section className="mt-10">
+          <section id="entradas" className="mt-10 scroll-mt-6">
 
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
 
@@ -500,6 +629,64 @@ export default async function PublicEventPage({
             />
 
           </section>
+
+          {/* ==================================================
+              COLECTIVOS
+          ================================================== */}
+
+          {(routeRows ?? []).length > 0 && (
+
+            <section className="mt-12">
+
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#ff6f4d]">
+                Traslado
+              </p>
+
+              <h2 className="mt-2 text-2xl font-semibold">
+                Viajá en colectivo
+              </h2>
+
+              <p className="mt-2 text-sm text-white/35">
+                Sumate al colectivo del evento. Pedile tu lugar a un RRPP al comprar tu entrada.
+              </p>
+
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+
+                {(routeRows ?? []).map((route) => {
+                  const stops = stopsByRoute.get(route.id as string) ?? [];
+                  return (
+                    <article key={route.id as string} className="rounded-[26px] border border-white/[0.09] bg-white/[0.025] p-6">
+
+                      <div className="flex items-start justify-between gap-4">
+                        <h3 className="text-lg font-bold">🚌 {route.name}</h3>
+                        <span className="shrink-0 rounded-full border border-white/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-white/60">
+                          {route.is_paid ? formatMoney(Number(route.price_minor)) : "Gratis"}
+                        </span>
+                      </div>
+
+                      {(route.departure_at || route.departure_location) && (
+                        <p className="mt-3 text-sm text-white/45">
+                          Sale{route.departure_at ? ` ${formatDeparture(route.departure_at as string)}` : ""}
+                          {route.departure_location ? ` desde ${route.departure_location}` : ""}
+                        </p>
+                      )}
+
+                      {stops.length > 0 && (
+                        <p className="mt-4 text-xs leading-6 text-white/35">
+                          <span className="font-semibold uppercase tracking-[0.12em] text-white/50">Recorrido: </span>
+                          {stops.join(" → ")}
+                        </p>
+                      )}
+
+                    </article>
+                  );
+                })}
+
+              </div>
+
+            </section>
+
+          )}
 
           <footer className="mt-16 border-t border-white/[0.07] pt-7 text-center">
 
@@ -540,6 +727,45 @@ function getAssetPublicUrl(
 // ============================================================
 // FORMATTERS
 // ============================================================
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatDeparture(value: string) {
+  return new Intl.DateTimeFormat("es-AR", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Argentina/Buenos_Aires",
+  }).format(new Date(value));
+}
+
+// "1 × Fernet" / "$ 2.000 de consumición": lo que trae incluida la entrada.
+function comboText(
+  ticket: {
+    combo_type: string | null;
+    combo_quantity: number | null;
+    combo_credit_minor: number | string | null;
+    combo_event_product_id: string | null;
+  },
+  productNames: Map<string, string>
+) {
+  if (ticket.combo_type === "producto" && ticket.combo_quantity) {
+    const name = ticket.combo_event_product_id ? productNames.get(ticket.combo_event_product_id) : null;
+    return `${ticket.combo_quantity} × ${name ?? "consumición"}`;
+  }
+  if (ticket.combo_type === "credito" && ticket.combo_credit_minor) {
+    return `${formatMoney(Number(ticket.combo_credit_minor))} de consumición`;
+  }
+  return null;
+}
 
 function formatStatus(
   status: string

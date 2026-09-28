@@ -12,6 +12,8 @@ type TicketType = {
   active: boolean;
   salesStartAt: string | null;
   salesEndAt: string | null;
+  // Consumicion incluida en la entrada (combo), ya armada como texto: "1 × Fernet".
+  includes?: string | null;
 };
 
 // El estado ("available"/"sold_out"/etc.) y la ventana de fecha
@@ -184,6 +186,11 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs, 
                     <h3 className="text-xl font-bold">{ticket.name}</h3>
                     {ticket.description && (
                       <p className="mt-2 text-sm leading-6 text-white/35">{ticket.description}</p>
+                    )}
+                    {ticket.includes && (
+                      <p className="mt-3 inline-flex items-center gap-2 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.07] px-3 py-1.5 text-xs font-semibold text-emerald-200">
+                        🍸 Incluye {ticket.includes}
+                      </p>
                     )}
                   </div>
 
