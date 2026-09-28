@@ -30,6 +30,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (!allowed) return NextResponse.json({ error: "Demasiados intentos. Esperá unos minutos." }, { status: 429 });
 
     const body = await request.json();
+    if (body.acceptedTerms !== true) {
+      return NextResponse.json({ error: "Tenés que aceptar que el saldo no es reembolsable." }, { status: 400 });
+    }
     const amount = Math.round(Number(body.amount));
     if (!Number.isFinite(amount) || amount < MIN_TOPUP || amount > MAX_TOPUP) {
       return NextResponse.json({ error: `Ingresá un monto entre $ ${MIN_TOPUP.toLocaleString("es-AR")} y $ ${MAX_TOPUP.toLocaleString("es-AR")}.` }, { status: 400 });
@@ -69,7 +72,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const mp = getOrganizerMercadoPago(accessToken);
     const preference = await mp.preference.create({
       body: {
-        items: [{ id: `recarga-${topup.id}`, title: `Recarga de saldo - ${org?.name ?? "Capital Pass"}`, quantity: 1, unit_price: amount, currency_id: "ARS" }],
+        items: [{ id: `recarga-${topup.id}`, title: `Recarga de saldo (no reembolsable) - ${org?.name ?? "Capital Pass"}`, quantity: 1, unit_price: amount, currency_id: "ARS" }],
         payer: { name: member.first_name, surname: member.last_name },
         external_reference: `capitalpass_topup:${topup.id}`,
         notification_url: `${base}/api/mercadopago/webhook-ventas`,

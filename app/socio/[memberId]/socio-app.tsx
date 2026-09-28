@@ -107,16 +107,21 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
   const [topupAmount, setTopupAmount] = useState("5000");
   const [topupBusy, setTopupBusy] = useState(false);
   const [topupError, setTopupError] = useState("");
+  const [topupAccepted, setTopupAccepted] = useState(false);
 
   async function startTopup() {
     if (topupBusy) return;
+    if (!topupAccepted) {
+      setTopupError("Tenés que aceptar que el saldo no es reembolsable.");
+      return;
+    }
     setTopupBusy(true);
     setTopupError("");
     try {
       const response = await fetch(`${base}/recarga${query}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: Number(topupAmount) }),
+        body: JSON.stringify({ amount: Number(topupAmount), acceptedTerms: topupAccepted }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo iniciar la recarga.");
@@ -363,10 +368,11 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                   </div>
 
                   {data.organization.topupsEnabled && isActive && (
-                    <button type="button" onClick={() => { setTopupError(""); setTopupOpen(true); }} className="mt-4 h-11 w-full border border-emerald-400/40 bg-emerald-400/10 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-300">
+                    <button type="button" onClick={() => { setTopupError(""); setTopupAccepted(false); setTopupOpen(true); }} className="mt-4 h-11 w-full border border-emerald-400/40 bg-emerald-400/10 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-300">
                       + Cargar saldo
                     </button>
                   )}
+                  <p className="mt-2 text-[10px] text-white/30">El saldo es para consumir en el boliche y no es reembolsable.</p>
 
                   <div className="mx-auto mt-6 w-fit rounded-2xl bg-white p-3">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -697,13 +703,20 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
               <span className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Otro monto ($)</span>
               <input value={topupAmount} onChange={(e) => setTopupAmount(e.target.value.replace(/\D/g, ""))} inputMode="numeric" className="mt-2 h-11 w-full border border-white/[0.12] bg-black/30 px-3 text-sm text-white outline-none focus:border-emerald-400/50" />
             </label>
-            <p className="mt-2 text-[11px] text-white/30">Mínimo $ 1.000 · Máximo $ 200.000. El saldo es para consumir en el boliche.</p>
+            <p className="mt-2 text-[11px] text-white/30">Mínimo $ 1.000 · Máximo $ 200.000. El saldo es para consumir en {data?.organization.name ?? "el boliche"}.</p>
+
+            <label className="mt-4 flex cursor-pointer items-start gap-3 border border-amber-400/25 bg-amber-400/[0.06] px-3 py-3">
+              <input type="checkbox" checked={topupAccepted} onChange={(e) => { setTopupAccepted(e.target.checked); setTopupError(""); }} className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-400" />
+              <span className="text-xs leading-relaxed text-amber-100/80">
+                Entiendo que el saldo cargado <strong>no es reembolsable</strong>: no se puede retirar ni transferir, solo se usa para consumir en este boliche.
+              </span>
+            </label>
 
             {topupError && <div className="mt-4 border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-300">{topupError}</div>}
 
             <div className="mt-5 flex gap-2">
               <button type="button" disabled={topupBusy} onClick={() => setTopupOpen(false)} className="h-12 flex-1 border border-white/15 text-[10px] font-black uppercase tracking-wide text-white/60">Volver</button>
-              <button type="button" disabled={topupBusy || !topupAmount} onClick={startTopup} className="h-12 flex-[2] bg-emerald-500 text-[11px] font-black uppercase tracking-wide text-black disabled:opacity-40">
+              <button type="button" disabled={topupBusy || !topupAmount || !topupAccepted} onClick={startTopup} className="h-12 flex-[2] bg-emerald-500 text-[11px] font-black uppercase tracking-wide text-black disabled:opacity-40">
                 {topupBusy ? "Abriendo Mercado Pago…" : `Pagar ${topupAmount ? money(Number(topupAmount)) : ""}`}
               </button>
             </div>
