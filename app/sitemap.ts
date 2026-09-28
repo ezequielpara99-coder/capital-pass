@@ -2,6 +2,11 @@ import type { MetadataRoute } from "next";
 import { createAdminClient } from "../lib/supabase/admin";
 import { getAppBaseUrl } from "../lib/mercadopago/server";
 
+// Se regenera cada hora: sin esto Next lo genera UNA vez al desplegar y queda
+// congelado -- un evento finalizado seguia en el sitemap (y uno nuevo no
+// aparecia) hasta el proximo deploy.
+export const revalidate = 3600;
+
 // Landing + paginas publicas de evento (activos o proximos, con slug). Los
 // eventos finalizados o cancelados no aportan nada indexados, asi que se
 // dejan afuera.
