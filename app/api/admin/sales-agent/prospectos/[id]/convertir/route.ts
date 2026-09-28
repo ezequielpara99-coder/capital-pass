@@ -20,6 +20,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     const admin = createAdminClient();
     const { data: prospect } = await admin.from("prospects").select("id, campaign_id, status").eq("id", id).is("deleted_at", null).maybeSingle();
     if (!prospect) return NextResponse.json({ error: "No se encontró el prospecto." }, { status: 404 });
+    if (prospect.status === "cliente") {
+      return NextResponse.json({ error: "Este prospecto ya está convertido en cliente." }, { status: 409 });
+    }
 
     const organizationId = UUID.test(String(body.organizationId ?? "")) ? body.organizationId : null;
     const monthlyValue = body.monthlyValue !== undefined && body.monthlyValue !== "" ? Math.round(Number(body.monthlyValue) * 100) : null;
@@ -37,6 +40,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       .select("id, converted_at")
       .single();
     if (error) {
+      if (error.code === "23505") return NextResponse.json({ error: "Este prospecto ya está convertido en cliente." }, { status: 409 });
       console.error("SALES AGENT CONVERTIR:", error);
       return NextResponse.json({ error: "No se pudo registrar la conversión." }, { status: 500 });
     }

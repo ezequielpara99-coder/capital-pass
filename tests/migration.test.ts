@@ -82,6 +82,8 @@ const avisosSocioMigration = readFileSync(new URL("../supabase/migrations/202609
 const pedidosCompletosMigration = readFileSync(new URL("../supabase/migrations/20260988_pedidos_completos.sql", import.meta.url), "utf8");
 const mesasOnlineMigration = readFileSync(new URL("../supabase/migrations/20260989_mesas_online.sql", import.meta.url), "utf8");
 const salesAgentMigration = readFileSync(new URL("../supabase/migrations/20260990_sales_agent.sql", import.meta.url), "utf8");
+const arreglaStockYExpiracionMigration = readFileSync(new URL("../supabase/migrations/20260991_arregla_stock_y_expiracion_pedidos_socio.sql", import.meta.url), "utf8");
+const arreglaDuplicadosSalesAgentMigration = readFileSync(new URL("../supabase/migrations/20260992_arregla_duplicados_y_conversion_sales_agent.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -212,6 +214,8 @@ async function database() {
   await db.exec(pedidosCompletosMigration);
   await db.exec(mesasOnlineMigration);
   await db.exec(salesAgentMigration);
+  await db.exec(arreglaStockYExpiracionMigration);
+  await db.exec(arreglaDuplicadosSalesAgentMigration);
   return db;
 }
 
@@ -1821,6 +1825,21 @@ test("sales agent: los indices de duplicados rechazan instagram/web/telefono/ema
   await db.exec(`insert into prospects(name, phone_digits) values ('Tel A', '5493411234567')`);
   await assert.rejects(() => db.exec(`insert into prospects(name, phone_digits) values ('Tel B', '5493411234567')`), /unique/i);
 
+  // phone_match_key (ultimos 10 digitos): el mismo numero con o sin el "9"
+  // de WhatsApp Argentina / codigo de pais tiene que chocar igual, aunque
+  // phone_digits (los digitos crudos) sea una cadena distinta.
+  await db.exec(`insert into prospects(name, phone_digits, phone_match_key) values ('Cel A', '5493419998888', '3419998888')`);
+  await assert.rejects(
+    () => db.exec(`insert into prospects(name, phone_digits, phone_match_key) values ('Cel B', '03419998888', '3419998888')`),
+    /unique/i,
+    "mismos ultimos 10 digitos, prefijo distinto -> se detecta como el mismo telefono"
+  );
+
+  // Convertir en cliente: no se puede registrar la conversion dos veces para el mismo prospecto (doble click).
+  const conv = await scalar(`insert into prospects(name) values ('Convertido') returning id::text`);
+  await db.exec(`insert into prospect_conversions(prospect_id) values ('${conv}')`);
+  await assert.rejects(() => db.exec(`insert into prospect_conversions(prospect_id) values ('${conv}')`), /unique/i);
+
   await db.exec(`insert into prospects(name, email_norm) values ('Mail A', 'hola@club.test')`);
   await assert.rejects(() => db.exec(`insert into prospects(name, email_norm) values ('Mail B', 'hola@club.test')`), /unique/i);
 
@@ -2057,6 +2076,7 @@ test("pedidos completos: stock al entregar, venta de mesa, nivel con descuento y
   // Sin nivel todavia: precio completo, y al entregar baja el stock del producto vinculado.
   const o1 = await place(`[{"id":"${fernet}","qty":2}]`);
   assert.equal(Number(o1.total_minor), 4000);
+  assert.equal(await scalar(`select event_id::text from member_orders where id='${o1.order_id}'`), event, "con un solo evento activo el pedido queda vinculado a el desde que se crea");
   await deliver(o1.order_id);
   assert.equal(await stock(), 8, "entregar 2 fernet descuenta 2 del stock");
   assert.equal(await scalar(`select stock_deducted from member_orders where id='${o1.order_id}'`), true);
@@ -2086,16 +2106,23 @@ test("pedidos completos: stock al entregar, venta de mesa, nivel con descuento y
   const o4 = await place(`[{"id":"${fernet}","qty":1}]`);
   assert.equal(Number(await scalar(`select points_earned from member_orders where id='${o4.order_id}'`)), 10);
 
-  // Stock insuficiente: descuenta lo que hay, nunca queda negativo.
+  // Stock insuficiente: entregar tiene que fallar, no entregar igual en
+  // silencio (antes descontaba lo que habia y quedaba "entregado").
   const o5 = await place(`[{"id":"${combo}","qty":5}]`);
-  await deliver(o5.order_id);
-  assert.equal(await stock(), 0);
+  await assert.rejects(() => deliver(o5.order_id), /No hay stock suficiente/, "no se puede entregar si no alcanza el stock");
+  assert.equal(await stock(), 4, "un intento de entrega fallido no toca el stock");
+  assert.equal(await scalar(`select status from member_orders where id='${o5.order_id}'`), "pending", "el pedido queda pendiente, no entregado");
 
-  // Dos eventos activos: no se sabe de cual barra salio, no se toca el stock.
-  await db.exec(`update bar_stock set quantity = 6 where bar_id='${bar}'; insert into events(id,organization_id,status) values ('d1d1d1d1-9999-4999-8999-999999999999','${org}','active')`);
+  // Dos eventos activos AL CREAR el pedido: no se sabe de cual barra va a
+  // salir, asi que el pedido no queda vinculado a ningun evento y por lo
+  // tanto no se toca el stock al entregar (antes se re-adivinaba el evento
+  // recien al entregar, lo que ademas era inconsistente si la cantidad de
+  // eventos activos cambiaba entre crear y entregar el pedido).
+  await db.exec(`insert into events(id,organization_id,status) values ('d1d1d1d1-9999-4999-8999-999999999999','${org}','active')`);
   const o6 = await place(`[{"id":"${fernet}","qty":1}]`);
+  assert.equal(await scalar(`select event_id from member_orders where id='${o6.order_id}'`), null, "con 2 eventos activos el pedido no queda vinculado a ninguno");
   await deliver(o6.order_id);
-  assert.equal(await stock(), 6, "con 2 eventos activos no se descuenta");
+  assert.equal(await stock(), 4, "sin evento vinculado no se toca el stock");
   assert.equal(await scalar(`select stock_deducted from member_orders where id='${o6.order_id}'`), false);
   await db.exec(`delete from events where id='d1d1d1d1-9999-4999-8999-999999999999'`);
 
@@ -2112,6 +2139,42 @@ test("pedidos completos: stock al entregar, venta de mesa, nivel con descuento y
   assert.equal(Number(await scalar(`select count(*)::int from sales where event_id='${event}' and channel='mesa' and status='confirmed'`)), 0);
   await deliver(m2.rows[0].order_id);
   assert.equal(Number(await scalar(`select count(*)::int from sales where event_id='${event}' and channel='mesa' and status='confirmed'`)), 1);
+
+  await db.close();
+});
+
+test("pedidos completos: un pedido de mesa colgado (nadie lo marco) vence solo, libera la mesa y reembolsa; uno reciente no se toca", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "d2d2d2d2-1111-4111-8111-111111111111";
+  const event = "d2d2d2d2-2222-4222-8222-222222222222";
+
+  await db.exec(`insert into organizations(id,name,slug) values ('${org}','Club Vencidos','club-vencidos');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');`);
+
+  const member = await scalar(`insert into premium_members(organization_id, first_name, last_name, member_code, balance_minor) values ('${org}','Beto','Colgado','CV0001', 50000) returning id::text`);
+  const table = await scalar(`insert into bar_tables(event_id,name,capacity,price_minor) values ('${event}','Mesa vieja',4,4000) returning id::text`);
+  const otherTable = await scalar(`insert into bar_tables(event_id,name,capacity,price_minor) values ('${event}','Mesa nueva',4,4000) returning id::text`);
+
+  const stale = await db.query<{ order_id: string }>(`select * from member_place_order('${member}','mesa','[]'::jsonb,'wallet','${table}',null,null)`);
+  await db.exec(`update member_orders set created_at = now() - interval '10 hours' where id='${stale.rows[0].order_id}'`);
+  assert.equal(await scalar(`select status from bar_tables where id='${table}'`), "reserved");
+  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 46000, "se descuenta al reservar");
+
+  // Un pedido reciente (otra mesa, para no chocar con la del pedido colgado) no tiene que tocarse.
+  const recent = await db.query<{ order_id: string }>(`select * from member_place_order('${member}','mesa','[]'::jsonb,'wallet','${otherTable}',null,null)`);
+
+  const cancelled = Number(await scalar(`select cp_expire_stale_member_orders(6)`));
+  assert.equal(cancelled, 1, "solo el pedido colgado se cancela");
+
+  assert.equal(await scalar(`select status from member_orders where id='${stale.rows[0].order_id}'`), "cancelled");
+  assert.equal(await scalar(`select status from bar_tables where id='${table}'`), "available", "la mesa se libera sola");
+  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 46000, "se reembolsa el saldo del pedido colgado (quedan descontados los 4000 del reciente, que sigue pendiente)");
+  assert.equal(await scalar(`select status from member_orders where id='${recent.rows[0].order_id}'`), "pending", "un pedido reciente no se toca");
+  assert.equal(await scalar(`select status from bar_tables where id='${otherTable}'`), "reserved", "la mesa del pedido reciente sigue reservada");
+
+  // Correrlo de nuevo no encuentra nada mas para cancelar (no es repetible sobre lo mismo).
+  assert.equal(Number(await scalar(`select cp_expire_stale_member_orders(6)`)), 0);
 
   await db.close();
 });

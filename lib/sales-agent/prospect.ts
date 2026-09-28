@@ -1,6 +1,6 @@
 import "server-only";
 import { createAdminClient } from "../supabase/admin";
-import { normalizeInstagramUsername, normalizeWebsiteDomain, normalizePhoneDigits, normalizeEmail } from "./duplicates";
+import { normalizeInstagramUsername, normalizeWebsiteDomain, normalizePhoneDigits, phoneMatchKey, normalizeEmail } from "./duplicates";
 import { computeProspectScore, type ScoreInput } from "./scoring";
 import { detectOpportunities } from "./opportunities";
 
@@ -48,7 +48,7 @@ export async function findDuplicate(admin: Admin, input: ProspectInput): Promise
   const checks: { column: string; value: string | null; reason: string }[] = [
     { column: "instagram_username", value: normalizeInstagramUsername(input.instagramUsername), reason: "el mismo Instagram" },
     { column: "website_domain", value: normalizeWebsiteDomain(input.website), reason: "el mismo sitio web" },
-    { column: "phone_digits", value: normalizePhoneDigits(input.whatsapp || input.phone), reason: "el mismo teléfono" },
+    { column: "phone_match_key", value: phoneMatchKey(input.whatsapp || input.phone), reason: "el mismo teléfono" },
     { column: "email_norm", value: normalizeEmail(input.email), reason: "el mismo email" },
   ];
   for (const check of checks) {
@@ -64,8 +64,17 @@ export async function findDuplicate(admin: Admin, input: ProspectInput): Promise
 
 export function normalizedColumns(input: ProspectInput) {
   return {
+    // instagram_username se guarda YA normalizado (sin @, en minusculas, y
+    // si pegaron una URL de instagram.com/usuario se extrae el usuario) --
+    // es la misma columna que se muestra ("@" + esto) y la que usa el
+    // indice unico, asi que si se guardara cruda un "@usuario" quedaba
+    // como "@@usuario" en pantalla y dos formas distintas de cargar el
+    // mismo Instagram (con o sin @, con URL completa) no se detectaban
+    // como duplicado.
+    instagram_username: normalizeInstagramUsername(input.instagramUsername),
     website_domain: normalizeWebsiteDomain(input.website ?? null),
     phone_digits: normalizePhoneDigits(input.whatsapp || input.phone || null),
+    phone_match_key: phoneMatchKey(input.whatsapp || input.phone || null),
     email_norm: normalizeEmail(input.email ?? null),
   };
 }

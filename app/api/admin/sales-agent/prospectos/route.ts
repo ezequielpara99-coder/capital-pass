@@ -5,6 +5,7 @@ import { PROSPECT_FIELDS, isMissingTable, findDuplicate, normalizedColumns, resc
 import { investigateProspectById } from "../../../../../lib/sales-agent/investigate-prospect";
 
 const MISSING = "Falta aplicar la actualización de la base de datos (Capital Sales Agent, 20260990).";
+const UUID = /^[0-9a-f-]{36}$/i;
 
 // GET: lista con filtros. ?city=&province=&category=&status=&potential=&campaignId=&q=&minScore=
 export async function GET(request: NextRequest) {
@@ -27,9 +28,9 @@ export async function GET(request: NextRequest) {
     const potential = params.get("potential");
     if (potential) query = query.eq("potential", potential);
     const campaignId = params.get("campaignId");
-    if (campaignId) query = query.eq("campaign_id", campaignId);
+    if (campaignId && UUID.test(campaignId)) query = query.eq("campaign_id", campaignId);
     const minScore = params.get("minScore");
-    if (minScore) query = query.gte("score", Math.max(0, Math.min(100, Number(minScore))));
+    if (minScore && Number.isFinite(Number(minScore))) query = query.gte("score", Math.max(0, Math.min(100, Number(minScore))));
     const ticketing = params.get("ticketingProvider");
     if (ticketing) query = query.eq("ticketing_provider", ticketing);
     const q = params.get("q");
@@ -102,7 +103,6 @@ export async function POST(request: NextRequest) {
       .insert({
         campaign_id: input.campaignId,
         name: input.name,
-        instagram_username: input.instagramUsername,
         instagram_url: input.instagramUrl,
         website: input.website,
         city: input.city,
@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
     // rompe la creacion -- queda "nuevo" y se puede investigar despues.
     if (input.website || input.instagramUrl) {
       try {
-        const outcome = await investigateProspectById(admin, data.id as string);
+        const outcome = await investigateProspectById(admin, data.id as string, null, { requireClaim: true });
         if (outcome.ok) {
           const { data: fresh } = await admin.from("prospects").select(PROSPECT_FIELDS).eq("id", data.id as string).maybeSingle();
           if (fresh) prospect = fresh;

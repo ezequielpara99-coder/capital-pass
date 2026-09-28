@@ -101,6 +101,7 @@ export async function POST(request: NextRequest) {
         const input: ProspectInput = {
           name: name.slice(0, 150),
           instagramUsername: get("instagramUsername") ?? null,
+          instagramUrl: get("instagramUrl") ?? null,
           website: get("website") ?? null,
           city: get("city") ?? null,
           province: get("province") ?? null,
@@ -122,7 +123,7 @@ export async function POST(request: NextRequest) {
           .insert({
             campaign_id: input.campaignId,
             name: input.name,
-            instagram_username: input.instagramUsername,
+            instagram_url: input.instagramUrl,
             website: input.website,
             city: input.city,
             province: input.province,

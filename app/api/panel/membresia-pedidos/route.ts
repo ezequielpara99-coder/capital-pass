@@ -3,8 +3,8 @@ import { isMissingTable, resolveOrganizer, UUID_RE } from "../../../../lib/panel
 import { sendPushToMember } from "../../../../lib/push/server";
 import { createMemberPublicPath } from "../../../../lib/members/signature";
 
-const MISSING = "Falta aplicar la actualizaciÃ³n de la base de datos de la app del socio (20260982).";
-const BUSINESS_ERRORS = /ya esta listo|ya esta cerrado|Estado invalido|no existe|permiso/i;
+const MISSING = "Falta aplicar la actualización de la base de datos de la app del socio (20260982).";
+const BUSINESS_ERRORS = /ya esta listo|ya esta cerrado|Estado invalido|no existe|permiso|No hay stock suficiente/i;
 
 // GET: pedidos de los socios. ?scope=open (default: pendientes y listos) | all (ultimos 100).
 export async function GET(request: NextRequest) {
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     const names = new Map<string, string>();
     if (memberIds.length > 0) {
       const { data: members } = await caller.admin.from("premium_members").select("id, first_name, last_name, member_code").in("id", memberIds);
-      for (const m of members ?? []) names.set(m.id as string, `${m.first_name} ${m.last_name} Â· ${m.member_code}`);
+      for (const m of members ?? []) names.set(m.id as string, `${m.first_name} ${m.last_name} · ${m.member_code}`);
     }
 
     return NextResponse.json({
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
       orders: (data ?? []).map((o) => ({ ...o, total_minor: Number(o.total_minor), memberName: names.get(o.member_id as string) ?? "Socio" })),
     });
   } catch {
-    return NextResponse.json({ error: "OcurriÃ³ un error inesperado." }, { status: 500 });
+    return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }
 }
 
@@ -55,7 +55,7 @@ export async function PATCH(request: NextRequest) {
     const id = String(body.id ?? "");
     const status = String(body.status ?? "");
     if (!UUID_RE.test(id) || !["ready", "delivered", "cancelled"].includes(status)) {
-      return NextResponse.json({ error: "Datos invÃ¡lidos." }, { status: 400 });
+      return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
     }
 
     const { error } = await caller.admin.rpc("member_order_set_status", {
@@ -89,8 +89,8 @@ export async function PATCH(request: NextRequest) {
 
         if (status === "ready") {
           await sendPushToMember(order.member_id as string, {
-            title: "Tu pedido estÃ¡ listo",
-            body: toTable ? `Pedido ${code}. Te lo estÃ¡n llevando a tu mesa.` : `Pedido ${code}. Retiralo en la barra.`,
+            title: "Tu pedido está listo",
+            body: toTable ? `Pedido ${code}. Te lo están llevando a tu mesa.` : `Pedido ${code}. Retiralo en la barra.`,
             url,
           });
         } else if (status === "delivered" && Number(order.points_earned) > 0) {
@@ -114,7 +114,6 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch {
-    return NextResponse.json({ error: "OcurriÃ³ un error inesperado." }, { status: 500 });
+    return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }
 }
-

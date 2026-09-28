@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
     for (const candidate of candidates ?? []) {
       if (Date.now() > deadline) break;
       try {
-        const outcome = await investigateProspectById(admin, candidate.id as string);
+        const outcome = await investigateProspectById(admin, candidate.id as string, null, { requireClaim: true });
         results.push(outcome.ok ? { id: candidate.id as string, name: candidate.name as string, ok: true } : { id: candidate.id as string, name: candidate.name as string, ok: false, error: outcome.error });
       } catch (error) {
         results.push({ id: candidate.id as string, name: candidate.name as string, ok: false, error: error instanceof Error ? error.message : "Error inesperado." });

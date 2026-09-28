@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyAdmin } from "../../../../../../lib/quotes/auth";
 import { createAdminClient } from "../../../../../../lib/supabase/admin";
 
+const UUID = /^[0-9a-f-]{36}$/i;
+
 function csvCell(value: unknown) {
   const s = value === null || value === undefined ? "" : String(value);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -25,9 +27,9 @@ export async function GET(request: NextRequest) {
     const status = params.get("status");
     if (status) query = query.eq("status", status);
     const campaignId = params.get("campaignId");
-    if (campaignId) query = query.eq("campaign_id", campaignId);
+    if (campaignId && UUID.test(campaignId)) query = query.eq("campaign_id", campaignId);
     const minScore = params.get("minScore");
-    if (minScore) query = query.gte("score", Number(minScore));
+    if (minScore && Number.isFinite(Number(minScore))) query = query.gte("score", Math.max(0, Math.min(100, Number(minScore))));
 
     const { data, error } = await query;
     if (error) {

@@ -48,6 +48,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (kind === "consumo" && items.length === 0) return NextResponse.json({ error: "El pedido está vacío." }, { status: 400 });
 
     const key = String(body.key ?? "").trim().slice(0, 80) || null;
+    if (!key) return NextResponse.json({ error: "Falta la clave del pedido." }, { status: 400 });
 
     const admin = createAdminClient();
 
@@ -131,6 +132,17 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (!UUID_RE.test(orderId)) return NextResponse.json({ error: "Pedido inválido." }, { status: 400 });
 
     const admin = createAdminClient();
+
+    // Cancelar mueve plata (reembolsa saldo/puntos) y libera una mesa que se
+    // pago: el link firmado del carnet no alcanza, igual que para pagar con
+    // saldo -- hace falta haber ingresado con el email de la membresia.
+    const { data: owner } = await admin.from("premium_members").select("email").eq("id", memberId).is("deleted_at", null).maybeSingle();
+    const session = await memberSessionStatus((owner?.email as string | null) ?? null);
+    if (session !== "ready") {
+      const problem = SESSION_MESSAGES[session];
+      return NextResponse.json({ error: problem.error, code: session }, { status: problem.status });
+    }
+
     const { error } = await admin.rpc("member_order_set_status", {
       p_order_id: orderId,
       p_status: "cancelled",
