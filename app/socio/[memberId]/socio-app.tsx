@@ -73,7 +73,26 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
-  const [cart, setCart] = useState<Record<string, number>>({});
+  // El pedido armado se guarda en el celular: si el socio tiene que cargar
+  // saldo, Mercado Pago lo saca de la app y al volver el pedido sigue ahi.
+  const cartStorageKey = `cp-socio-cart:${memberId}`;
+  const [cart, setCart] = useState<Record<string, number>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(cartStorageKey) ?? "{}");
+      return saved && typeof saved === "object" && !Array.isArray(saved) ? (saved as Record<string, number>) : {};
+    } catch {
+      return {};
+    }
+  });
+  useEffect(() => {
+    try {
+      if (Object.keys(cart).length === 0) window.localStorage.removeItem(cartStorageKey);
+      else window.localStorage.setItem(cartStorageKey, JSON.stringify(cart));
+    } catch {
+      // Sin almacenamiento disponible: el pedido funciona igual, solo no se recuerda.
+    }
+  }, [cart, cartStorageKey]);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [payment, setPayment] = useState<"wallet" | "en_barra">("wallet");
   const [deliveryMode, setDeliveryMode] = useState<"barra" | "mesa">("barra");
@@ -108,6 +127,18 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
   const [topupBusy, setTopupBusy] = useState(false);
   const [topupError, setTopupError] = useState("");
   const [topupAccepted, setTopupAccepted] = useState(false);
+
+  // Abre la recarga con el monto que falta (redondeado hacia arriba a $ 1.000).
+  function openTopupFor(shortfall: number) {
+    const rounded = Math.min(200000, Math.max(1000, Math.ceil(shortfall / 1000) * 1000));
+    setTopupAmount(String(rounded));
+    setTopupAccepted(false);
+    setTopupError("");
+    setError("");
+    setCheckoutOpen(false);
+    setTableChoice(null);
+    setTopupOpen(true);
+  }
 
   async function startTopup() {
     if (topupBusy) return;
@@ -151,6 +182,12 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
             if (!cancelled) {
               setNotice(`Recarga acreditada: ${money(Number(result.amountMinor))}`);
               await load();
+              // Si estaba armando un pedido, vuelve directo a la carta para confirmarlo.
+              try {
+                if (window.localStorage.getItem(cartStorageKey)) setTab("carta");
+              } catch {
+                // Sin almacenamiento: se queda en el carnet.
+              }
             }
             break;
           }
@@ -168,7 +205,7 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
       if (!cancelled) window.history.replaceState(null, "", `${window.location.pathname}?s=${encodeURIComponent(signature)}`);
     })();
     return () => { cancelled = true; };
-  }, [base, query, signature, load]);
+  }, [base, query, signature, load, cartStorageKey]);
 
   // Ranking: se carga al abrir la solapa y al cambiar de periodo.
   const [rankingPeriod, setRankingPeriod] = useState<"month" | "all">("month");
@@ -668,6 +705,16 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                     Pago al recibir
                   </button>
                 </div>
+                {!canPayWithWallet && (
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2">
+                    <p className="text-xs text-amber-100/80">Te faltan {money(cartTotal - (member?.balanceMinor ?? 0))} de saldo.</p>
+                    {data?.organization.topupsEnabled && (
+                      <button type="button" onClick={() => openTopupFor(cartTotal - (member?.balanceMinor ?? 0))} className="h-9 border border-emerald-400/40 bg-emerald-400/10 px-3 text-[10px] font-black uppercase tracking-wide text-emerald-300">
+                        Cargar saldo
+                      </button>
+                    )}
+                  </div>
+                )}
               </>
             )}
 
@@ -739,6 +786,16 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                 <button type="button" onClick={() => setTablePayment("en_barra")} className={`h-11 border text-[10px] font-black uppercase tracking-wide ${tablePayment === "en_barra" ? "border-emerald-400/60 bg-emerald-400/15 text-emerald-200" : "border-white/15 text-white/50"}`}>
                   Pago en el boliche
                 </button>
+              </div>
+            ) : null}
+            {tableChoice.price_minor && (member?.balanceMinor ?? 0) < tableChoice.price_minor ? (
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2">
+                <p className="text-xs text-amber-100/80">Te faltan {money(tableChoice.price_minor - (member?.balanceMinor ?? 0))} de saldo.</p>
+                {data?.organization.topupsEnabled && (
+                  <button type="button" onClick={() => openTopupFor((tableChoice.price_minor ?? 0) - (member?.balanceMinor ?? 0))} className="h-9 border border-emerald-400/40 bg-emerald-400/10 px-3 text-[10px] font-black uppercase tracking-wide text-emerald-300">
+                    Cargar saldo
+                  </button>
+                )}
               </div>
             ) : null}
 
