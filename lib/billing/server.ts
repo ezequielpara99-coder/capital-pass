@@ -5,7 +5,7 @@ import { destinationFor, saleFromReference, signupFromReference, topupFromRefere
 import { getPayment, getPlatformCollectorId, paymentsForReference } from "./provider";
 import { sendSubscriptionReceipt } from "../email/subscription-receipt";
 import { sendTicketDelivery } from "../email/ticket-delivery";
-import { sendPushToPlatformAdmins, sendPushToMember } from "../push/server";
+import { sendPushToPlatformAdmins, sendPushToMember, sendPushToOrganizers } from "../push/server";
 import { createMemberPublicPath } from "../members/signature";
 import { createTicketPublicPath } from "../tickets/signature";
 import { ticketQrPngBuffer } from "../tickets/qr-image";
@@ -260,6 +260,32 @@ async function sendOnlineSaleTicketEmail(saleId: string) {
   }
 }
 
+// Aviso al organizador cuando se vende una mesa online. Se reclama de forma
+// atomica en sales.ticket_email_sent_at (la misma marca que evita mandar dos
+// veces el mail de la entrada), asi el webhook y el "verificar mi pago" del
+// comprador, que pueden llegar juntos, avisan una sola vez. Best-effort: nunca
+// puede revertir una venta ya cobrada.
+async function notifyTableSale(saleId: string, organizationId: string, tableId: string, previousStatus: string) {
+  try {
+    if (previousStatus === "confirmed") return; // reintento del mismo pago
+    const admin = createAdminClient();
+    const claimed = await admin.from("sales")
+      .update({ ticket_email_sent_at: new Date().toISOString() })
+      .eq("id", saleId).eq("status", "confirmed").is("ticket_email_sent_at", null)
+      .select("id");
+    if (!claimed.data || claimed.data.length === 0) return;
+
+    const { data: table } = await admin.from("bar_tables").select("name").eq("id", tableId).maybeSingle();
+    await sendPushToOrganizers(organizationId, "bar_sale", {
+      title: "Mesa vendida online",
+      body: `${table?.name ?? "Una mesa"} fue reservada y pagada por Mercado Pago.`,
+      url: "/panel/stock",
+    });
+  } catch (error) {
+    console.error("BILLING: no se pudo avisar la venta de mesa.", error instanceof Error ? error.message : error);
+  }
+}
+
 // Aplica un pago verificado de Mercado Pago a una venta online: confirma la
 // venta (RPC, crea las entradas) y dispara el email con el/los QR. Lo llama
 // tanto el webhook real de Mercado Pago (unica notification_url configurada
@@ -275,7 +301,7 @@ async function sendOnlineSaleTicketEmail(saleId: string) {
 export async function applySalePayment(payment: ProviderPayment, saleId: string) {
   const admin = createAdminClient();
   const { data: sale, error } = await admin.from("sales")
-    .select("id, organization_id, total_charged_minor, currency")
+    .select("id, organization_id, total_charged_minor, currency, table_id, status")
     .eq("id", saleId).eq("channel", "online").maybeSingle();
   if (error) throw new Error("No se pudo consultar la venta.");
   if (!sale || sale.total_charged_minor == null) return false;
@@ -289,7 +315,11 @@ export async function applySalePayment(payment: ProviderPayment, saleId: string)
   const result = await admin.rpc("confirm_online_sale", { p_sale_id: saleId, p_status: verified.status });
   if (result.error) throw new Error("No se pudo confirmar la venta.");
   if (verified.status === "approved") {
-    await sendOnlineSaleTicketEmail(saleId);
+    if (sale.table_id) {
+      await notifyTableSale(saleId, sale.organization_id as string, sale.table_id as string, sale.status as string);
+    } else {
+      await sendOnlineSaleTicketEmail(saleId);
+    }
   }
   return true;
 }

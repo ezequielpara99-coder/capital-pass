@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
 import { friendlyErrorMessage } from "../../lib/errors/friendly-message";
+import PedidosClient from "../panel/membresia/pedidos/pedidos-client";
 
 type Table = { id: string; name: string; status: string };
 type Drink = { eventProductId: string; name: string; salePriceMinor: number; stock: number };
@@ -58,7 +59,7 @@ export default function BartenderPage() {
 
   const [receipt, setReceipt] = useState<Receipt | null>(null);
 
-  const [mode, setMode] = useState<"vender" | "combo">("vender");
+  const [mode, setMode] = useState<"vender" | "combo" | "pedidos">("vender");
   const [comboCode, setComboCode] = useState("");
   const [comboLookupLoading, setComboLookupLoading] = useState(false);
   const [comboTicket, setComboTicket] = useState<ComboTicket | null>(null);
@@ -298,7 +299,7 @@ export default function BartenderPage() {
         )}
 
         {barId && (
-          <div className="mt-5 grid grid-cols-2 gap-2">
+          <div className="mt-5 grid grid-cols-3 gap-2">
             <button
               type="button"
               onClick={() => setMode("vender")}
@@ -313,12 +314,23 @@ export default function BartenderPage() {
             >
               🎟️ Canjear combo
             </button>
+            <button
+              type="button"
+              onClick={() => setMode("pedidos")}
+              className={`h-12 rounded-xl border text-sm font-bold ${mode === "pedidos" ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-300" : "border-white/10 bg-white/[0.03] text-white/50"}`}
+            >
+              Pedidos
+            </button>
           </div>
         )}
 
         {!barId ? (
           <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-sm text-white/50">
             Todavía no tenés una barra asignada. Pedile al organizador que te cree como bartender.
+          </div>
+        ) : mode === "pedidos" ? (
+          <div className="mt-6">
+            <PedidosClient embedded />
           </div>
         ) : mode === "combo" ? (
           <div className="mt-6">

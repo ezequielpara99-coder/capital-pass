@@ -80,6 +80,7 @@ const premioMensualMigration = readFileSync(new URL("../supabase/migrations/2026
 const seguimientoColectivoMigration = readFileSync(new URL("../supabase/migrations/20260986_seguimiento_colectivo.sql", import.meta.url), "utf8");
 const avisosSocioMigration = readFileSync(new URL("../supabase/migrations/20260987_avisos_socio.sql", import.meta.url), "utf8");
 const pedidosCompletosMigration = readFileSync(new URL("../supabase/migrations/20260988_pedidos_completos.sql", import.meta.url), "utf8");
+const mesasOnlineMigration = readFileSync(new URL("../supabase/migrations/20260989_mesas_online.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -208,6 +209,7 @@ async function database() {
   await db.exec(seguimientoColectivoMigration);
   await db.exec(avisosSocioMigration);
   await db.exec(pedidosCompletosMigration);
+  await db.exec(mesasOnlineMigration);
   return db;
 }
 
@@ -1796,6 +1798,79 @@ test("seguimiento del colectivo: el escaneo mueve la posicion sin retroceder, ma
   const reused = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','${codeB}')`);
   assert.equal(reused.rows[0].result, "already_used");
   assert.equal(await current(), stopB);
+
+  await db.close();
+});
+
+test("mesas online: la mesa se reserva al pagar, se libera si no se paga o se reembolsa y no se vende dos veces", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const admin = "e1e1e1e1-1111-4111-8111-111111111111";
+  const org = "e1e1e1e1-2222-4222-8222-222222222222";
+  const event = "e1e1e1e1-3333-4333-8333-333333333333";
+  const buyer = (n: string) => `'Comprador','${n}','30${n}','3462${n}',null`;
+
+  await db.exec(`insert into auth.users values ('${admin}','admin-mesa@example.test',now(),'{}');
+    insert into platform_admins(user_id) values ('${admin}');
+    insert into organizations(id,name,slug) values ('${org}','Club Mesas','club-mesas');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    select set_config('request.jwt.claim.sub','${admin}',false);`);
+
+  const mkTable = (name: string, price: string) =>
+    scalar(`insert into bar_tables(event_id,name,capacity,price_minor) values ('${event}','${name}',6,${price}) returning id::text`) as Promise<string>;
+  const t1 = await mkTable("Mesa 1", "6000");
+  const t2 = await mkTable("Mesa 2", "5000");
+  const t3 = await mkTable("Mesa 3", "4000");
+  const free = await mkTable("Mesa libre", "null");
+  const status = async (id: string) => scalar(`select status from bar_tables where id='${id}'`);
+  const create = (table: string, n: string) =>
+    db.query<{ sale_id: string; total_minor: string; table_name: string }>(`select * from create_online_table_sale('${event}','${table}',${buyer(n)})`);
+
+  // Sin Mercado Pago conectado no se puede vender.
+  await assert.rejects(() => create(t1, "111111"), /Mercado Pago/);
+  await db.exec(`insert into organization_mercadopago_accounts(organization_id,mp_user_id,access_token,refresh_token,expires_at)
+    values ('${org}', 999, 'tok', 'ref', now() + interval '1 day');`);
+
+  // Una mesa sin precio no se vende online.
+  await assert.rejects(() => create(free, "222222"), /no se puede reservar online/);
+
+  const s1 = (await create(t1, "333333")).rows[0];
+  assert.equal(Number(s1.total_minor), 6000);
+  assert.equal(await status(t1), "reserved", "la mesa queda reservada mientras se paga");
+  assert.equal(await scalar(`select status from sales where id='${s1.sale_id}'`), "pending_approval");
+  await assert.rejects(() => create(t1, "444444"), /ya no esta disponible/, "nadie mas puede tomar la misma mesa");
+
+  // Pago aprobado: la venta se confirma, la mesa sigue reservada y no se emite ninguna entrada.
+  await db.query(`select confirm_online_sale('${s1.sale_id}', 'approved')`);
+  assert.equal(await scalar(`select status from sales where id='${s1.sale_id}'`), "confirmed");
+  assert.equal(await status(t1), "reserved");
+  assert.equal(Number(await scalar(`select count(*)::int from tickets where sale_id='${s1.sale_id}'`)), 0);
+
+  // Reembolso posterior: se anula la venta y la mesa se libera.
+  await db.query(`select confirm_online_sale('${s1.sale_id}', 'refunded')`);
+  assert.equal(await scalar(`select status from sales where id='${s1.sale_id}'`), "refunded");
+  assert.equal(await status(t1), "available");
+
+  // Carrito abandonado: el cron de 30 minutos cancela la venta y libera la mesa.
+  const s2 = (await create(t2, "555555")).rows[0];
+  await db.exec(`update sales set created_at = now() - interval '1 hour' where id='${s2.sale_id}'`);
+  assert.equal(Number(await scalar(`select cp_cancel_stale_online_sales()`)), 1);
+  assert.equal(await status(t2), "available", "la mesa vuelve a estar disponible");
+
+  // Pago aprobado tarde y la mesa sigue libre: la venta revive y la mesa se vuelve a reservar.
+  await db.query(`select confirm_online_sale('${s2.sale_id}', 'approved')`);
+  assert.equal(await scalar(`select status from sales where id='${s2.sale_id}'`), "confirmed");
+  assert.equal(await status(t2), "reserved");
+
+  // Pago aprobado tarde pero otra persona ya tomo la mesa: no se vende dos veces, queda cancelada (reintegro manual).
+  const s3 = (await create(t3, "666666")).rows[0];
+  await db.exec(`update sales set created_at = now() - interval '1 hour' where id='${s3.sale_id}'`);
+  await db.query(`select cp_cancel_stale_online_sales()`);
+  const s4 = (await create(t3, "777777")).rows[0];
+  await db.query(`select confirm_online_sale('${s3.sale_id}', 'approved')`);
+  assert.equal(await scalar(`select status from sales where id='${s3.sale_id}'`), "cancelled", "la mesa ya era de otro comprador");
+  assert.equal(await status(t3), "reserved", "la mesa sigue reservada para quien la tomo");
+  assert.equal(await scalar(`select status from sales where id='${s4.sale_id}'`), "pending_approval");
 
   await db.close();
 });

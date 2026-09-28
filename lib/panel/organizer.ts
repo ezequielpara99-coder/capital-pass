@@ -12,7 +12,9 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 // Organizador activo -> su organizationId. Con requirePremium tambien exige
 // que Capital Pass le haya habilitado la membresia premium (el panel de
 // carta, pedidos y metricas se desbloquea recien despues del pago).
-export async function resolveOrganizer(options: { requirePremium?: boolean } = {}) {
+// Por defecto solo el organizador. Con roles: ["organizer", "bartender"] el
+// bartender de la barra tambien puede usar esa ruta (p. ej. la cola de pedidos).
+export async function resolveOrganizer(options: { requirePremium?: boolean; roles?: string[] } = {}) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "No hay una sesión válida.", status: 401 } as const;
@@ -22,7 +24,7 @@ export async function resolveOrganizer(options: { requirePremium?: boolean } = {
     .from("organization_members")
     .select("organization_id")
     .eq("user_id", user.id)
-    .eq("role", "organizer")
+    .in("role", options.roles ?? ["organizer"])
     .eq("status", "active")
     .order("created_at", { ascending: true })
     .limit(1)

@@ -163,7 +163,7 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs, 
   }
 
   if (returningSaleId) {
-    return <ReturningSaleStatus slug={slug} saleId={returningSaleId} />;
+    return <ReturningSaleStatus slug={slug} saleId={returningSaleId} isTable={searchParams.get("mesa") === "1"} />;
   }
 
   return (
@@ -413,7 +413,7 @@ type SaleStatus = "checking" | "pending_approval" | "confirmed" | "cancelled" | 
 // pago se acredito o no -- se quedaba mirando un mensaje generico para
 // siempre. Esto chequea el estado real una vez solo al entrar (dandole
 // tiempo al webhook) y deja un boton para volver a intentar a mano.
-function ReturningSaleStatus({ slug, saleId }: { slug: string; saleId: string }) {
+function ReturningSaleStatus({ slug, saleId, isTable = false }: { slug: string; saleId: string; isTable?: boolean }) {
   const [status, setStatus] = useState<SaleStatus>("checking");
   const [checking, setChecking] = useState(false);
 
@@ -445,7 +445,10 @@ function ReturningSaleStatus({ slug, saleId }: { slug: string; saleId: string })
       <div className="mt-5 rounded-[24px] border border-emerald-400/20 bg-emerald-400/[0.05] p-7 text-sm leading-6 text-emerald-100">
         <p className="text-lg font-bold text-emerald-200">¡Pago confirmado!</p>
         <p className="mt-2 text-white/60">
-          Tu entrada te va a llegar a tu WhatsApp o email en unos instantes. Número de referencia: <span className="font-mono text-white/80">{saleId}</span>.
+          {isTable
+            ? "Tu mesa quedó reservada a tu nombre. Presentá tu DNI en la puerta y el equipo te lleva a tu mesa."
+            : "Tu entrada te va a llegar a tu WhatsApp o email en unos instantes."}{" "}
+          Número de referencia: <span className="font-mono text-white/80">{saleId}</span>.
         </p>
       </div>
     );
@@ -468,7 +471,7 @@ function ReturningSaleStatus({ slug, saleId }: { slug: string; saleId: string })
     <div className="mt-5 rounded-[24px] border border-emerald-400/20 bg-emerald-400/[0.05] p-7 text-sm leading-6 text-emerald-100">
       <p className="text-lg font-bold text-emerald-200">¡Gracias por tu compra!</p>
       <p className="mt-2 text-white/60">
-        Estamos confirmando tu pago con Mercado Pago — puede tardar unos segundos. Si el pago se aprobó, tu entrada te va a llegar a tu WhatsApp o email, y también podés revisar el estado escribiéndole al organizador con el número de referencia: <span className="font-mono text-white/80">{saleId}</span>.
+        Estamos confirmando tu pago con Mercado Pago — puede tardar unos segundos. Si el pago se aprobó, {isTable ? "tu mesa queda reservada a tu nombre" : "tu entrada te va a llegar a tu WhatsApp o email"}, y también podés revisar el estado escribiéndole al organizador con el número de referencia: <span className="font-mono text-white/80">{saleId}</span>.
       </p>
       <button
         type="button"

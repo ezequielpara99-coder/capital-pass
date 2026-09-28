@@ -22,7 +22,8 @@ function formatTime(value: string) {
   return new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires" }).format(new Date(value));
 }
 
-export default function PedidosClient() {
+// embedded: se usa dentro de otra pantalla (la del bartender), sin marco ni encabezado.
+export default function PedidosClient({ embedded = false }: { embedded?: boolean }) {
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [scope, setScope] = useState<"open" | "all">("open");
   const [error, setError] = useState("");
@@ -73,11 +74,20 @@ export default function PedidosClient() {
     }
   }
 
-  return (
-    <main className="relative min-h-screen bg-[#050505] text-[#f7f3ed]">
-      <section className="mx-auto w-full max-w-[900px] px-5 py-8 md:px-8">
-        <MembresiaHeader active="pedidos" title="Pedidos." subtitle="Lo que piden tus socios desde su app. Se actualiza solo cada 10 segundos." />
+  const renderShell = (children: React.ReactNode) =>
+    embedded ? (
+      <div className="text-[#f7f3ed]">{children}</div>
+    ) : (
+      <main className="relative min-h-screen bg-[#050505] text-[#f7f3ed]">
+        <section className="mx-auto w-full max-w-[900px] px-5 py-8 md:px-8">
+          <MembresiaHeader active="pedidos" title="Pedidos." subtitle="Lo que piden tus socios desde su app. Se actualiza solo cada 10 segundos." />
+          {children}
+        </section>
+      </main>
+    );
 
+  return renderShell(
+      <>
         {blocked && <div className="mt-6 border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">{blocked}</div>}
         {error && !blocked && <div className="mt-6 border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>}
 
@@ -135,7 +145,6 @@ export default function PedidosClient() {
             </div>
           </>
         )}
-      </section>
-    </main>
+      </>
   );
 }

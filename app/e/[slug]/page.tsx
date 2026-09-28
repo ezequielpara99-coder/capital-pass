@@ -6,6 +6,7 @@ import { getAppBaseUrl } from "../../../lib/mercadopago/server";
 import EventCheckout from "./event-checkout";
 import FallbackImage from "./fallback-image";
 import { Countdown, EventActions, StickyBuyBar } from "./event-extras";
+import EventTables from "./event-tables";
 
 // Esta pagina se comparte activamente por WhatsApp/Instagram (es el flujo
 // de venta principal) -- sin esto, todos los eventos indexaban con el
@@ -181,6 +182,24 @@ export default async function PublicEventPage({
     .select("name")
     .eq("id", event.organization_id)
     .maybeSingle();
+
+  // Mesas a la venta online: disponibles y con precio (una mesa sin precio se
+  // maneja con el organizador o el RRPP, no se paga por Mercado Pago).
+  const { data: tableRows } = await admin
+    .from("bar_tables")
+    .select("id, name, capacity, price_minor")
+    .eq("event_id", event.id)
+    .eq("status", "available")
+    .gt("price_minor", 0)
+    .order("price_minor", { ascending: true })
+    .order("name", { ascending: true })
+    .limit(60);
+  const onlineTables = (tableRows ?? []).map((t) => ({
+    id: t.id as string,
+    name: t.name as string,
+    capacity: t.capacity === null ? null : Number(t.capacity),
+    priceMinor: Number(t.price_minor),
+  }));
 
   const { data: packRows } = await admin
     .from("ticket_packs")
@@ -661,6 +680,14 @@ export default async function PublicEventPage({
             />
 
           </section>
+
+          {/* ==================================================
+              MESAS
+          ================================================== */}
+
+          {canBuyOnline && (event.status === "upcoming" || event.status === "active") && (
+            <EventTables slug={slug} tables={onlineTables} feePercent={feePercent} />
+          )}
 
           {/* ==================================================
               COLECTIVOS
