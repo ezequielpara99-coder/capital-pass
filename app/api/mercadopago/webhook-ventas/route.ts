@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { WebhookSignatureValidator } from "mercadopago";
 import { getPayment } from "../../../../lib/billing/provider";
-import { saleFromReference, validResourceId } from "../../../../lib/billing/rules";
-import { applySalePayment } from "../../../../lib/billing/server";
+import { saleFromReference, topupFromReference, validResourceId } from "../../../../lib/billing/rules";
+import { applySalePayment, applyTopupPayment } from "../../../../lib/billing/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,6 +39,14 @@ export async function POST(request: NextRequest) {
     if (type !== "payment") return NextResponse.json({ ok: true, ignored: true });
 
     const payment = await getPayment(id);
+
+    // Recarga de saldo de un socio premium (mismo webhook, otra referencia).
+    const topupId = topupFromReference(payment.external_reference);
+    if (topupId) {
+      const credited = await applyTopupPayment(payment, topupId);
+      return NextResponse.json({ ok: true, ignored: !credited });
+    }
+
     const saleId = saleFromReference(payment.external_reference);
     if (!saleId) return NextResponse.json({ ok: true, ignored: true });
 

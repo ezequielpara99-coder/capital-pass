@@ -74,6 +74,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "La app del socio todavía no está disponible." }, { status: 503 });
     }
 
+    // Las recargas online se habilitan solas si el organizador conecto su
+    // cuenta de Mercado Pago (la misma que usa para vender entradas).
+    const { data: mpAccount } = await admin.from("organization_mercadopago_accounts").select("organization_id").eq("organization_id", orgId).maybeSingle();
+
     // Mesas disponibles de cada evento proximo.
     const events = (eventsRes.data ?? []) as { id: string; name: string; starts_at: string | null; status: string }[];
     let tables: { id: string; event_id: string; name: string; capacity: number | null; price_minor: number | null }[] = [];
@@ -99,7 +103,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
         balanceMinor: Number(member.balance_minor),
         pointsBalance: Number(member.points_balance),
       },
-      organization: { name: orgRes.data?.name ?? "Capital Pass", checkinPoints: Number(orgRes.data?.member_checkin_points ?? 0) },
+      organization: { name: orgRes.data?.name ?? "Capital Pass", checkinPoints: Number(orgRes.data?.member_checkin_points ?? 0), topupsEnabled: Boolean(mpAccount) },
       menu: (menuRes.data ?? []).map((m) => ({ ...m, price_minor: Number(m.price_minor) })),
       events: events.map((e) => ({ ...e, tables: tables.filter((t) => t.event_id === e.id) })),
       orders: (ordersRes.data ?? []).map((o) => ({ ...o, total_minor: Number(o.total_minor) })),

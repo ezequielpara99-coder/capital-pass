@@ -35,7 +35,7 @@ export async function getPlatformCollectorId() {
 // "capitalpass_sale:<uuid>"). Se usa tanto desde el webhook como desde
 // "Verificar mi pago" para reconciliar sin depender de una notificacion.
 export async function paymentsForReference(externalReference: string) {
-  if (!/^capitalpass_(signup|upgrade|sale):[0-9a-f-]{36}$/i.test(externalReference)) throw new Error("Referencia invalida.");
+  if (!/^capitalpass_(signup|upgrade|sale|topup):[0-9a-f-]{36}$/i.test(externalReference)) throw new Error("Referencia invalida.");
   const params = new URLSearchParams({ external_reference: externalReference, sort: "date_created", criteria: "desc" });
   const page = await get<{ results?: ProviderPayment[] }>(`/v1/payments/search?${params}`);
   return page.results ?? [];

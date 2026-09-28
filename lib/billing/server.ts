@@ -1,7 +1,7 @@
 import "server-only";
 import type { User } from "@supabase/supabase-js";
 import { createAdminClient } from "../supabase/admin";
-import { destinationFor, saleFromReference, signupFromReference, upgradeChargeFromReference, verifiedPayment, type BillingMembership, type ProviderPayment } from "./rules";
+import { destinationFor, saleFromReference, signupFromReference, topupFromReference, upgradeChargeFromReference, verifiedPayment, type BillingMembership, type ProviderPayment } from "./rules";
 import { getPayment, getPlatformCollectorId, paymentsForReference } from "./provider";
 import { sendSubscriptionReceipt } from "../email/subscription-receipt";
 import { sendTicketDelivery } from "../email/ticket-delivery";
@@ -307,10 +307,49 @@ export async function reconcileOnlineSale(saleId: string) {
   return applied;
 }
 
+// =========================================================
+// RECARGA DE SALDO DEL SOCIO PREMIUM (Checkout Pro del organizador)
+// =========================================================
+
+// Verifica el pago contra la recarga (monto, moneda, modo live y que el
+// cobrador sea la cuenta de Mercado Pago de ESE organizador) y recien ahi
+// acredita el saldo. La funcion SQL es idempotente: si el webhook y el
+// "verificar mi pago" del socio llegan juntos, se acredita una sola vez.
+export async function applyTopupPayment(payment: ProviderPayment, topupId: string) {
+  const admin = createAdminClient();
+  const { data: topup, error } = await admin.from("wallet_topups")
+    .select("id, organization_id, amount_minor").eq("id", topupId).maybeSingle();
+  if (error) throw new Error("No se pudo consultar la recarga.");
+  if (!topup) return false;
+  const { data: account } = await admin.from("organization_mercadopago_accounts")
+    .select("mp_user_id").eq("organization_id", topup.organization_id).maybeSingle();
+  if (!account) return false;
+  const verified = verifiedPayment(payment, {
+    amount: Number(topup.amount_minor), currency: "ARS", collectorId: account.mp_user_id,
+    live: process.env.MERCADOPAGO_ENV !== "sandbox",
+  });
+  const result = await admin.rpc("member_wallet_topup_apply", {
+    p_topup_id: topupId, p_payment_id: String(payment.id), p_status: verified.status,
+  });
+  if (result.error) throw new Error("No se pudo acreditar la recarga.");
+  return true;
+}
+
+export async function reconcileTopup(topupId: string) {
+  const payments = await paymentsForReference(`capitalpass_topup:${topupId}`);
+  let applied = false;
+  for (const payment of payments) {
+    if (await applyTopupPayment(payment, topupId)) applied = true;
+  }
+  return applied;
+}
+
 export async function reconcilePayment(paymentId: string) {
   const payment = await getPayment(paymentId);
   const signupId = signupFromReference(payment.external_reference);
   if (signupId) return applyPayment(payment, signupId);
+  const topupId = topupFromReference(payment.external_reference);
+  if (topupId) return applyTopupPayment(payment, topupId);
   const chargeId = upgradeChargeFromReference(payment.external_reference);
   if (chargeId) return applyUpgradeCharge(payment, chargeId);
   const saleId = saleFromReference(payment.external_reference);

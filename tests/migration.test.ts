@@ -75,6 +75,7 @@ const calendarioRentalMigration = readFileSync(new URL("../supabase/migrations/2
 const softDeleteRpcFixesMigration = readFileSync(new URL("../supabase/migrations/20260981_soft_delete_rpc_fixes.sql", import.meta.url), "utf8");
 const appSocioMigration = readFileSync(new URL("../supabase/migrations/20260982_app_socio.sql", import.meta.url), "utf8");
 const rankingSociosMigration = readFileSync(new URL("../supabase/migrations/20260983_ranking_socios.sql", import.meta.url), "utf8");
+const recargaSaldoMigration = readFileSync(new URL("../supabase/migrations/20260984_recarga_saldo.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -198,6 +199,7 @@ async function database() {
   await db.exec(softDeleteRpcFixesMigration);
   await db.exec(appSocioMigration);
   await db.exec(rankingSociosMigration);
+  await db.exec(recargaSaldoMigration);
   return db;
 }
 
@@ -2108,6 +2110,50 @@ test("ranking de socios: cuenta puntos ganados, ignora canjes y reembolsos, mane
   const off = (await scalar(`select member_ranking('${ana}', ${since})`)) as { enabled: boolean; top: unknown[] };
   assert.equal(off.enabled, false);
   assert.equal(off.top.length, 0);
+
+  await db.close();
+});
+
+test("recarga de saldo: acredita una sola vez por pago, permite reintento tras rechazo y descuenta lo que quede si reembolsan", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "aeaeaeae-1111-4111-8111-111111111111";
+  await db.exec(`insert into organizations(id,name,slug) values ('${org}','Club Recarga','club-recarga')`);
+  const member = await scalar(`insert into premium_members(organization_id, first_name, last_name, member_code) values ('${org}','Ana','Recarga','RC0001') returning id::text`);
+  const balance = async () => Number(await scalar(`select balance_minor from premium_members where id='${member}'`));
+  const newTopup = (amount: number) => scalar(`insert into wallet_topups(organization_id, member_id, amount_minor) values ('${org}','${member}',${amount}) returning id::text`) as Promise<string>;
+  const apply = (topup: string, payment: string, status: string) =>
+    db.query<{ applied: boolean; new_status: string }>(`select * from member_wallet_topup_apply('${topup}', '${payment}', '${status}')`);
+
+  // Pendiente / en proceso no acredita nada.
+  const first = await newTopup(5000);
+  assert.equal((await apply(first, "111", "in_process")).rows[0].applied, false);
+  assert.equal(await balance(), 0);
+
+  // Aprobado acredita; el reintento del webhook (o "verificar") no duplica.
+  assert.equal((await apply(first, "111", "approved")).rows[0].applied, true);
+  assert.equal(await balance(), 5000);
+  assert.equal((await apply(first, "111", "approved")).rows[0].applied, false);
+  assert.equal(await balance(), 5000, "un segundo aviso del mismo pago no acredita de nuevo");
+  assert.equal(Number(await scalar(`select sum(amount_minor)::text from wallet_transactions where member_id='${member}'`)), 5000);
+
+  // El mismo pago de Mercado Pago no puede acreditar otra recarga.
+  const other = await newTopup(5000);
+  await assert.rejects(() => apply(other, "111", "approved"), /duplicate|unique/i);
+  assert.equal(await balance(), 5000);
+
+  // Rechazado y despues aprobado (reintento con la misma preferencia).
+  assert.equal((await apply(other, "222", "rejected")).rows[0].new_status, "rejected");
+  assert.equal(await balance(), 5000);
+  assert.equal((await apply(other, "333", "approved")).rows[0].applied, true);
+  assert.equal(await balance(), 10000);
+
+  // Reembolso despues de gastar: solo se descuenta lo que queda.
+  await db.exec(`update premium_members set balance_minor = 2000 where id='${member}'`);
+  const refunded = await apply(other, "333", "refunded");
+  assert.equal(refunded.rows[0].new_status, "refunded");
+  assert.equal(await balance(), 0, "no queda saldo negativo si ya consumio parte");
+  assert.equal((await apply(other, "333", "refunded")).rows[0].applied, false, "el reembolso tampoco se aplica dos veces");
 
   await db.close();
 });

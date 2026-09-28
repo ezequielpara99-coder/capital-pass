@@ -13,7 +13,7 @@ type Order = {
 type PointsRow = { id: string; delta: number; reason: string; created_at: string };
 type AppData = {
   member: { firstName: string; lastName: string; code: string; status: string; expiresAt: string | null; balanceMinor: number; pointsBalance: number };
-  organization: { name: string; checkinPoints: number };
+  organization: { name: string; checkinPoints: number; topupsEnabled: boolean };
   menu: MenuItem[];
   events: EventRow[];
   orders: Order[];
@@ -101,6 +101,69 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  // Recarga de saldo con Mercado Pago.
+  const [topupOpen, setTopupOpen] = useState(false);
+  const [topupAmount, setTopupAmount] = useState("5000");
+  const [topupBusy, setTopupBusy] = useState(false);
+  const [topupError, setTopupError] = useState("");
+
+  async function startTopup() {
+    if (topupBusy) return;
+    setTopupBusy(true);
+    setTopupError("");
+    try {
+      const response = await fetch(`${base}/recarga${query}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: Number(topupAmount) }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo iniciar la recarga.");
+      window.location.href = result.checkoutUrl;
+    } catch (err) {
+      setTopupError(err instanceof Error ? err.message : "No se pudo iniciar la recarga.");
+      setTopupBusy(false);
+    }
+  }
+
+  // Al volver de Mercado Pago (?recarga=ID) se verifica el pago hasta que se
+  // acredite: el webhook suele llegar antes, pero se consulta igual por si demora.
+  useEffect(() => {
+    const topupId = new URLSearchParams(window.location.search).get("recarga");
+    if (!topupId) return;
+    let cancelled = false;
+    (async () => {
+      for (let attempt = 0; attempt < 8 && !cancelled; attempt++) {
+        try {
+          const response = await fetch(`${base}/recarga/verificar${query}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ topupId }),
+          });
+          const result = await response.json();
+          if (response.ok && result.status === "approved") {
+            if (!cancelled) {
+              setNotice(`Recarga acreditada: ${money(Number(result.amountMinor))}`);
+              await load();
+            }
+            break;
+          }
+          if (response.ok && result.status === "refunded") {
+            if (!cancelled) setNotice("Esa recarga fue reembolsada.");
+            break;
+          }
+          if (!cancelled) setNotice("Estamos verificando tu pago con Mercado Pago…");
+        } catch {
+          if (!cancelled) setNotice("Estamos verificando tu pago con Mercado Pago…");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        if (attempt === 7 && !cancelled) setNotice("Todavía no vemos el pago. Si ya pagaste, se acredita solo en unos minutos.");
+      }
+      if (!cancelled) window.history.replaceState(null, "", `${window.location.pathname}?s=${encodeURIComponent(signature)}`);
+    })();
+    return () => { cancelled = true; };
+  }, [base, query, signature, load]);
 
   // Ranking: se carga al abrir la solapa y al cambiar de periodo.
   const [rankingPeriod, setRankingPeriod] = useState<"month" | "all">("month");
@@ -298,6 +361,12 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                       <p className="text-lg font-black text-violet-300">{member.pointsBalance}</p>
                     </div>
                   </div>
+
+                  {data.organization.topupsEnabled && isActive && (
+                    <button type="button" onClick={() => { setTopupError(""); setTopupOpen(true); }} className="mt-4 h-11 w-full border border-emerald-400/40 bg-emerald-400/10 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-300">
+                      + Cargar saldo
+                    </button>
+                  )}
 
                   <div className="mx-auto mt-6 w-fit rounded-2xl bg-white p-3">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -604,6 +673,38 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
               <button type="button" disabled={busy} onClick={() => setCheckoutOpen(false)} className="h-12 flex-1 border border-white/15 text-[10px] font-black uppercase tracking-wide text-white/60">Seguir viendo</button>
               <button type="button" disabled={busy} onClick={submitOrder} className="h-12 flex-[2] bg-violet-500 text-[11px] font-black uppercase tracking-wide text-white disabled:opacity-40">
                 {busy ? "Enviando…" : "Confirmar pedido"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recarga de saldo */}
+      {topupOpen && (
+        <div className="fixed inset-0 z-40 flex items-end bg-black/70" onClick={() => !topupBusy && setTopupOpen(false)}>
+          <div className="mx-auto w-full max-w-[440px] border-t border-emerald-400/30 bg-[#0d0d0d] px-5 py-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-black">Cargar saldo</h2>
+            <p className="mt-1 text-sm text-white/50">Pagás con Mercado Pago (tarjeta, dinero en cuenta o transferencia) y se acredita solo, en segundos.</p>
+
+            <div className="mt-4 grid grid-cols-4 gap-2">
+              {["2000", "5000", "10000", "20000"].map((value) => (
+                <button key={value} type="button" onClick={() => setTopupAmount(value)} className={`h-11 border text-xs font-black ${topupAmount === value ? "border-emerald-400/60 bg-emerald-400/15 text-emerald-200" : "border-white/15 text-white/60"}`}>
+                  {money(Number(value))}
+                </button>
+              ))}
+            </div>
+            <label className="mt-3 block">
+              <span className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Otro monto ($)</span>
+              <input value={topupAmount} onChange={(e) => setTopupAmount(e.target.value.replace(/\D/g, ""))} inputMode="numeric" className="mt-2 h-11 w-full border border-white/[0.12] bg-black/30 px-3 text-sm text-white outline-none focus:border-emerald-400/50" />
+            </label>
+            <p className="mt-2 text-[11px] text-white/30">Mínimo $ 1.000 · Máximo $ 200.000. El saldo es para consumir en el boliche.</p>
+
+            {topupError && <div className="mt-4 border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-300">{topupError}</div>}
+
+            <div className="mt-5 flex gap-2">
+              <button type="button" disabled={topupBusy} onClick={() => setTopupOpen(false)} className="h-12 flex-1 border border-white/15 text-[10px] font-black uppercase tracking-wide text-white/60">Volver</button>
+              <button type="button" disabled={topupBusy || !topupAmount} onClick={startTopup} className="h-12 flex-[2] bg-emerald-500 text-[11px] font-black uppercase tracking-wide text-black disabled:opacity-40">
+                {topupBusy ? "Abriendo Mercado Pago…" : `Pagar ${topupAmount ? money(Number(topupAmount)) : ""}`}
               </button>
             </div>
           </div>
