@@ -122,7 +122,8 @@ async function setup() {
   const org = must(await a.from("organizations").insert({ name: "ZZ QA Boliche", slug: `zz-qa-${stamp}` }).select("id").single(), "org");
   s.orgId = org.id; save();
   must(await a.from("organizations").update({
-    premium_memberships_enabled: true, member_checkin_points: 20, member_ranking_enabled: true,
+    // complimentary: cuenta de cortesia = con servicio activo, sin necesitar una suscripcion pagada.
+    complimentary: true, premium_memberships_enabled: true, member_checkin_points: 20, member_ranking_enabled: true,
     member_prize_1: "Mesa VIP QA", member_prize_2: "2 tragos QA", member_prize_3: null,
   }).eq("id", org.id), "org update");
 
@@ -284,10 +285,10 @@ async function setup() {
   const c1 = (await api(`${P}/colectivo${S(A)}`)).json?.routes?.[0];
   check("Ana ve su colectivo: faltan 2 paradas", c1?.state === "approaching" && c1?.stopsAway === 2, JSON.stringify(c1)?.slice(0, 200));
   const claim = await a.rpc("transfer_claim_notifications", { p_route_id: route.id });
-  check("avisos del colectivo: nadie en la parada 1 ni la 2 todavia", !claim.error && claim.data.length === 0, JSON.stringify(claim));
+  check("colectivo en la parada 1: solo avisa 'ya casi llega' al pasajero de la parada 2", !claim.error && claim.data.length === 1 && claim.data[0].passenger_name === "Otro Qa" && claim.data[0].kind === "approaching", JSON.stringify(claim));
   must(await a.from("transfer_routes").update({ current_stop_id: stopBy(2), current_stop_at: new Date().toISOString() }).eq("id", route.id), "avanza");
   const claim2 = await a.rpc("transfer_claim_notifications", { p_route_id: route.id });
-  check("al llegar a la 2: 'Otro Qa' arrived y Ana approaching", claim2.data?.length === 2 && claim2.data.find((r) => r.passenger_name === "Otro Qa")?.kind === "arrived" && claim2.data.find((r) => r.passenger_name === "Ana Qa")?.kind === "approaching", JSON.stringify(claim2.data));
+  check("al llegar a la 2: 'Otro Qa' arrived (ya no repite approaching) y Ana approaching", claim2.data?.length === 2 && claim2.data.find((r) => r.passenger_name === "Otro Qa")?.kind === "arrived" && claim2.data.find((r) => r.passenger_name === "Ana Qa")?.kind === "approaching", JSON.stringify(claim2.data));
   check("reclamar de nuevo no duplica", (await a.rpc("transfer_claim_notifications", { p_route_id: route.id })).data?.length === 0);
 
   console.log("== Avisos al celular ==");
