@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
     let query = admin
       .from("expenses")
       .select("id, kind, category, description, amount_minor, expense_date, payment_method, is_recurring, notes, created_at")
+      .is("deleted_at", null)
       .order("expense_date", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// DELETE: borra un gasto (?id=).
+// DELETE: borra un gasto (?id=) -- soft-delete, recuperable desde /admin/papelera.
 export async function DELETE(request: NextRequest) {
   try {
     const verification = await verifyAdmin();
@@ -127,12 +128,19 @@ export async function DELETE(request: NextRequest) {
     if (!UUID.test(id)) return NextResponse.json({ error: "Gasto inválido." }, { status: 400 });
 
     const admin = createAdminClient();
-    const { error } = await admin.from("expenses").delete().eq("id", id);
+    const { data, error } = await admin
+      .from("expenses")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id)
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle();
 
     if (error) {
       console.error("GASTOS DELETE:", error);
       return NextResponse.json({ error: "No se pudo borrar el gasto." }, { status: 500 });
     }
+    if (!data) return NextResponse.json({ error: "No se encontró el gasto." }, { status: 404 });
 
     return NextResponse.json({ ok: true });
   } catch {

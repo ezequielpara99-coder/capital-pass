@@ -12,6 +12,7 @@ export default async function ClientesPresupuestosPage() {
   const { data, error } = await admin
     .from("quote_clients")
     .select("id, name, contact, phone, email, notes")
+    .is("deleted_at", null)
     .order("name");
 
   if (error && !isMissingTable(error)) console.error("ADMIN CLIENTES:", error);

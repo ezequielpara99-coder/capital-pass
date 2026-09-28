@@ -26,13 +26,13 @@ export async function GET(request: NextRequest) {
     const numericQuery = Number(q.replace(/^p-?0*/i, ""));
 
     const [quotes, clients, expenses, packs, catalog, members, blacklist] = await Promise.all([
-      admin.from("quotes").select("id, number, client_name, status").or(`client_name.ilike.${like}${Number.isFinite(numericQuery) && numericQuery > 0 ? `,number.eq.${numericQuery}` : ""}`).limit(8),
-      admin.from("quote_clients").select("id, name, contact, phone, email").or(`name.ilike.${like},contact.ilike.${like},email.ilike.${like}`).limit(8),
-      admin.from("expenses").select("id, description, amount_minor, expense_date").ilike("description", like).limit(8),
-      admin.from("monthly_packs").select("id, client_name, package_price_minor, active").ilike("client_name", like).limit(8),
-      admin.from("quote_catalog").select("id, description, unit_price_minor").ilike("description", like).limit(8),
-      admin.from("premium_members").select("id, first_name, last_name, dni, member_code").or(`first_name.ilike.${like},last_name.ilike.${like},dni.ilike.${like},member_code.ilike.${like}`).limit(8),
-      admin.from("blacklist_entries").select("id, dni, full_name").or(`dni.ilike.${like},full_name.ilike.${like}`).limit(8),
+      admin.from("quotes").select("id, number, client_name, status").is("deleted_at", null).or(`client_name.ilike.${like}${Number.isFinite(numericQuery) && numericQuery > 0 ? `,number.eq.${numericQuery}` : ""}`).limit(8),
+      admin.from("quote_clients").select("id, name, contact, phone, email").is("deleted_at", null).or(`name.ilike.${like},contact.ilike.${like},email.ilike.${like}`).limit(8),
+      admin.from("expenses").select("id, description, amount_minor, expense_date").is("deleted_at", null).ilike("description", like).limit(8),
+      admin.from("monthly_packs").select("id, client_name, package_price_minor, active").is("deleted_at", null).ilike("client_name", like).limit(8),
+      admin.from("quote_catalog").select("id, description, unit_price_minor").is("deleted_at", null).ilike("description", like).limit(8),
+      admin.from("premium_members").select("id, first_name, last_name, dni, member_code").is("deleted_at", null).or(`first_name.ilike.${like},last_name.ilike.${like},dni.ilike.${like},member_code.ilike.${like}`).limit(8),
+      admin.from("blacklist_entries").select("id, dni, full_name").is("deleted_at", null).or(`dni.ilike.${like},full_name.ilike.${like}`).limit(8),
     ]);
 
     const results = [

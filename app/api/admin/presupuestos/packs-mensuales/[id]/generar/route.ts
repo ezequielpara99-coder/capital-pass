@@ -26,7 +26,7 @@ export async function POST(_request: NextRequest, context: Context) {
     if (!UUID.test(id)) return NextResponse.json({ error: "Pack inválido." }, { status: 400 });
 
     const admin = createAdminClient();
-    const { data: pack, error: packError } = await admin.from("monthly_packs").select("*").eq("id", id).maybeSingle();
+    const { data: pack, error: packError } = await admin.from("monthly_packs").select("*").eq("id", id).is("deleted_at", null).maybeSingle();
 
     if (packError) {
       if (isMissingTable(packError)) return NextResponse.json({ error: "Falta aplicar la actualización de la base de datos (packs mensuales)." }, { status: 503 });
@@ -39,7 +39,7 @@ export async function POST(_request: NextRequest, context: Context) {
     const period = currentPeriod();
     const packPrice = Number(pack.package_price_minor);
 
-    const { data: existing } = await admin.from("quotes").select(QUOTE_FIELDS).eq("monthly_pack_id", id).eq("pack_period", period).maybeSingle();
+    const { data: existing } = await admin.from("quotes").select(QUOTE_FIELDS).eq("monthly_pack_id", id).eq("pack_period", period).is("deleted_at", null).maybeSingle();
     if (existing) return NextResponse.json({ ok: true, quote: existing, alreadyExisted: true });
 
     const { data: quote, error: insertError } = await admin
@@ -69,7 +69,7 @@ export async function POST(_request: NextRequest, context: Context) {
       // Carrera rara (doble click a la vez): el indice unico ya frenó el
       // duplicado -- se devuelve la que quedó creada, no un error.
       if (insertError.code === "23505") {
-        const { data: raced } = await admin.from("quotes").select(QUOTE_FIELDS).eq("monthly_pack_id", id).eq("pack_period", period).maybeSingle();
+        const { data: raced } = await admin.from("quotes").select(QUOTE_FIELDS).eq("monthly_pack_id", id).eq("pack_period", period).is("deleted_at", null).maybeSingle();
         if (raced) return NextResponse.json({ ok: true, quote: raced, alreadyExisted: true });
       }
       console.error("GENERAR PACK INSERT:", insertError);

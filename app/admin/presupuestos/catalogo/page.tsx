@@ -14,6 +14,7 @@ export default async function CatalogoPresupuestosPage() {
     .from("quote_catalog")
     .select("id, kind, description, unit, unit_price_minor")
     .eq("active", true)
+    .is("deleted_at", null)
     .order("kind")
     .order("description");
 

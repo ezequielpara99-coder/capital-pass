@@ -31,7 +31,7 @@ export async function GET(_request: NextRequest, context: Context) {
     if (!UUID.test(id)) return NextResponse.json({ error: "Presupuesto inválido." }, { status: 400 });
 
     const admin = createAdminClient();
-    const { data, error } = await admin.from("quotes").select(QUOTE_FIELDS).eq("id", id).maybeSingle();
+    const { data, error } = await admin.from("quotes").select(QUOTE_FIELDS).eq("id", id).is("deleted_at", null).maybeSingle();
 
     if (error) {
       if (isMissingTable(error)) return NextResponse.json({ error: "Falta aplicar la actualización de la base de datos (presupuestos)." }, { status: 503 });
@@ -89,7 +89,7 @@ export async function PATCH(request: NextRequest, context: Context) {
     }
 
     const admin = createAdminClient();
-    const { data, error } = await admin.from("quotes").update(updates).eq("id", id).select(QUOTE_FIELDS).maybeSingle();
+    const { data, error } = await admin.from("quotes").update(updates).eq("id", id).is("deleted_at", null).select(QUOTE_FIELDS).maybeSingle();
 
     if (error) {
       if (isMissingTable(error)) return NextResponse.json({ error: "Falta aplicar la actualización de la base de datos (presupuestos)." }, { status: 503 });
@@ -104,7 +104,8 @@ export async function PATCH(request: NextRequest, context: Context) {
   }
 }
 
-// DELETE: borra un presupuesto.
+// DELETE: borra un presupuesto (soft-delete -- queda en la base con
+// deleted_at, recuperable desde /admin/papelera).
 export async function DELETE(_request: NextRequest, context: Context) {
   try {
     const verification = await verifyAdmin();
@@ -114,12 +115,19 @@ export async function DELETE(_request: NextRequest, context: Context) {
     if (!UUID.test(id)) return NextResponse.json({ error: "Presupuesto inválido." }, { status: 400 });
 
     const admin = createAdminClient();
-    const { error } = await admin.from("quotes").delete().eq("id", id);
+    const { data, error } = await admin
+      .from("quotes")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id)
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle();
 
     if (error) {
       console.error("PRESUPUESTOS DELETE:", error);
       return NextResponse.json({ error: "No se pudo borrar el presupuesto." }, { status: 500 });
     }
+    if (!data) return NextResponse.json({ error: "No se encontró el presupuesto." }, { status: 404 });
 
     return NextResponse.json({ ok: true });
   } catch {

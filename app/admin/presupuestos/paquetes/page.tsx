@@ -12,6 +12,7 @@ export default async function PaquetesPresupuestosPage() {
   const { data, error } = await admin
     .from("quote_packages")
     .select("id, kind, name, items, price_mode, package_price_minor, notes, active")
+    .is("deleted_at", null)
     .order("kind")
     .order("name");
 

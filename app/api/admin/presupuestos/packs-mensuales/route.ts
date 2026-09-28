@@ -17,7 +17,7 @@ export async function GET() {
     if (!verification.ok) return NextResponse.json({ error: verification.error }, { status: verification.status });
 
     const admin = createAdminClient();
-    const { data: packs, error } = await admin.from("monthly_packs").select(FIELDS).order("active", { ascending: false }).order("client_name", { ascending: true });
+    const { data: packs, error } = await admin.from("monthly_packs").select(FIELDS).is("deleted_at", null).order("active", { ascending: false }).order("client_name", { ascending: true });
 
     if (error) {
       if (isMissingTable(error)) return NextResponse.json({ error: "Falta aplicar la actualización de la base de datos (packs mensuales)." }, { status: 503 });
@@ -33,6 +33,7 @@ export async function GET() {
         .from("quotes")
         .select("id, number, monthly_pack_id, pack_period, status")
         .in("monthly_pack_id", packIds)
+        .is("deleted_at", null)
         .order("pack_period", { ascending: false });
 
       for (const quote of quotes ?? []) {
@@ -123,7 +124,7 @@ export async function PATCH(request: NextRequest) {
     if (body.active !== undefined) updates.active = Boolean(body.active);
 
     const admin = createAdminClient();
-    const { data, error } = await admin.from("monthly_packs").update(updates).eq("id", id).select(FIELDS).maybeSingle();
+    const { data, error } = await admin.from("monthly_packs").update(updates).eq("id", id).is("deleted_at", null).select(FIELDS).maybeSingle();
 
     if (error) {
       console.error("PACKS MENSUALES PATCH:", error);
@@ -137,7 +138,9 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// DELETE: borra un pack (?id=) -- solo si nunca se generó ninguna factura con el (si ya tiene historial, desactivalo en vez de borrarlo).
+// DELETE: borra un pack (?id=) -- soft-delete, recuperable desde
+// /admin/papelera (su historial de facturas ya generadas queda intacto,
+// no se pierde nada).
 export async function DELETE(request: NextRequest) {
   try {
     const verification = await verifyAdmin();
@@ -147,16 +150,19 @@ export async function DELETE(request: NextRequest) {
     if (!UUID.test(id)) return NextResponse.json({ error: "Pack inválido." }, { status: 400 });
 
     const admin = createAdminClient();
-    const { count } = await admin.from("quotes").select("id", { count: "exact", head: true }).eq("monthly_pack_id", id);
-    if (count && count > 0) {
-      return NextResponse.json({ error: "Este pack ya generó facturas -- desactivalo en vez de borrarlo, para no perder el historial." }, { status: 409 });
-    }
+    const { data, error } = await admin
+      .from("monthly_packs")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id)
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle();
 
-    const { error } = await admin.from("monthly_packs").delete().eq("id", id);
     if (error) {
       console.error("PACKS MENSUALES DELETE:", error);
       return NextResponse.json({ error: "No se pudo borrar el pack." }, { status: 500 });
     }
+    if (!data) return NextResponse.json({ error: "No se encontró el pack." }, { status: 404 });
 
     return NextResponse.json({ ok: true });
   } catch {

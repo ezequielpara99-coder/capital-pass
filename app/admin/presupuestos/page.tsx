@@ -12,6 +12,7 @@ export default async function AdminPresupuestosPage() {
   const { data, error } = await admin
     .from("quotes")
     .select("id, number, kind, status, client_name, event_name, modality, items, price_mode, package_price_minor, discount_type, discount_value, created_at")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(300);
 

@@ -281,6 +281,12 @@ export default function FinanzasClient() {
             >
               Cierre mensual →
             </Link>
+            <Link
+              href="/admin/finanzas/proyeccion"
+              className="inline-flex h-10 items-center border border-white/[0.14] px-4 text-[9px] font-black uppercase tracking-[0.15em] text-white/60 transition hover:border-white/40 hover:text-white"
+            >
+              Flujo de caja →
+            </Link>
           </div>
         </header>
 

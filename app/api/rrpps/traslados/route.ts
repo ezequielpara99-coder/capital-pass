@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
     const caller = await resolveCaller(eventId);
     if ("error" in caller) return NextResponse.json({ error: caller.error }, { status: caller.status });
 
-    let query = caller.admin.from("transfer_routes").select(FIELDS).eq("event_id", eventId).order("created_at", { ascending: true });
+    let query = caller.admin.from("transfer_routes").select(FIELDS).eq("event_id", eventId).is("deleted_at", null).order("created_at", { ascending: true });
     if (!caller.isOrganizer) query = query.or(`organization_member_id.eq.${caller.memberId},organization_member_id.is.null`);
     const { data, error } = await query;
 
@@ -171,7 +171,7 @@ export async function PATCH(request: NextRequest) {
     if (body.priceMinor !== undefined) updates.price_minor = updates.is_paid === false ? 0 : normalizePrice(body.priceMinor);
     if (body.active !== undefined) updates.active = Boolean(body.active);
 
-    const { data, error } = await caller.admin.from("transfer_routes").update(updates).eq("id", id).eq("event_id", eventId).select(FIELDS).maybeSingle();
+    const { data, error } = await caller.admin.from("transfer_routes").update(updates).eq("id", id).eq("event_id", eventId).is("deleted_at", null).select(FIELDS).maybeSingle();
 
     if (error) {
       console.error("TRASLADOS PATCH:", error);
@@ -185,7 +185,8 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// DELETE: borra un colectivo (solo organizador, solo si nunca sumo pasajeros).
+// DELETE: borra un colectivo (solo organizador) -- soft-delete, recuperable
+// desde /admin/papelera; sus pasajeros ya cargados no se pierden.
 export async function DELETE(request: NextRequest) {
   try {
     const id = request.nextUrl.searchParams.get("id") ?? "";
@@ -196,16 +197,19 @@ export async function DELETE(request: NextRequest) {
     if ("error" in caller) return NextResponse.json({ error: caller.error }, { status: caller.status });
     if (!caller.isOrganizer) return NextResponse.json({ error: "Solo el organizador puede borrar colectivos." }, { status: 403 });
 
-    const { count } = await caller.admin.from("transfer_tickets").select("id", { count: "exact", head: true }).eq("route_id", id);
-    if (count && count > 0) {
-      return NextResponse.json({ error: "Este colectivo ya tiene pasajeros -- desactivalo en vez de borrarlo." }, { status: 409 });
-    }
-
-    const { error } = await caller.admin.from("transfer_routes").delete().eq("id", id).eq("event_id", eventId);
+    const { data, error } = await caller.admin
+      .from("transfer_routes")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("event_id", eventId)
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle();
     if (error) {
       console.error("TRASLADOS DELETE:", error);
       return NextResponse.json({ error: "No se pudo borrar el colectivo." }, { status: 500 });
     }
+    if (!data) return NextResponse.json({ error: "No se encontró el colectivo." }, { status: 404 });
 
     return NextResponse.json({ ok: true });
   } catch {

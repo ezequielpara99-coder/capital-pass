@@ -150,8 +150,8 @@ export default function OrganizerPanelClient({
               className="absolute inset-0 bg-black/80 backdrop-blur-md"
             />
 
-            <aside className="relative h-full w-[290px] border-r border-white/[0.08] bg-[#070605]">
-              <div className="flex h-[72px] items-center justify-end border-b border-white/[0.07] px-5">
+            <aside className="relative flex h-full w-[290px] flex-col border-r border-white/[0.08] bg-[#070605]">
+              <div className="flex h-[72px] shrink-0 items-center justify-end border-b border-white/[0.07] px-5">
                 <button
                   type="button"
                   onClick={() =>
@@ -163,18 +163,20 @@ export default function OrganizerPanelClient({
                 </button>
               </div>
 
-              <Sidebar
-                section={section}
-                eventId={eventId}
-                isAdmin={isAdmin}
-                organizationName={
-                  organizationName
-                }
-                initials={initials}
-                onNavigate={() =>
-                  setMobileMenu(false)
-                }
-              />
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-8">
+                <Sidebar
+                  section={section}
+                  eventId={eventId}
+                  isAdmin={isAdmin}
+                  organizationName={
+                    organizationName
+                  }
+                  initials={initials}
+                  onNavigate={() =>
+                    setMobileMenu(false)
+                  }
+                />
+              </div>
             </aside>
           </div>
         )}

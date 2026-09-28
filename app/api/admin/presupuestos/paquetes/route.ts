@@ -70,7 +70,7 @@ export async function PATCH(request: NextRequest) {
     if (body.active !== undefined) updates.active = Boolean(body.active);
 
     const admin = createAdminClient();
-    const { data, error } = await admin.from("quote_packages").update(updates).eq("id", id).select(FIELDS).maybeSingle();
+    const { data, error } = await admin.from("quote_packages").update(updates).eq("id", id).is("deleted_at", null).select(FIELDS).maybeSingle();
 
     if (error) {
       console.error("PAQUETES PATCH:", error);
@@ -84,7 +84,8 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// DELETE: borra un paquete predeterminado (?id=...).
+// DELETE: borra un paquete predeterminado (?id=...) -- soft-delete,
+// recuperable desde /admin/papelera.
 export async function DELETE(request: NextRequest) {
   try {
     const verification = await verifyAdmin();
@@ -94,12 +95,19 @@ export async function DELETE(request: NextRequest) {
     if (!UUID.test(id)) return NextResponse.json({ error: "Paquete inválido." }, { status: 400 });
 
     const admin = createAdminClient();
-    const { error } = await admin.from("quote_packages").delete().eq("id", id);
+    const { data, error } = await admin
+      .from("quote_packages")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id)
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle();
 
     if (error) {
       console.error("PAQUETES DELETE:", error);
       return NextResponse.json({ error: "No se pudo borrar el paquete." }, { status: 500 });
     }
+    if (!data) return NextResponse.json({ error: "No se encontró el paquete." }, { status: 404 });
 
     return NextResponse.json({ ok: true });
   } catch {

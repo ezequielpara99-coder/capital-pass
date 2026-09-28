@@ -88,7 +88,8 @@ export default async function MiPortalPage({
   const { data: members } = await admin
     .from("premium_members")
     .select("id, first_name, last_name, member_code, status, expires_at, balance_minor, organization_id")
-    .eq("email", email);
+    .eq("email", email)
+    .is("deleted_at", null);
 
   const orgIds = [...new Set((members ?? []).map((m) => m.organization_id))];
   const orgNames = orgIds.length

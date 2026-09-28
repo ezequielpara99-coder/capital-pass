@@ -35,6 +35,7 @@ export async function POST(request: NextRequest) {
       .from("premium_members")
       .select("id, organization_id, first_name, last_name, member_code, status, expires_at")
       .eq("id", memberId)
+      .is("deleted_at", null)
       .maybeSingle();
 
     if (error) {

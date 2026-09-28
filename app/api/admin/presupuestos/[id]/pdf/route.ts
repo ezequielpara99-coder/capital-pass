@@ -27,7 +27,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     if (!UUID.test(id)) return NextResponse.json({ error: "Presupuesto inválido." }, { status: 400 });
 
     const admin = createAdminClient();
-    const { data, error } = await admin.from("quotes").select(QUOTE_FIELDS).eq("id", id).maybeSingle();
+    const { data, error } = await admin.from("quotes").select(QUOTE_FIELDS).eq("id", id).is("deleted_at", null).maybeSingle();
 
     if (error) {
       if (isMissingTable(error)) return NextResponse.json({ error: "Falta aplicar la actualización de la base de datos (presupuestos)." }, { status: 503 });

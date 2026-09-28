@@ -61,6 +61,12 @@ export default function RentalsClient({ inquiries }: { inquiries: Inquiry[] }) {
           <p className="mt-7 text-[9px] font-black uppercase tracking-[0.22em] text-[#ff7354]">Capital Pass admin</p>
           <h1 className="mt-3 text-[clamp(36px,5vw,64px)] font-black uppercase leading-[0.9] tracking-[-0.05em]">Capital Rentals.</h1>
           <p className="mt-3 max-w-xl text-sm text-white/45">Consultas de alquiler de terminales enviadas desde la landing.</p>
+          <Link
+            href="/admin/rentals/calendario"
+            className="mt-4 inline-flex h-10 items-center border border-white/[0.14] px-4 text-[9px] font-black uppercase tracking-[0.15em] text-white/60 transition hover:border-white/40 hover:text-white"
+          >
+            Calendario de equipos →
+          </Link>
         </header>
 
         {error && <div className="mt-6 border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>}

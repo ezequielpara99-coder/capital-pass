@@ -46,7 +46,8 @@ export async function computeFinanzasSummary(
   // conjunto completo, sin importar el rango.
   const { data: quotesData, error: quotesError } = await admin
     .from("quotes")
-    .select("id, status, kind, client_name, items, price_mode, package_price_minor, discount_type, discount_value, created_at");
+    .select("id, status, kind, client_name, items, price_mode, package_price_minor, discount_type, discount_value, created_at")
+    .is("deleted_at", null);
 
   if (quotesError) {
     if (isMissingTable(quotesError)) return { error: "missing_table" };
@@ -72,7 +73,7 @@ export async function computeFinanzasSummary(
   const facturado = facturadas.reduce((sum, q) => sum + quoteTotal(q), 0);
   const allFacturadoIds = new Set(allQuotes.filter((q) => q.status === "a_pagar" || q.status === "aceptado").map((q) => q.id));
 
-  let paymentsQuery = admin.from("quote_payments").select("quote_id, amount_minor, paid_at");
+  let paymentsQuery = admin.from("quote_payments").select("quote_id, amount_minor, paid_at").is("deleted_at", null);
   if (from) paymentsQuery = paymentsQuery.gte("paid_at", from);
   if (to) paymentsQuery = paymentsQuery.lte("paid_at", to);
   const { data: paymentsData, error: paymentsError } = await paymentsQuery;
@@ -123,7 +124,7 @@ export async function computeFinanzasSummary(
     pendiente: Math.max(0, values.facturado - values.cobrado),
   }));
 
-  let expensesQuery = admin.from("expenses").select("amount_minor, expense_date, kind");
+  let expensesQuery = admin.from("expenses").select("amount_minor, expense_date, kind").is("deleted_at", null);
   if (from) expensesQuery = expensesQuery.gte("expense_date", from);
   if (to) expensesQuery = expensesQuery.lte("expense_date", to);
   const { data: expensesData, error: expensesError } = await expensesQuery;

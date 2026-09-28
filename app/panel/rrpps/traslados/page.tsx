@@ -79,6 +79,7 @@ export default async function TrasladosPage({
     .from("transfer_routes")
     .select("id, event_id, organization_member_id, name, departure_at, departure_location, capacity, is_paid, price_minor, active, created_at")
     .eq("event_id", event.id)
+    .is("deleted_at", null)
     .order("created_at", { ascending: true });
 
   const missingSql = Boolean(routesError && (routesError.code === "42P01" || routesError.code === "PGRST205" || /does not exist|schema cache/i.test(routesError.message ?? "")));

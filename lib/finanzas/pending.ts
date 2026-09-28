@@ -22,7 +22,8 @@ export async function computePendingCollections(admin: Admin): Promise<PendingCo
   const { data: quotesData, error: quotesError } = await admin
     .from("quotes")
     .select("id, number, kind, client_name, items, price_mode, package_price_minor, discount_type, discount_value, updated_at")
-    .in("status", ["a_pagar", "aceptado"]);
+    .in("status", ["a_pagar", "aceptado"])
+    .is("deleted_at", null);
 
   if (quotesError) {
     if (isMissingTable(quotesError)) return { error: "missing_table" };
@@ -47,7 +48,8 @@ export async function computePendingCollections(admin: Admin): Promise<PendingCo
   const { data: paymentsData, error: paymentsError } = await admin
     .from("quote_payments")
     .select("quote_id, amount_minor")
-    .in("quote_id", quotes.map((q) => q.id));
+    .in("quote_id", quotes.map((q) => q.id))
+    .is("deleted_at", null);
 
   if (paymentsError) {
     if (isMissingTable(paymentsError)) return { error: "missing_table" };

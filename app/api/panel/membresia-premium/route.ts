@@ -57,6 +57,7 @@ export async function GET() {
       .from("premium_members")
       .select(FIELDS)
       .eq("organization_id", caller.organizationId)
+      .is("deleted_at", null)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -155,6 +156,7 @@ export async function PATCH(request: NextRequest) {
       .update(updates)
       .eq("id", id)
       .eq("organization_id", caller.organizationId)
+      .is("deleted_at", null)
       .select(FIELDS)
       .maybeSingle();
 
@@ -170,7 +172,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// DELETE: borra un socio (?id=).
+// DELETE: borra un socio (?id=) -- soft-delete, recuperable desde /admin/papelera.
 export async function DELETE(request: NextRequest) {
   try {
     const caller = await resolveOrganizer();
@@ -179,11 +181,19 @@ export async function DELETE(request: NextRequest) {
     const id = request.nextUrl.searchParams.get("id") ?? "";
     if (!UUID.test(id)) return NextResponse.json({ error: "Socio inválido." }, { status: 400 });
 
-    const { error } = await caller.admin.from("premium_members").delete().eq("id", id).eq("organization_id", caller.organizationId);
+    const { data, error } = await caller.admin
+      .from("premium_members")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("organization_id", caller.organizationId)
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle();
     if (error) {
       console.error("MEMBRESIA PREMIUM DELETE:", error);
       return NextResponse.json({ error: "No se pudo borrar el socio." }, { status: 500 });
     }
+    if (!data) return NextResponse.json({ error: "No se encontró el socio." }, { status: 404 });
 
     return NextResponse.json({ ok: true });
   } catch {

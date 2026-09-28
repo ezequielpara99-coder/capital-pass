@@ -70,6 +70,9 @@ const billeteraSocioMigration = readFileSync(new URL("../supabase/migrations/202
 const idempotenciaPagosGastosMigration = readFileSync(new URL("../supabase/migrations/20260976_idempotencia_pagos_gastos.sql", import.meta.url), "utf8");
 const recordatorioCobrosMigration = readFileSync(new URL("../supabase/migrations/20260977_recordatorio_cobros.sql", import.meta.url), "utf8");
 const metasMigration = readFileSync(new URL("../supabase/migrations/20260978_metas_y_buscador.sql", import.meta.url), "utf8");
+const softDeleteMigration = readFileSync(new URL("../supabase/migrations/20260979_soft_delete_capital.sql", import.meta.url), "utf8");
+const calendarioRentalMigration = readFileSync(new URL("../supabase/migrations/20260980_calendario_rental.sql", import.meta.url), "utf8");
+const softDeleteRpcFixesMigration = readFileSync(new URL("../supabase/migrations/20260981_soft_delete_rpc_fixes.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -188,6 +191,9 @@ async function database() {
   await db.exec(idempotenciaPagosGastosMigration);
   await db.exec(recordatorioCobrosMigration);
   await db.exec(metasMigration);
+  await db.exec(softDeleteMigration);
+  await db.exec(calendarioRentalMigration);
+  await db.exec(softDeleteRpcFixesMigration);
   return db;
 }
 
@@ -1900,6 +1906,71 @@ test("metas: un mes solo puede tener una meta (upsert por period)", async () => 
     /violates check constraint/,
     "la meta tiene que ser positiva"
   );
+
+  await db.close();
+});
+
+test("soft-delete: un socio, entrada de lista negra y colectivo borrados dejan de funcionar en los RPCs", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "abababab-1111-4111-8111-111111111111";
+  const event = "abababab-2222-4222-8222-222222222222";
+  const organizerUser = "abababab-3333-4333-8333-333333333333";
+
+  await db.exec(`insert into auth.users values ('${organizerUser}','sd-organizer@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club SD','club-sd');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${organizerUser}','organizer','active');`);
+
+  const member = await scalar(`insert into premium_members(organization_id, first_name, last_name, member_code) values ('${org}','Ana','Borrada','SDSD11') returning id::text`);
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false)`);
+  await db.query(`select * from wallet_move('${member}', 5000, 'topup', null)`);
+
+  // Soft-delete: el RPC ya no lo encuentra ni deja mover saldo.
+  await db.exec(`update premium_members set deleted_at = now() where id='${member}'`);
+  await assert.rejects(() => db.query(`select * from wallet_move('${member}', 1000, 'topup', null)`), /no existe/);
+
+  // Restaurado, vuelve a funcionar.
+  await db.exec(`update premium_members set deleted_at = null where id='${member}'`);
+  await db.query(`select * from wallet_move('${member}', 1000, 'topup', null)`);
+
+  // Lista negra borrada no advierte (lo consulta un controlador asignado).
+  const controllerUser = "abababab-4444-4444-8444-444444444444";
+  await db.exec(`insert into auth.users values ('${controllerUser}','sd-controller@example.test',now(),'{}');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${controllerUser}','controller','active');`);
+  const controllerMember = await scalar(`select id::text from organization_members where user_id='${controllerUser}'`);
+  await db.exec(`insert into event_staff(event_id,organization_member_id,staff_role,active) values ('${event}','${controllerMember}','controller',true);
+    insert into blacklist_entries(organization_id, dni, active, deleted_at) values ('${org}', '30111222', true, now());
+    select set_config('request.jwt.claim.sub','${controllerUser}',false);`);
+  const bl = await db.query<{ is_blacklisted: boolean }>(`select * from check_blacklist('${event}','30111222')`);
+  assert.equal(bl.rows[0].is_blacklisted, false, "una entrada borrada no genera advertencia en la puerta");
+
+  // Indice unico parcial: un socio borrado libera su codigo.
+  await db.exec(`update premium_members set deleted_at = now() where id='${member}'`);
+  await db.exec(`insert into premium_members(organization_id, first_name, last_name, member_code) values ('${org}','Otra','Persona','SDSD11')`);
+
+  await db.close();
+});
+
+test("calendario de rental: rental_bookings valida que ends_on no sea anterior a starts_on", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const asset = await db.query<{ id: string }>(`insert into rental_assets(name) values ('Terminal Nº1') returning id`);
+  const assetId = asset.rows[0].id;
+
+  await db.exec(`insert into rental_bookings(asset_id, client_name, starts_on, ends_on) values ('${assetId}', 'Bar Los Alamos', '2026-04-10', '2026-04-15')`);
+  assert.equal(await scalar(`select count(*)::int from rental_bookings where asset_id='${assetId}'`), 1);
+
+  await assert.rejects(
+    () => db.query(`insert into rental_bookings(asset_id, client_name, starts_on, ends_on) values ('${assetId}', 'Otro', '2026-04-15', '2026-04-10')`),
+    /violates check constraint/,
+    "la fecha de fin no puede ser anterior a la de inicio"
+  );
+
+  // Si se borra el equipo, sus reservas se van con el.
+  await db.exec(`delete from rental_assets where id='${assetId}'`);
+  assert.equal(await scalar(`select count(*)::int from rental_bookings where asset_id='${assetId}'`), 0);
 
   await db.close();
 });

@@ -12,9 +12,9 @@ export async function GET() {
 
   const admin = createAdminClient();
   const [{ data: catalog }, { data: clients }, { data: packages }] = await Promise.all([
-    admin.from("quote_catalog").select("id, kind, description, unit, unit_price_minor").eq("active", true).order("description"),
-    admin.from("quote_clients").select("id, name, contact, phone, email").order("name"),
-    admin.from("quote_packages").select("id, kind, name, items, price_mode, package_price_minor, notes").eq("active", true).order("name"),
+    admin.from("quote_catalog").select("id, kind, description, unit, unit_price_minor").eq("active", true).is("deleted_at", null).order("description"),
+    admin.from("quote_clients").select("id, name, contact, phone, email").is("deleted_at", null).order("name"),
+    admin.from("quote_packages").select("id, kind, name, items, price_mode, package_price_minor, notes").eq("active", true).is("deleted_at", null).order("name"),
   ]);
 
   // unit_price_minor/package_price_minor son bigint: PostgREST los

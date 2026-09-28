@@ -73,14 +73,14 @@ export async function PATCH(request: NextRequest) {
     // Si cambia el precio, deja el punto anterior fijado en el historial
     // antes de pisarlo -- así la línea de tiempo queda completa.
     if (updates.unit_price_minor !== undefined) {
-      const { data: current } = await admin.from("quote_catalog").select("unit_price_minor").eq("id", id).maybeSingle();
+      const { data: current } = await admin.from("quote_catalog").select("unit_price_minor").eq("id", id).is("deleted_at", null).maybeSingle();
       if (current && Number(current.unit_price_minor) !== updates.unit_price_minor) {
         const historyInsert = await admin.from("quote_catalog_price_history").insert({ catalog_id: id, unit_price_minor: updates.unit_price_minor, changed_by: verification.userId });
         if (historyInsert.error) console.error("CATALOGO PATCH historial:", historyInsert.error);
       }
     }
 
-    const { data, error } = await admin.from("quote_catalog").update(updates).eq("id", id).select(FIELDS).maybeSingle();
+    const { data, error } = await admin.from("quote_catalog").update(updates).eq("id", id).is("deleted_at", null).select(FIELDS).maybeSingle();
 
     if (error) {
       console.error("CATALOGO PATCH:", error);
@@ -94,7 +94,8 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// DELETE: borra un item del catalogo (?id=...).
+// DELETE: borra un item del catalogo (?id=...) -- soft-delete, recuperable
+// desde /admin/papelera.
 export async function DELETE(request: NextRequest) {
   try {
     const verification = await verifyAdmin();
@@ -104,12 +105,19 @@ export async function DELETE(request: NextRequest) {
     if (!UUID.test(id)) return NextResponse.json({ error: "Item inválido." }, { status: 400 });
 
     const admin = createAdminClient();
-    const { error } = await admin.from("quote_catalog").delete().eq("id", id);
+    const { data, error } = await admin
+      .from("quote_catalog")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id)
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle();
 
     if (error) {
       console.error("CATALOGO DELETE:", error);
       return NextResponse.json({ error: "No se pudo borrar el item." }, { status: 500 });
     }
+    if (!data) return NextResponse.json({ error: "No se encontró el item." }, { status: 404 });
 
     return NextResponse.json({ ok: true });
   } catch {

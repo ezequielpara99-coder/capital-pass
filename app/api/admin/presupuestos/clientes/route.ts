@@ -66,7 +66,7 @@ export async function PATCH(request: NextRequest) {
     if (body.notes !== undefined) updates.notes = optionalText(body.notes, 1000);
 
     const admin = createAdminClient();
-    const { data, error } = await admin.from("quote_clients").update(updates).eq("id", id).select(FIELDS).maybeSingle();
+    const { data, error } = await admin.from("quote_clients").update(updates).eq("id", id).is("deleted_at", null).select(FIELDS).maybeSingle();
 
     if (error) {
       console.error("CLIENTES PATCH:", error);
@@ -80,7 +80,8 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// DELETE: borra un cliente del directorio (?id=...).
+// DELETE: borra un cliente del directorio (?id=...) -- soft-delete,
+// recuperable desde /admin/papelera.
 export async function DELETE(request: NextRequest) {
   try {
     const verification = await verifyAdmin();
@@ -90,12 +91,19 @@ export async function DELETE(request: NextRequest) {
     if (!UUID.test(id)) return NextResponse.json({ error: "Cliente inválido." }, { status: 400 });
 
     const admin = createAdminClient();
-    const { error } = await admin.from("quote_clients").delete().eq("id", id);
+    const { data, error } = await admin
+      .from("quote_clients")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id)
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle();
 
     if (error) {
       console.error("CLIENTES DELETE:", error);
       return NextResponse.json({ error: "No se pudo borrar el cliente." }, { status: 500 });
     }
+    if (!data) return NextResponse.json({ error: "No se encontró el cliente." }, { status: 404 });
 
     return NextResponse.json({ ok: true });
   } catch {

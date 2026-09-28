@@ -35,6 +35,7 @@ export async function GET(_request: NextRequest, context: Context) {
       .from("quote_payments")
       .select("id, amount_minor, paid_at, method, notes, created_at")
       .eq("quote_id", id)
+      .is("deleted_at", null)
       .order("paid_at", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest, context: Context) {
     if (!UUID.test(id)) return NextResponse.json({ error: "Presupuesto inválido." }, { status: 400 });
 
     const admin = createAdminClient();
-    const { data: quote, error: quoteError } = await admin.from("quotes").select("id, status").eq("id", id).maybeSingle();
+    const { data: quote, error: quoteError } = await admin.from("quotes").select("id, status").eq("id", id).is("deleted_at", null).maybeSingle();
 
     if (quoteError) {
       if (isMissingTable(quoteError)) return NextResponse.json({ error: "Falta aplicar la actualización de la base de datos (presupuestos)." }, { status: 503 });
@@ -109,7 +110,8 @@ export async function POST(request: NextRequest, context: Context) {
   }
 }
 
-// DELETE: borra un pago (?paymentId=), por si se cargó mal.
+// DELETE: borra un pago (?paymentId=), por si se cargó mal -- soft-delete,
+// recuperable desde /admin/papelera.
 export async function DELETE(request: NextRequest, context: Context) {
   try {
     const verification = await verifyAdmin();
@@ -123,12 +125,20 @@ export async function DELETE(request: NextRequest, context: Context) {
     if (!UUID.test(paymentId)) return NextResponse.json({ error: "Pago inválido." }, { status: 400 });
 
     const admin = createAdminClient();
-    const { error } = await admin.from("quote_payments").delete().eq("id", paymentId).eq("quote_id", id);
+    const { data, error } = await admin
+      .from("quote_payments")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", paymentId)
+      .eq("quote_id", id)
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle();
 
     if (error) {
       console.error("PAGOS DELETE:", error);
       return NextResponse.json({ error: "No se pudo borrar el pago." }, { status: 500 });
     }
+    if (!data) return NextResponse.json({ error: "No se encontró el pago." }, { status: 404 });
 
     return NextResponse.json({ ok: true });
   } catch {

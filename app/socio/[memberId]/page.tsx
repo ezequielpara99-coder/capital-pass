@@ -33,6 +33,7 @@ export default async function SocioPage({ params, searchParams }: PageProps) {
     .from("premium_members")
     .select("id, organization_id, first_name, last_name, member_code, status, expires_at, balance_minor")
     .eq("id", memberId)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (!member) notFound();
