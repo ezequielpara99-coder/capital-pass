@@ -79,6 +79,7 @@ const recargaSaldoMigration = readFileSync(new URL("../supabase/migrations/20260
 const premioMensualMigration = readFileSync(new URL("../supabase/migrations/20260985_premio_mensual.sql", import.meta.url), "utf8");
 const seguimientoColectivoMigration = readFileSync(new URL("../supabase/migrations/20260986_seguimiento_colectivo.sql", import.meta.url), "utf8");
 const avisosSocioMigration = readFileSync(new URL("../supabase/migrations/20260987_avisos_socio.sql", import.meta.url), "utf8");
+const pedidosCompletosMigration = readFileSync(new URL("../supabase/migrations/20260988_pedidos_completos.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -206,6 +207,7 @@ async function database() {
   await db.exec(premioMensualMigration);
   await db.exec(seguimientoColectivoMigration);
   await db.exec(avisosSocioMigration);
+  await db.exec(pedidosCompletosMigration);
   return db;
 }
 
@@ -1794,6 +1796,92 @@ test("seguimiento del colectivo: el escaneo mueve la posicion sin retroceder, ma
   const reused = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','${codeB}')`);
   assert.equal(reused.rows[0].result, "already_used");
   assert.equal(await current(), stopB);
+
+  await db.close();
+});
+
+test("pedidos completos: stock al entregar, venta de mesa, nivel con descuento y puntos dobles", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "d1d1d1d1-1111-4111-8111-111111111111";
+  const event = "d1d1d1d1-2222-4222-8222-222222222222";
+
+  await db.exec(`insert into organizations(id,name,slug) values ('${org}','Club Completo','club-completo');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');`);
+
+  const product = await scalar(`insert into products(name, category) values ('Fernet Test','bebida') returning id::text`);
+  const ep = await scalar(`insert into event_products(event_id, product_id) values ('${event}','${product}') returning id::text`);
+  const bar = await scalar(`insert into bars(event_id, name) values ('${event}','Barra 1') returning id::text`);
+  await db.exec(`insert into bar_stock(bar_id, event_product_id, quantity) values ('${bar}','${ep}', 10)`);
+  const stock = async () => Number(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${ep}'`));
+
+  const member = await scalar(`insert into premium_members(organization_id, first_name, last_name, member_code, balance_minor, phone, email) values ('${org}','Ana','Completa','CP0001', 100000, '3400000001', 'ana@example.test') returning id::text`);
+  const fernet = await scalar(`insert into member_menu_items(organization_id, kind, name, price_minor, points_earned, product_id, stock_units) values ('${org}','trago','Fernet',2000,10,'${product}',1) returning id::text`);
+  const combo = await scalar(`insert into member_menu_items(organization_id, kind, name, price_minor, points_earned, product_id, stock_units) values ('${org}','combo','Combo',5000,30,'${product}',3) returning id::text`);
+  await db.exec(`insert into member_levels(organization_id, name, min_points, discount_percent, perk) values ('${org}','Plata',100,10,'10% de descuento'), ('${org}','Oro',500,20,null)`);
+
+  const place = async (items: string, payment = "en_barra") =>
+    (await db.query<{ order_id: string; total_minor: string }>(`select * from member_place_order('${member}','consumo','${items}'::jsonb,'${payment}',null,null,null)`)).rows[0];
+  const deliver = (id: string) => db.query(`select * from member_order_set_status('${id}','delivered','${org}',null)`);
+
+  // Sin nivel todavia: precio completo, y al entregar baja el stock del producto vinculado.
+  const o1 = await place(`[{"id":"${fernet}","qty":2}]`);
+  assert.equal(Number(o1.total_minor), 4000);
+  await deliver(o1.order_id);
+  assert.equal(await stock(), 8, "entregar 2 fernet descuenta 2 del stock");
+  assert.equal(await scalar(`select stock_deducted from member_orders where id='${o1.order_id}'`), true);
+  assert.equal(Number(await scalar(`select count(*)::int from stock_movements where event_product_id='${ep}' and type='venta'`)), 1);
+
+  // Con 100 puntos ganados pasa a Plata: 10% de descuento automatico.
+  const info = (await scalar(`select member_level_info('${member}')`)) as { lifetime: number; level: { name: string } | null; next: { name: string; missing: number } | null };
+  assert.equal(info.lifetime, 20);
+  assert.equal(info.level, null);
+  assert.deepEqual([info.next?.name, info.next?.missing], ["Plata", 80]);
+  await db.exec(`insert into member_points_transactions(member_id, delta, reason) values ('${member}', 80, 'Pedido extra')`);
+  const o2 = await place(`[{"id":"${combo}","qty":1}]`);
+  assert.equal(Number(o2.total_minor), 4500, "combo de 5000 con 10% de descuento");
+  await deliver(o2.order_id);
+  assert.equal(await stock(), 5, "el combo usa 3 unidades de stock");
+
+  // Puntos dobles vigentes: el pedido suma el doble.
+  await db.exec(`insert into member_point_boosts(organization_id, name, multiplier, starts_at, ends_at) values ('${org}','Doble sabado',2, now() - interval '1 hour', now() + interval '1 hour')`);
+  const o3 = await place(`[{"id":"${fernet}","qty":1}]`);
+  assert.equal(Number(await scalar(`select points_earned from member_orders where id='${o3.order_id}'`)), 20, "10 puntos x2");
+  assert.equal(Number(await scalar(`select boost_multiplier from member_orders where id='${o3.order_id}'`)), 2);
+  await deliver(o3.order_id);
+  assert.equal(await stock(), 4);
+
+  // Un boost vencido no cuenta.
+  await db.exec(`update member_point_boosts set starts_at = now() - interval '3 hours', ends_at = now() - interval '2 hours'`);
+  const o4 = await place(`[{"id":"${fernet}","qty":1}]`);
+  assert.equal(Number(await scalar(`select points_earned from member_orders where id='${o4.order_id}'`)), 10);
+
+  // Stock insuficiente: descuenta lo que hay, nunca queda negativo.
+  const o5 = await place(`[{"id":"${combo}","qty":5}]`);
+  await deliver(o5.order_id);
+  assert.equal(await stock(), 0);
+
+  // Dos eventos activos: no se sabe de cual barra salio, no se toca el stock.
+  await db.exec(`update bar_stock set quantity = 6 where bar_id='${bar}'; insert into events(id,organization_id,status) values ('d1d1d1d1-9999-4999-8999-999999999999','${org}','active')`);
+  const o6 = await place(`[{"id":"${fernet}","qty":1}]`);
+  await deliver(o6.order_id);
+  assert.equal(await stock(), 6, "con 2 eventos activos no se descuenta");
+  assert.equal(await scalar(`select stock_deducted from member_orders where id='${o6.order_id}'`), false);
+  await db.exec(`delete from events where id='d1d1d1d1-9999-4999-8999-999999999999'`);
+
+  // Mesa pagada con saldo: genera una venta del evento; cancelar la anula.
+  const table = await scalar(`insert into bar_tables(event_id,name,capacity,price_minor) values ('${event}','Mesa 9',6,4000) returning id::text`);
+  const m1 = await db.query<{ order_id: string }>(`select * from member_place_order('${member}','mesa','[]'::jsonb,'wallet','${table}',null,null)`);
+  assert.equal(Number(await scalar(`select count(*)::int from sales where event_id='${event}' and channel='mesa' and status='confirmed'`)), 1);
+  assert.equal(Number(await scalar(`select total_minor from sales where event_id='${event}' and channel='mesa'`)), 4000);
+  await db.query(`select * from member_order_set_status('${m1.rows[0].order_id}','cancelled','${org}',null)`);
+  assert.equal(await scalar(`select status::text from sales where event_id='${event}' and channel='mesa'`), "cancelled");
+
+  // Mesa a pagar en el boliche: la venta se registra recien al confirmarla (entregada).
+  const m2 = await db.query<{ order_id: string }>(`select * from member_place_order('${member}','mesa','[]'::jsonb,'en_barra','${table}',null,null)`);
+  assert.equal(Number(await scalar(`select count(*)::int from sales where event_id='${event}' and channel='mesa' and status='confirmed'`)), 0);
+  await deliver(m2.rows[0].order_id);
+  assert.equal(Number(await scalar(`select count(*)::int from sales where event_id='${event}' and channel='mesa' and status='confirmed'`)), 1);
 
   await db.close();
 });

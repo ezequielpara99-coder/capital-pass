@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { sendPushToOrganizers } from "../../../../../lib/push/server";
+import { memberSessionStatus, SESSION_MESSAGES } from "../../../../../lib/customer/member-auth";
 import { verifyMemberSignature } from "../../../../../lib/members/signature";
 import { checkRateLimit, getClientIp } from "../../../../../lib/http/rate-limit";
 import { UUID_RE } from "../../../../../lib/panel/organizer";
@@ -49,6 +50,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const key = String(body.key ?? "").trim().slice(0, 80) || null;
 
     const admin = createAdminClient();
+
+    // Pagar con saldo mueve plata: no alcanza con tener el link del carnet,
+    // hay que haber ingresado con el email de la membresia.
+    if (payment === "wallet") {
+      const { data: owner } = await admin.from("premium_members").select("email").eq("id", memberId).is("deleted_at", null).maybeSingle();
+      const session = await memberSessionStatus((owner?.email as string | null) ?? null);
+      if (session !== "ready") {
+        const problem = SESSION_MESSAGES[session];
+        return NextResponse.json({ error: problem.error, code: session }, { status: problem.status });
+      }
+    }
     const { data, error } = await admin.rpc("member_place_order", {
       p_member_id: memberId,
       p_kind: kind,

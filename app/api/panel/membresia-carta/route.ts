@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isMissingTable, resolveOrganizer, UUID_RE } from "../../../../lib/panel/organizer";
+import { createAdminClient } from "../../../../lib/supabase/admin";
 
-const FIELDS = "id, kind, name, description, price_minor, points_earned, points_cost, active, sort_order";
+const FIELDS = "id, kind, name, description, price_minor, points_earned, points_cost, active, sort_order, product_id, stock_units";
 const KINDS = ["trago", "combo", "premio"] as const;
 type Kind = (typeof KINDS)[number];
 
@@ -9,6 +10,30 @@ const MISSING = "Falta aplicar la actualización de la base de datos de la app d
 
 function serialize<T extends { price_minor: number | string }>(row: T) {
   return { ...row, price_minor: Number(row.price_minor) };
+}
+
+// Vinculo opcional de un item de la carta con un producto de stock: al
+// entregar el pedido se descuenta stock de barra. Solo productos del catalogo
+// global o del propio boliche (nunca de otro).
+async function parseStockLink(
+  admin: ReturnType<typeof createAdminClient>,
+  organizationId: string,
+  body: { productId?: unknown; stockUnits?: unknown }
+): Promise<{ productId: string | null; units: number } | { error: string }> {
+  const rawProduct = String(body.productId ?? "").trim();
+  const units = body.stockUnits === undefined || body.stockUnits === "" ? 1 : Math.round(Number(body.stockUnits));
+  if (!Number.isFinite(units) || units < 1 || units > 100) return { error: "Las unidades de stock tienen que ser entre 1 y 100." };
+  if (!rawProduct) return { productId: null, units: 1 };
+  if (!UUID_RE.test(rawProduct)) return { error: "Producto inválido." };
+
+  const { data } = await admin
+    .from("products")
+    .select("id")
+    .eq("id", rawProduct)
+    .or(`organization_id.is.null,organization_id.eq.${organizationId}`)
+    .maybeSingle();
+  if (!data) return { error: "Ese producto no existe." };
+  return { productId: rawProduct, units };
 }
 
 function parseAmount(value: unknown) {
@@ -21,6 +46,15 @@ export async function GET() {
   try {
     const caller = await resolveOrganizer({ requirePremium: true });
     if ("error" in caller) return NextResponse.json({ error: caller.error }, { status: caller.status });
+
+    // Productos de stock que se pueden vincular a un item de la carta (los del
+    // catalogo global y los propios del boliche).
+    const productsRes = await caller.admin
+      .from("products")
+      .select("id, name")
+      .or(`organization_id.is.null,organization_id.eq.${caller.organizationId}`)
+      .order("name", { ascending: true })
+      .limit(500);
 
     const [items, org, winnersRes] = await Promise.all([
       caller.admin.from("member_menu_items").select(FIELDS).eq("organization_id", caller.organizationId).is("deleted_at", null).order("kind").order("sort_order").order("created_at").limit(500),
@@ -45,6 +79,7 @@ export async function GET() {
     return NextResponse.json({
       ok: true,
       items: (items.data ?? []).map(serialize),
+      products: productsRes.data ?? [],
       checkinPoints: Number(org.data?.member_checkin_points ?? 0),
       rankingEnabled: org.data?.member_ranking_enabled ?? true,
       prizes: [org.data?.member_prize_1 ?? "", org.data?.member_prize_2 ?? "", org.data?.member_prize_3 ?? ""],
@@ -67,11 +102,16 @@ export async function POST(request: NextRequest) {
     if (!KINDS.includes(kind)) return NextResponse.json({ error: "Tipo inválido." }, { status: 400 });
     if (!name) return NextResponse.json({ error: "Ingresá el nombre." }, { status: 400 });
 
+    const stockLink = await parseStockLink(caller.admin, caller.organizationId, body);
+    if ("error" in stockLink) return NextResponse.json({ error: stockLink.error }, { status: 400 });
+
     const row: Record<string, unknown> = {
       organization_id: caller.organizationId,
       kind,
       name,
       description: String(body.description ?? "").trim().slice(0, 300) || null,
+      product_id: stockLink.productId,
+      stock_units: stockLink.units,
     };
 
     if (kind === "premio") {
@@ -180,6 +220,12 @@ export async function PATCH(request: NextRequest) {
     }
     if (body.description !== undefined) updates.description = String(body.description).trim().slice(0, 300) || null;
     if (body.active !== undefined) updates.active = Boolean(body.active);
+    if (body.productId !== undefined || body.stockUnits !== undefined) {
+      const stockLink = await parseStockLink(caller.admin, caller.organizationId, body);
+      if ("error" in stockLink) return NextResponse.json({ error: stockLink.error }, { status: 400 });
+      updates.product_id = stockLink.productId;
+      updates.stock_units = stockLink.units;
+    }
     if (current.kind === "premio") {
       if (body.pointsCost !== undefined) {
         const cost = parseAmount(body.pointsCost);

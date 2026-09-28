@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ColectivoTracker from "../../_components/colectivo-tracker";
+import { useNow } from "../../_components/use-now";
 
 type MenuItem = { id: string; kind: "trago" | "combo" | "premio"; name: string; description: string | null; price_minor: number; points_earned: number; points_cost: number | null };
 type Table = { id: string; event_id: string; name: string; capacity: number | null; price_minor: number | null };
@@ -21,6 +22,12 @@ type AppData = {
   points: PointsRow[];
   wonPrizes: WonPrize[];
   alerts: { status: "no_email" | "login" | "mismatch" | "ready"; vapidKey: string };
+  level: {
+    lifetime: number;
+    level: { name: string; min_points: number; discount_percent: number; perk: string | null } | null;
+    next: { name: string; min_points: number; missing: number } | null;
+  } | null;
+  boosts: { id: string; name: string; multiplier: number; starts_at: string; ends_at: string }[];
 };
 
 type Props = { memberId: string; signature: string; qrDataUrl: string };
@@ -75,6 +82,26 @@ function urlBase64ToUint8Array(base64String: string) {
   const output = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i);
   return output;
+}
+
+// Aviso cuando todavia no se puede pagar con saldo: hay que ingresar con el email.
+function WalletLockHint({ status }: { status: "no_email" | "login" | "mismatch" | "ready" | undefined }) {
+  const text =
+    status === "no_email"
+      ? "Tu membresía no tiene email cargado. Pedile al boliche que lo cargue para pagar con saldo."
+      : status === "mismatch"
+        ? "Ingresaste con otro email. Usá el email de tu membresía para pagar con saldo."
+        : "Para pagar con saldo, primero ingresá con tu email. Podés pagar al recibir sin ingresar.";
+  return (
+    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2">
+      <p className="text-xs text-amber-100/80">{text}</p>
+      {status !== "no_email" && (
+        <a href="/mi" className="h-9 border border-violet-400/40 bg-violet-400/10 px-3 text-[10px] font-black uppercase leading-9 tracking-wide text-violet-200">
+          Ingresar
+        </a>
+      )}
+    </div>
+  );
 }
 
 function monthName(period: string) {
@@ -362,13 +389,23 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
   const menuById = useMemo(() => new Map((data?.menu ?? []).map((m) => [m.id, m])), [data]);
   const cartLines = Object.entries(cart).map(([id, qty]) => ({ item: menuById.get(id), qty })).filter((l): l is { item: MenuItem; qty: number } => Boolean(l.item) && l.qty > 0);
   const cartCount = cartLines.reduce((sum, l) => sum + l.qty, 0);
-  const cartTotal = cartLines.reduce((sum, l) => sum + (l.item.kind === "premio" ? 0 : l.item.price_minor * l.qty), 0);
+  const cartGross = cartLines.reduce((sum, l) => sum + (l.item.kind === "premio" ? 0 : l.item.price_minor * l.qty), 0);
+  // El servidor calcula el total final; esto es solo para mostrarlo igual.
+  const discountPercent = data?.level?.level?.discount_percent ?? 0;
+  const cartTotal = discountPercent > 0 ? Math.round((cartGross * (100 - discountPercent)) / 100) : cartGross;
+  const nowMs = useNow();
+  const activeBoost = nowMs === 0 ? undefined : (data?.boosts ?? []).find((b) => new Date(b.starts_at).getTime() <= nowMs && nowMs < new Date(b.ends_at).getTime());
   const cartPointsCost = cartLines.reduce((sum, l) => sum + (l.item.kind === "premio" ? (l.item.points_cost ?? 0) * l.qty : 0), 0);
-  const cartPointsEarned = cartLines.reduce((sum, l) => sum + (l.item.kind === "premio" ? 0 : l.item.points_earned * l.qty), 0);
+  const cartPointsBase = cartLines.reduce((sum, l) => sum + (l.item.kind === "premio" ? 0 : l.item.points_earned * l.qty), 0);
+  const cartPointsEarned = activeBoost ? Math.round(cartPointsBase * activeBoost.multiplier) : cartPointsBase;
 
   const member = data?.member;
   const isActive = member?.status === "active";
-  const canPayWithWallet = (member?.balanceMinor ?? 0) >= cartTotal;
+  // Pagar con saldo exige haber ingresado con el email de la membresia (el
+  // link del carnet solo no alcanza para mover plata).
+  const walletUnlocked = data?.alerts?.status === "ready";
+  const insufficientBalance = (member?.balanceMinor ?? 0) < cartTotal;
+  const canPayWithWallet = walletUnlocked && !insufficientBalance;
   const activeMesa = (data?.orders ?? []).find((o) => o.kind === "mesa" && (o.status === "pending" || o.status === "ready"));
 
   function changeCart(id: string, delta: number) {
@@ -526,6 +563,29 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                   <h1 className="text-2xl font-black">{member.firstName} {member.lastName}</h1>
                   <p className="mt-1 font-mono text-sm tracking-[0.15em] text-white/50">{member.code}</p>
 
+                  {data.level && (data.level.level || data.level.next) && (
+                    <div className="mx-auto mt-3 max-w-[260px] text-center">
+                      {data.level.level && (
+                        <p className="inline-block border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-amber-300">
+                          Nivel {data.level.level.name}
+                          {data.level.level.discount_percent > 0 ? ` · ${data.level.level.discount_percent}% de descuento` : ""}
+                        </p>
+                      )}
+                      {data.level.level?.perk && <p className="mt-1 text-[11px] text-white/45">{data.level.level.perk}</p>}
+                      {data.level.next && (
+                        <div className="mt-2">
+                          <div className="h-1 w-full bg-white/10">
+                            <div
+                              className="h-1 bg-amber-300"
+                              style={{ width: `${Math.max(4, Math.min(100, Math.round(((data.level.lifetime - (data.level.level?.min_points ?? 0)) / Math.max(1, data.level.next.min_points - (data.level.level?.min_points ?? 0))) * 100)))}%` }}
+                            />
+                          </div>
+                          <p className="mt-1 text-[10px] text-white/40">Te faltan {data.level.next.missing} puntos para {data.level.next.name}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="mt-4 flex justify-center gap-3">
                     <div className="border border-emerald-400/20 bg-emerald-400/[0.06] px-4 py-2">
                       <p className="text-[9px] font-black uppercase tracking-wide text-emerald-300/70">Saldo</p>
@@ -608,6 +668,24 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
             {tab === "carta" && (
               <section className="mt-5">
                 <p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/40">Pedí sin hacer fila</p>
+
+                {(data.boosts ?? []).map((boost) => {
+                  const live = nowMs !== 0 && new Date(boost.starts_at).getTime() <= nowMs;
+                  return (
+                    <div key={boost.id} className={`mt-4 border px-4 py-3 ${live ? "border-amber-400/40 bg-amber-400/[0.08]" : "border-white/10 bg-white/[0.02]"}`}>
+                      <p className={`text-[10px] font-black uppercase tracking-[0.16em] ${live ? "text-amber-300" : "text-white/50"}`}>
+                        {live ? "Puntos x" : "Próximamente: puntos x"}{boost.multiplier} · {boost.name}
+                      </p>
+                      <p className="mt-1 text-xs text-white/50">
+                        {live ? `Hasta ${formatDate(boost.ends_at)}` : `Desde ${formatDate(boost.starts_at)}`}
+                      </p>
+                    </div>
+                  );
+                })}
+
+                {discountPercent > 0 && (
+                  <p className="mt-4 text-xs text-white/50">Tu nivel te da {discountPercent}% de descuento en tragos y combos.</p>
+                )}
                 {grouped.length === 0 && <div className="mt-4 border border-dashed border-white/10 p-8 text-center text-sm text-white/35">El boliche todavía no cargó su carta.</div>}
                 {grouped.map((group) => (
                   <div key={group.kind} className="mt-6">
@@ -887,7 +965,8 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
               <span>Total</span>
               <span>{cartTotal > 0 ? money(cartTotal) : "—"}{cartPointsCost > 0 ? ` ${cartTotal > 0 ? "+ " : ""}${cartPointsCost} pts` : ""}</span>
             </div>
-            {cartPointsEarned > 0 && <p className="mt-1 text-xs text-violet-300">Sumás {cartPointsEarned} puntos cuando te lo entreguen.</p>}
+            {discountPercent > 0 && cartGross > 0 && <p className="mt-1 text-xs text-amber-300">Incluye {discountPercent}% de descuento de tu nivel (antes {money(cartGross)}).</p>}
+            {cartPointsEarned > 0 && <p className="mt-1 text-xs text-violet-300">Sumás {cartPointsEarned} puntos cuando te lo entreguen{activeBoost ? ` (puntos x${activeBoost.multiplier})` : ""}.</p>}
 
             <p className="mt-5 text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Dónde lo recibís</p>
             <div className="mt-2 grid grid-cols-2 gap-2">
@@ -909,7 +988,8 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                     Pago al recibir
                   </button>
                 </div>
-                {!canPayWithWallet && (
+                {!walletUnlocked && <WalletLockHint status={data?.alerts?.status} />}
+                {walletUnlocked && insufficientBalance && (
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2">
                     <p className="text-xs text-amber-100/80">Te faltan {money(cartTotal - (member?.balanceMinor ?? 0))} de saldo.</p>
                     {data?.organization.topupsEnabled && (
@@ -984,7 +1064,7 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
 
             {tableChoice.price_minor ? (
               <div className="mt-4 grid grid-cols-2 gap-2">
-                <button type="button" disabled={(member?.balanceMinor ?? 0) < tableChoice.price_minor} onClick={() => setTablePayment("wallet")} className={`h-11 border text-[10px] font-black uppercase tracking-wide disabled:opacity-30 ${tablePayment === "wallet" ? "border-emerald-400/60 bg-emerald-400/15 text-emerald-200" : "border-white/15 text-white/50"}`}>
+                <button type="button" disabled={!walletUnlocked || (member?.balanceMinor ?? 0) < tableChoice.price_minor} onClick={() => setTablePayment("wallet")} className={`h-11 border text-[10px] font-black uppercase tracking-wide disabled:opacity-30 ${tablePayment === "wallet" ? "border-emerald-400/60 bg-emerald-400/15 text-emerald-200" : "border-white/15 text-white/50"}`}>
                   Con saldo
                 </button>
                 <button type="button" onClick={() => setTablePayment("en_barra")} className={`h-11 border text-[10px] font-black uppercase tracking-wide ${tablePayment === "en_barra" ? "border-emerald-400/60 bg-emerald-400/15 text-emerald-200" : "border-white/15 text-white/50"}`}>
@@ -992,7 +1072,8 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                 </button>
               </div>
             ) : null}
-            {tableChoice.price_minor && (member?.balanceMinor ?? 0) < tableChoice.price_minor ? (
+            {tableChoice.price_minor && !walletUnlocked ? <WalletLockHint status={data?.alerts?.status} /> : null}
+            {tableChoice.price_minor && walletUnlocked && (member?.balanceMinor ?? 0) < tableChoice.price_minor ? (
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2">
                 <p className="text-xs text-amber-100/80">Te faltan {money(tableChoice.price_minor - (member?.balanceMinor ?? 0))} de saldo.</p>
                 {data?.organization.topupsEnabled && (

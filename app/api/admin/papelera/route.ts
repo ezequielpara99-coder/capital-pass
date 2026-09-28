@@ -19,6 +19,8 @@ const TABLES = [
   { table: "premium_members", type: "Socio premium", select: "id, first_name, last_name, member_code, deleted_at", label: (r: Record<string, unknown>) => `${r.first_name} ${r.last_name} · ${r.member_code}` },
   { table: "blacklist_entries", type: "Lista negra", select: "id, dni, full_name, deleted_at", label: (r: Record<string, unknown>) => `${r.full_name || "Sin nombre"} · DNI ${r.dni}` },
   { table: "member_menu_items", type: "Carta de socios", select: "id, name, kind, deleted_at", label: (r: Record<string, unknown>) => `${r.name} · ${r.kind}` },
+  { table: "member_levels", type: "Nivel de socio", select: "id, name, min_points, deleted_at", label: (r: Record<string, unknown>) => `${r.name} · desde ${r.min_points} pts` },
+  { table: "member_point_boosts", type: "Puntos dobles", select: "id, name, multiplier, deleted_at", label: (r: Record<string, unknown>) => `${r.name} · x${r.multiplier}` },
   { table: "organization_purchases", type: "Compra", select: "id, description, total_minor, deleted_at", label: (r: Record<string, unknown>) => `${r.description} · $ ${Number(r.total_minor).toLocaleString("es-AR")}` },
   { table: "transfer_routes", type: "Colectivo", select: "id, name, deleted_at", label: (r: Record<string, unknown>) => String(r.name) },
 ] as const;

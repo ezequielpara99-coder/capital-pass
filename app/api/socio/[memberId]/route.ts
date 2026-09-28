@@ -1,6 +1,5 @@
-import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionToken, CUSTOMER_SESSION_COOKIE } from "../../../../lib/customer/session";
+import { memberSessionStatus } from "../../../../lib/customer/member-auth";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { verifyMemberSignature } from "../../../../lib/members/signature";
 import { checkRateLimit, getClientIp } from "../../../../lib/http/rate-limit";
@@ -42,16 +41,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     // Estado de los avisos al celular: solo se pueden activar con sesion por
     // email (la misma de /mi) y con el email de la membresia.
-    const cookieStore = await cookies();
-    const sessionCookie = cookieStore.get(CUSTOMER_SESSION_COOKIE)?.value ?? "";
-    const sessionEmail = sessionCookie ? verifySessionToken(sessionCookie) : null;
-    const alertsStatus: "no_email" | "login" | "mismatch" | "ready" = !member.email
-      ? "no_email"
-      : !sessionEmail
-        ? "login"
-        : sessionEmail.trim().toLowerCase() !== String(member.email).trim().toLowerCase()
-          ? "mismatch"
-          : "ready";
+    const alertsStatus = await memberSessionStatus(member.email as string | null);
 
     // Premios del ranking mensual que ya gano este socio (tolerante: si la
     // tabla todavia no existe, simplemente no hay premios que mostrar).
@@ -61,6 +51,20 @@ export async function GET(request: NextRequest, context: RouteContext) {
       .eq("member_id", memberId)
       .order("created_at", { ascending: false })
       .limit(6);
+
+    // Nivel del socio (descuento automatico) y puntos dobles vigentes o proximos.
+    // Tolerante: sin la migracion de pedidos completos simplemente no hay nivel ni boosts.
+    const levelRes = await admin.rpc("member_level_info", { p_member_id: memberId });
+    const boostsRes = await admin
+      .from("member_point_boosts")
+      .select("id, name, multiplier, starts_at, ends_at")
+      .eq("organization_id", orgId)
+      .eq("active", true)
+      .is("deleted_at", null)
+      .gte("ends_at", new Date().toISOString())
+      .lte("starts_at", new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString())
+      .order("starts_at", { ascending: true })
+      .limit(5);
 
     const [menuRes, ordersRes, pointsRes, eventsRes, orgRes] = await Promise.all([
       admin
@@ -134,6 +138,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
       points: pointsRes.data ?? [],
       wonPrizes: prizesRes.error ? [] : prizesRes.data ?? [],
       alerts: { status: alertsStatus, vapidKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "" },
+      level: levelRes.error ? null : levelRes.data ?? null,
+      boosts: boostsRes.error ? [] : (boostsRes.data ?? []).map((b) => ({ ...b, multiplier: Number(b.multiplier) })),
     });
   } catch (error) {
     console.error("SOCIO GET:", error);

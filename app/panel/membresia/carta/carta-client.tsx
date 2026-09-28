@@ -2,10 +2,12 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { FIELD_INPUT, FIELD_LABEL, MembresiaHeader, formatMoney } from "../membresia-nav";
+import CartaExtras from "./carta-extras";
 
 type Kind = "trago" | "combo" | "premio";
 type Winner = { id: string; period: string; position: number; points: number; prize: string; claimed_at: string | null; memberName: string };
-type Item = { id: string; kind: Kind; name: string; description: string | null; price_minor: number; points_earned: number; points_cost: number | null; active: boolean };
+type Item = { id: string; kind: Kind; name: string; description: string | null; price_minor: number; points_earned: number; points_cost: number | null; active: boolean; product_id: string | null; stock_units: number };
+type Product = { id: string; name: string };
 
 const KIND_LABEL: Record<Kind, string> = { trago: "Trago", combo: "Combo", premio: "Premio (se canjea con puntos)" };
 const KIND_TITLE: Record<Kind, string> = { trago: "Tragos", combo: "Combos", premio: "Premios" };
@@ -28,9 +30,13 @@ export default function CartaClient() {
   const [price, setPrice] = useState("");
   const [pointsEarned, setPointsEarned] = useState("");
   const [pointsCost, setPointsCost] = useState("");
+  const [products, setProducts] = useState<Product[]>([]);
+  const [productId, setProductId] = useState("");
+  const [stockUnits, setStockUnits] = useState("1");
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [edit, setEdit] = useState({ name: "", price: "", pointsEarned: "", pointsCost: "" });
+  const [edit, setEdit] = useState({ name: "", price: "", pointsEarned: "", pointsCost: "", productId: "", stockUnits: "1" });
+  const productName = (id: string | null) => (id ? products.find((p) => p.id === id)?.name ?? "producto" : null);
 
   async function load() {
     try {
@@ -41,6 +47,7 @@ export default function CartaClient() {
         throw new Error(result.error ?? "No se pudo cargar.");
       }
       setItems(result.items);
+      setProducts(result.products ?? []);
       setCheckinPoints(String(result.checkinPoints));
       setSavedCheckin(String(result.checkinPoints));
       setRankingEnabled(result.rankingEnabled !== false);
@@ -105,8 +112,10 @@ export default function CartaClient() {
     setSaving(true);
     setError("");
     try {
-      const result = await request("POST", { kind, name, description, price, pointsEarned: pointsEarned || 0, pointsCost });
+      const result = await request("POST", { kind, name, description, price, pointsEarned: pointsEarned || 0, pointsCost, productId, stockUnits });
       setItems((prev) => [...(prev ?? []), result.item]);
+      setProductId("");
+      setStockUnits("1");
       setName("");
       setDescription("");
       setPrice("");
@@ -147,13 +156,16 @@ export default function CartaClient() {
       price: String(item.price_minor),
       pointsEarned: String(item.points_earned),
       pointsCost: String(item.points_cost ?? ""),
+      productId: item.product_id ?? "",
+      stockUnits: String(item.stock_units ?? 1),
     });
   }
 
   async function saveEdit(item: Item) {
     setError("");
     try {
-      const body = item.kind === "premio" ? { id: item.id, name: edit.name, pointsCost: edit.pointsCost } : { id: item.id, name: edit.name, price: edit.price, pointsEarned: edit.pointsEarned || 0 };
+      const stock = { productId: edit.productId, stockUnits: edit.stockUnits };
+      const body = item.kind === "premio" ? { id: item.id, name: edit.name, pointsCost: edit.pointsCost, ...stock } : { id: item.id, name: edit.name, price: edit.price, pointsEarned: edit.pointsEarned || 0, ...stock };
       const result = await request("PATCH", body);
       setItems((prev) => (prev ?? []).map((i) => (i.id === item.id ? result.item : i)));
       setEditingId(null);
@@ -249,6 +261,8 @@ export default function CartaClient() {
               )}
             </div>
 
+            <CartaExtras onError={setError} />
+
             <form onSubmit={add} className="mt-6 border border-white/[0.08] bg-white/[0.02] p-5">
               <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Agregar a la carta</p>
 
@@ -290,6 +304,27 @@ export default function CartaClient() {
                 </div>
               )}
 
+              {products.length > 0 && (
+                <div className="grid gap-x-4 sm:grid-cols-[1fr_140px]">
+                  <label className="mt-3 block">
+                    <span className={FIELD_LABEL}>Descuenta de stock (opcional)</span>
+                    <select value={productId} onChange={(e) => setProductId(e.target.value)} className={FIELD_INPUT}>
+                      <option value="" className="bg-black">No descuenta stock</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={p.id} className="bg-black">{p.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {productId && (
+                    <label className="mt-3 block">
+                      <span className={FIELD_LABEL}>Unidades</span>
+                      <input value={stockUnits} onChange={(e) => setStockUnits(e.target.value)} inputMode="numeric" className={FIELD_INPUT} />
+                    </label>
+                  )}
+                </div>
+              )}
+              {productId && <p className="mt-1 text-[11px] text-white/35">Al entregar el pedido se descuenta de la barra, siempre que haya un solo evento activo.</p>}
+
               <button type="submit" disabled={saving} className="mt-4 h-12 w-full bg-[#ff2a1a] text-[10px] font-black uppercase tracking-[0.16em] text-white transition hover:bg-[#ff4a2d] disabled:opacity-40 sm:w-auto sm:px-8">
                 {saving ? "Guardando…" : "+ Agregar"}
               </button>
@@ -318,6 +353,19 @@ export default function CartaClient() {
                                   <input value={edit.pointsEarned} onChange={(e) => setEdit((d) => ({ ...d, pointsEarned: e.target.value }))} inputMode="numeric" placeholder="Pts" className="h-10 w-20 border border-white/[0.12] bg-black/30 px-3 text-sm outline-none focus:border-[#ff5a2a]/50" />
                                 </>
                               )}
+                              {products.length > 0 && (
+                                <>
+                                  <select value={edit.productId} onChange={(e) => setEdit((d) => ({ ...d, productId: e.target.value }))} className="h-10 max-w-[180px] border border-white/[0.12] bg-black/30 px-2 text-xs outline-none focus:border-[#ff5a2a]/50">
+                                    <option value="" className="bg-black">Sin stock</option>
+                                    {products.map((p) => (
+                                      <option key={p.id} value={p.id} className="bg-black">{p.name}</option>
+                                    ))}
+                                  </select>
+                                  {edit.productId && (
+                                    <input value={edit.stockUnits} onChange={(e) => setEdit((d) => ({ ...d, stockUnits: e.target.value }))} inputMode="numeric" placeholder="Unid." className="h-10 w-16 border border-white/[0.12] bg-black/30 px-3 text-sm outline-none focus:border-[#ff5a2a]/50" />
+                                  )}
+                                </>
+                              )}
                               <button type="button" onClick={() => saveEdit(item)} className="h-10 border border-emerald-400/30 bg-emerald-400/10 px-3 text-[10px] font-black uppercase tracking-wide text-emerald-300">Guardar</button>
                               <button type="button" onClick={() => setEditingId(null)} className="h-10 border border-white/15 px-3 text-[10px] font-black uppercase tracking-wide text-white/50">Cancelar</button>
                             </div>
@@ -328,6 +376,7 @@ export default function CartaClient() {
                                 <p className="mt-0.5 text-[11px] text-white/40">
                                   {item.kind === "premio" ? `${item.points_cost} puntos` : `${formatMoney(item.price_minor)} · suma ${item.points_earned} pts`}
                                   {item.description ? ` · ${item.description}` : ""}
+                                  {item.product_id ? ` · descuenta ${item.stock_units} de ${productName(item.product_id)}` : ""}
                                 </p>
                               </div>
                               <div className="flex gap-2">
