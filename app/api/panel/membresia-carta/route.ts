@@ -22,12 +22,20 @@ export async function GET() {
     const caller = await resolveOrganizer({ requirePremium: true });
     if ("error" in caller) return NextResponse.json({ error: caller.error }, { status: caller.status });
 
-    const [items, org] = await Promise.all([
+    const [items, org, winnersRes] = await Promise.all([
       caller.admin.from("member_menu_items").select(FIELDS).eq("organization_id", caller.organizationId).is("deleted_at", null).order("kind").order("sort_order").order("created_at").limit(500),
-      caller.admin.from("organizations").select("member_checkin_points, member_ranking_enabled").eq("id", caller.organizationId).maybeSingle(),
+      caller.admin.from("organizations").select("member_checkin_points, member_ranking_enabled, member_prize_1, member_prize_2, member_prize_3").eq("id", caller.organizationId).maybeSingle(),
+      caller.admin.from("member_monthly_winners").select("id, member_id, period, position, points, prize, claimed_at").eq("organization_id", caller.organizationId).order("period", { ascending: false }).order("position", { ascending: true }).limit(30),
     ]);
 
-    const failure = items.error ?? org.error;
+    const winnerIds = [...new Set((winnersRes.data ?? []).map((w) => w.member_id as string))];
+    const winnerNames = new Map<string, string>();
+    if (winnerIds.length > 0) {
+      const { data: people } = await caller.admin.from("premium_members").select("id, first_name, last_name, member_code, phone").in("id", winnerIds);
+      for (const p of people ?? []) winnerNames.set(p.id as string, `${p.first_name} ${p.last_name} · ${p.member_code}${p.phone ? ` · ${p.phone}` : ""}`);
+    }
+
+    const failure = items.error ?? org.error ?? winnersRes.error;
     if (failure) {
       if (isMissingTable(failure)) return NextResponse.json({ error: MISSING }, { status: 503 });
       console.error("MEMBRESIA CARTA GET:", failure);
@@ -39,6 +47,8 @@ export async function GET() {
       items: (items.data ?? []).map(serialize),
       checkinPoints: Number(org.data?.member_checkin_points ?? 0),
       rankingEnabled: org.data?.member_ranking_enabled ?? true,
+      prizes: [org.data?.member_prize_1 ?? "", org.data?.member_prize_2 ?? "", org.data?.member_prize_3 ?? ""],
+      winners: (winnersRes.data ?? []).map((w) => ({ ...w, memberName: winnerNames.get(w.member_id as string) ?? "Socio" })),
     });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
@@ -99,6 +109,41 @@ export async function PATCH(request: NextRequest) {
     if ("error" in caller) return NextResponse.json({ error: caller.error }, { status: caller.status });
 
     const body = await request.json();
+
+    // Premios del ranking mensual: 3 textos (vacio = ese puesto no tiene premio).
+    if (body.monthlyPrizes !== undefined) {
+      const raw = Array.isArray(body.monthlyPrizes) ? body.monthlyPrizes : [];
+      const clean = [0, 1, 2].map((i) => String(raw[i] ?? "").trim().slice(0, 120) || null);
+      const { error } = await caller.admin
+        .from("organizations")
+        .update({ member_prize_1: clean[0], member_prize_2: clean[1], member_prize_3: clean[2] })
+        .eq("id", caller.organizationId);
+      if (error) {
+        console.error("MEMBRESIA CARTA PREMIOS:", error);
+        return NextResponse.json({ error: "No se pudo guardar." }, { status: 500 });
+      }
+      return NextResponse.json({ ok: true, prizes: clean.map((p) => p ?? "") });
+    }
+
+    // El organizador marca que ya entrego el premio a un ganador.
+    if (body.claimWinnerId !== undefined) {
+      const winnerId = String(body.claimWinnerId);
+      if (!UUID_RE.test(winnerId)) return NextResponse.json({ error: "Ganador inválido." }, { status: 400 });
+      const { data, error } = await caller.admin
+        .from("member_monthly_winners")
+        .update({ claimed_at: new Date().toISOString() })
+        .eq("id", winnerId)
+        .eq("organization_id", caller.organizationId)
+        .is("claimed_at", null)
+        .select("id, claimed_at")
+        .maybeSingle();
+      if (error) {
+        console.error("MEMBRESIA CARTA ENTREGA:", error);
+        return NextResponse.json({ error: "No se pudo guardar." }, { status: 500 });
+      }
+      if (!data) return NextResponse.json({ error: "Ese premio ya figura como entregado." }, { status: 409 });
+      return NextResponse.json({ ok: true, claimedAt: data.claimed_at });
+    }
 
     if (body.rankingEnabled !== undefined) {
       const enabled = Boolean(body.rankingEnabled);

@@ -31,7 +31,32 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "No se pudo cargar el ranking." }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, period, ranking: data });
+    // Ganadores del ultimo mes cerrado (solo nombre con inicial y premio).
+    let lastWinners: { period: string; position: number; name: string; prize: string }[] = [];
+    const { data: me } = await admin.from("premium_members").select("organization_id").eq("id", memberId).maybeSingle();
+    if (me && (data as { enabled?: boolean } | null)?.enabled) {
+      const { data: latest } = await admin
+        .from("member_monthly_winners")
+        .select("period")
+        .eq("organization_id", me.organization_id)
+        .order("period", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latest) {
+        const { data: rows } = await admin
+          .from("member_monthly_winners")
+          .select("period, position, prize, member_id")
+          .eq("organization_id", me.organization_id)
+          .eq("period", latest.period)
+          .order("position", { ascending: true });
+        const ids = (rows ?? []).map((r) => r.member_id as string);
+        const { data: people } = ids.length ? await admin.from("premium_members").select("id, first_name, last_name").in("id", ids) : { data: [] };
+        const names = new Map((people ?? []).map((p) => [p.id as string, `${p.first_name} ${String(p.last_name).slice(0, 1)}.`]));
+        lastWinners = (rows ?? []).map((r) => ({ period: r.period as string, position: Number(r.position), name: names.get(r.member_id as string) ?? "Socio", prize: r.prize as string }));
+      }
+    }
+
+    return NextResponse.json({ ok: true, period, ranking: data, lastWinners });
   } catch (error) {
     console.error("SOCIO RANKING:", error);
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });

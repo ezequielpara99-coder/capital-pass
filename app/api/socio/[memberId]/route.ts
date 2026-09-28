@@ -38,6 +38,15 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const orgId = member.organization_id as string;
 
+    // Premios del ranking mensual que ya gano este socio (tolerante: si la
+    // tabla todavia no existe, simplemente no hay premios que mostrar).
+    const prizesRes = await admin
+      .from("member_monthly_winners")
+      .select("id, period, position, prize, claimed_at")
+      .eq("member_id", memberId)
+      .order("created_at", { ascending: false })
+      .limit(6);
+
     const [menuRes, ordersRes, pointsRes, eventsRes, orgRes] = await Promise.all([
       admin
         .from("member_menu_items")
@@ -108,6 +117,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       events: events.map((e) => ({ ...e, tables: tables.filter((t) => t.event_id === e.id) })),
       orders: (ordersRes.data ?? []).map((o) => ({ ...o, total_minor: Number(o.total_minor) })),
       points: pointsRes.data ?? [],
+      wonPrizes: prizesRes.error ? [] : prizesRes.data ?? [],
     });
   } catch (error) {
     console.error("SOCIO GET:", error);

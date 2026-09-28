@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/recordatorio-cobros",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/cierre-ranking",
+      "schedule": "10 3 * * *"
     }
   ]
 }

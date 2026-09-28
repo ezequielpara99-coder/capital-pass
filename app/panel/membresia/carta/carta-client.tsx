@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { FIELD_INPUT, FIELD_LABEL, MembresiaHeader, formatMoney } from "../membresia-nav";
 
 type Kind = "trago" | "combo" | "premio";
+type Winner = { id: string; period: string; position: number; points: number; prize: string; claimed_at: string | null; memberName: string };
 type Item = { id: string; kind: Kind; name: string; description: string | null; price_minor: number; points_earned: number; points_cost: number | null; active: boolean };
 
 const KIND_LABEL: Record<Kind, string> = { trago: "Trago", combo: "Combo", premio: "Premio (se canjea con puntos)" };
@@ -14,6 +15,9 @@ export default function CartaClient() {
   const [checkinPoints, setCheckinPoints] = useState("0");
   const [savedCheckin, setSavedCheckin] = useState("0");
   const [rankingEnabled, setRankingEnabled] = useState(true);
+  const [prizes, setPrizes] = useState<string[]>(["", "", ""]);
+  const [savedPrizes, setSavedPrizes] = useState<string[]>(["", "", ""]);
+  const [winners, setWinners] = useState<Winner[]>([]);
   const [error, setError] = useState("");
   const [blocked, setBlocked] = useState("");
   const [saving, setSaving] = useState(false);
@@ -40,8 +44,32 @@ export default function CartaClient() {
       setCheckinPoints(String(result.checkinPoints));
       setSavedCheckin(String(result.checkinPoints));
       setRankingEnabled(result.rankingEnabled !== false);
+      setPrizes(result.prizes);
+      setSavedPrizes(result.prizes);
+      setWinners(result.winners);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo cargar.");
+    }
+  }
+
+  async function savePrizes() {
+    setError("");
+    try {
+      const result = await request("PATCH", { monthlyPrizes: prizes });
+      setPrizes(result.prizes);
+      setSavedPrizes(result.prizes);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar.");
+    }
+  }
+
+  async function markDelivered(winner: Winner) {
+    setError("");
+    try {
+      const result = await request("PATCH", { claimWinnerId: winner.id });
+      setWinners((prev) => prev.map((w) => (w.id === winner.id ? { ...w, claimed_at: result.claimedAt } : w)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar.");
     }
   }
 
@@ -174,6 +202,51 @@ export default function CartaClient() {
               <button type="button" onClick={toggleRanking} className={`h-11 border px-5 text-[10px] font-black uppercase tracking-[0.14em] ${rankingEnabled ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300" : "border-white/15 text-white/50"}`}>
                 {rankingEnabled ? "Visible" : "Oculto"}
               </button>
+            </div>
+
+            <div className="mt-6 border border-amber-400/25 bg-amber-400/[0.04] p-5">
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-amber-300">Premios del ranking mensual</p>
+              <p className="mt-1 text-xs text-white/40">Al terminar cada mes, los mejores del ranking ganan estos premios. Un puesto vacío no tiene premio. Si hay empate, gana quien llegó primero a ese puntaje.</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                {[0, 1, 2].map((i) => (
+                  <label key={i} className="block">
+                    <span className={FIELD_LABEL}>{["🥇 Puesto 1", "🥈 Puesto 2", "🥉 Puesto 3"][i]}</span>
+                    <input
+                      value={prizes[i] ?? ""}
+                      onChange={(e) => setPrizes((prev) => prev.map((p, index) => (index === i ? e.target.value : p)))}
+                      maxLength={120}
+                      placeholder={["Mesa VIP gratis", "2 tragos gratis", "1 trago gratis"][i]}
+                      className={FIELD_INPUT}
+                    />
+                  </label>
+                ))}
+              </div>
+              <button type="button" disabled={prizes.join("|") === savedPrizes.join("|")} onClick={savePrizes} className="mt-4 h-11 bg-[#ff2a1a] px-6 text-[10px] font-black uppercase tracking-[0.16em] text-white disabled:opacity-30">
+                Guardar premios
+              </button>
+
+              {winners.length > 0 && (
+                <div className="mt-6 border-t border-white/[0.08] pt-4">
+                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Ganadores</p>
+                  <div className="mt-3 space-y-2">
+                    {winners.map((winner) => (
+                      <div key={winner.id} className="flex flex-wrap items-center justify-between gap-2 border border-white/[0.08] bg-white/[0.02] px-4 py-3">
+                        <div>
+                          <p className="text-sm font-bold">{["🥇", "🥈", "🥉"][winner.position - 1]} {winner.memberName}</p>
+                          <p className="mt-0.5 text-[11px] text-white/45">{winner.period} · {winner.points} pts · Premio: {winner.prize}</p>
+                        </div>
+                        {winner.claimed_at ? (
+                          <span className="border border-white/15 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-white/40">Entregado</span>
+                        ) : (
+                          <button type="button" onClick={() => markDelivered(winner)} className="h-9 border border-emerald-400/30 bg-emerald-400/10 px-3 text-[10px] font-black uppercase tracking-wide text-emerald-300">
+                            Marcar entregado
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <form onSubmit={add} className="mt-6 border border-white/[0.08] bg-white/[0.02] p-5">

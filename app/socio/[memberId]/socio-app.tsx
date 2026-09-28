@@ -18,12 +18,16 @@ type AppData = {
   events: EventRow[];
   orders: Order[];
   points: PointsRow[];
+  wonPrizes: WonPrize[];
 };
 
 type Props = { memberId: string; signature: string; qrDataUrl: string };
 type Tab = "carnet" | "carta" | "mesas" | "pedidos" | "puntos" | "ranking";
+type WonPrize = { id: string; period: string; position: number; prize: string; claimed_at: string | null };
+type LastWinner = { period: string; position: number; name: string; prize: string };
 type RankingData = {
   enabled: boolean;
+  prizes: { position: number; prize: string }[];
   participants: number;
   top: { position: number; name: string; points: number; isMe: boolean }[];
   me: { position: number; points: number } | null;
@@ -56,6 +60,11 @@ function money(minor: number) {
 function formatDate(value: string | null) {
   if (!value) return "";
   return new Intl.DateTimeFormat("es-AR", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires" }).format(new Date(value));
+}
+
+function monthName(period: string) {
+  const [year, month] = period.split("-").map(Number);
+  return new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(year, month - 1, 1)));
 }
 
 function formatExpiry(value: string | null) {
@@ -211,6 +220,7 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
   const [rankingPeriod, setRankingPeriod] = useState<"month" | "all">("month");
   const [ranking, setRanking] = useState<RankingData | null>(null);
   const [rankingError, setRankingError] = useState("");
+  const [lastWinners, setLastWinners] = useState<LastWinner[]>([]);
   useEffect(() => {
     if (tab !== "ranking") return;
     let cancelled = false;
@@ -221,6 +231,7 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
         if (!response.ok) throw new Error(result.error ?? "No se pudo cargar el ranking.");
         if (!cancelled) {
           setRanking(result.ranking as RankingData);
+          setLastWinners((result.lastWinners ?? []) as LastWinner[]);
           setRankingError("");
         }
       } catch (err) {
@@ -385,6 +396,15 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                 Tu membresía no está activa. Consultá con el boliche para poder pedir.
               </div>
             )}
+
+            {/* Premios del ranking mensual ganados y todavia sin retirar */}
+            {(data.wonPrizes ?? []).filter((p) => !p.claimed_at).map((prize) => (
+              <div key={prize.id} className="mt-5 border border-amber-400/40 bg-gradient-to-r from-amber-400/[0.14] to-transparent px-5 py-4">
+                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-300">🏆 ¡Ganaste el ranking de {monthName(prize.period)}!</p>
+                <p className="mt-1 text-lg font-black">{MEDALS[prize.position - 1]} {prize.prize}</p>
+                <p className="mt-1 text-xs text-white/50">Mostrá esta pantalla en la barra o en la puerta para retirar tu premio.</p>
+              </div>
+            ))}
 
             {/* CARNET */}
             {tab === "carnet" && (
@@ -567,6 +587,18 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
 
                 {ranking && ranking.enabled && (
                   <>
+                    {rankingPeriod === "month" && (ranking.prizes ?? []).length > 0 && (
+                      <div className="mt-4 border border-amber-400/30 bg-amber-400/[0.07] px-5 py-4">
+                        <p className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-300">🏆 Premios del mes</p>
+                        <ul className="mt-2 space-y-1 text-sm">
+                          {ranking.prizes.map((p) => (
+                            <li key={p.position} className="flex gap-2"><span>{MEDALS[p.position - 1]}</span><span className="font-bold">{p.prize}</span></li>
+                          ))}
+                        </ul>
+                        <p className="mt-2 text-[11px] text-white/40">Ganan los mejores del ranking al terminar el mes. Si hay empate, gana quien llegó primero.</p>
+                      </div>
+                    )}
+
                     {ranking.me ? (
                       <div className="mt-4 border border-violet-400/30 bg-violet-400/[0.08] px-5 py-4 text-center">
                         <p className="text-[9px] font-black uppercase tracking-[0.2em] text-violet-300/70">Tu posición</p>
@@ -596,6 +628,17 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                         <span className="w-8 shrink-0 text-center text-lg font-black">#{ranking.me.position}</span>
                         <span className="flex-1 text-sm font-bold">Vos</span>
                         <span className="text-sm font-black text-violet-300">{ranking.me.points} pts</span>
+                      </div>
+                    )}
+
+                    {lastWinners.length > 0 && (
+                      <div className="mt-6 border border-white/[0.08] bg-white/[0.02] px-5 py-4">
+                        <p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/40">Ganadores de {monthName(lastWinners[0].period)}</p>
+                        <ul className="mt-2 space-y-1 text-sm">
+                          {lastWinners.map((w) => (
+                            <li key={w.position} className="flex flex-wrap gap-x-2"><span>{MEDALS[w.position - 1]}</span><span className="font-bold">{w.name}</span><span className="text-white/45">· {w.prize}</span></li>
+                          ))}
+                        </ul>
                       </div>
                     )}
 

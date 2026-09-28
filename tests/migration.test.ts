@@ -76,6 +76,7 @@ const softDeleteRpcFixesMigration = readFileSync(new URL("../supabase/migrations
 const appSocioMigration = readFileSync(new URL("../supabase/migrations/20260982_app_socio.sql", import.meta.url), "utf8");
 const rankingSociosMigration = readFileSync(new URL("../supabase/migrations/20260983_ranking_socios.sql", import.meta.url), "utf8");
 const recargaSaldoMigration = readFileSync(new URL("../supabase/migrations/20260984_recarga_saldo.sql", import.meta.url), "utf8");
+const premioMensualMigration = readFileSync(new URL("../supabase/migrations/20260985_premio_mensual.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -200,6 +201,7 @@ async function database() {
   await db.exec(appSocioMigration);
   await db.exec(rankingSociosMigration);
   await db.exec(recargaSaldoMigration);
+  await db.exec(premioMensualMigration);
   return db;
 }
 
@@ -2095,7 +2097,7 @@ test("ranking de socios: cuenta puntos ganados, ignora canjes y reembolsos, mane
   };
   assert.equal(ranking.enabled, true);
   assert.equal(ranking.participants, 3, "solo entran los que sumaron en el periodo, de su propio boliche");
-  assert.deepEqual(ranking.top.map((r) => [r.position, r.name, r.points]), [[1, "Ana L.", 100], [1, "Beto G.", 100], [3, "Cami D.", 40]], "empate compartido y nombre con inicial");
+  assert.deepEqual(ranking.top.map((r) => [r.position, r.name, r.points]), [[1, "Ana L.", 100], [2, "Beto G.", 100], [3, "Cami D.", 40]], "el empate lo gana quien llego primero al puntaje, y el nombre va con inicial");
   assert.equal(ranking.me?.position, 3);
   assert.equal(ranking.top[2].isMe, true);
 
@@ -2110,6 +2112,51 @@ test("ranking de socios: cuenta puntos ganados, ignora canjes y reembolsos, mane
   const off = (await scalar(`select member_ranking('${ana}', ${since})`)) as { enabled: boolean; top: unknown[] };
   assert.equal(off.enabled, false);
   assert.equal(off.top.length, 0);
+
+  await db.close();
+});
+
+test("premio mensual: el cierre guarda ganadores con desempate, no duplica y respeta puestos sin premio", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "afafafaf-1111-4111-8111-111111111111";
+  const orgNoPrize = "afafafaf-2222-4222-8222-222222222222";
+  await db.exec(`insert into organizations(id,name,slug,member_prize_1,member_prize_2) values ('${org}','Club Premio','club-premio','Mesa VIP','2 tragos'), ('${orgNoPrize}','Sin Premio','sin-premio',null,null)`);
+
+  const mk = (orgId: string, first: string, code: string) =>
+    scalar(`insert into premium_members(organization_id, first_name, last_name, member_code) values ('${orgId}','${first}','Perez','${code}') returning id::text`) as Promise<string>;
+  const ana = await mk(org, "Ana", "PM0001");
+  const beto = await mk(org, "Beto", "PM0002");
+  const cami = await mk(org, "Cami", "PM0003");
+  const dani = await mk(org, "Dani", "PM0004");
+  const otro = await mk(orgNoPrize, "Otro", "PM0005");
+
+  const tx = (member: string, delta: number, reason: string, when: string) =>
+    db.exec(`insert into member_points_transactions(member_id, delta, reason, created_at) values ('${member}', ${delta}, '${reason}', '${when}')`);
+  await tx(ana, 100, "Pedido A", "2026-03-10T12:00:00Z");
+  await tx(beto, 60, "Pedido B", "2026-03-05T12:00:00Z");
+  await tx(beto, 40, "Pedido B2", "2026-03-20T12:00:00Z"); // llega a 100 despues que Ana: pierde el desempate
+  await tx(cami, 50, "Pedido C", "2026-03-11T12:00:00Z");
+  await tx(dani, 999, "Pedido D", "2026-04-02T12:00:00Z"); // abril: fuera del mes que se cierra
+  await tx(otro, 500, "Pedido O", "2026-03-11T12:00:00Z");
+
+  const from = "2026-03-01T03:00:00Z";
+  const to = "2026-04-01T03:00:00Z";
+  const close = () => scalar(`select member_close_month('${org}', '2026-03', '${from}', '${to}')`);
+
+  assert.equal(Number(await close()), 2, "solo los puestos 1 y 2 tienen premio");
+  assert.equal(Number(await close()), 0, "cerrar de nuevo no duplica");
+
+  const winners = (await db.query<{ position: number; prize: string; member_id: string; points: number }>(
+    `select position, prize, member_id::text, points from member_monthly_winners where organization_id='${org}' order by position`
+  )).rows;
+  assert.deepEqual(winners.map((w) => [w.position, w.prize, w.member_id, w.points]), [[1, "Mesa VIP", ana, 100], [2, "2 tragos", beto, 100]]);
+
+  assert.equal(Number(await scalar(`select member_close_month('${orgNoPrize}', '2026-03', '${from}', '${to}')`)), 0, "sin premios configurados no registra ganadores");
+
+  // El ranking que ve el socio muestra los premios y usa el mismo desempate.
+  const ranking = (await scalar(`select member_ranking('${cami}', '${from}')`)) as { prizes: { position: number; prize: string }[]; top: { name: string }[] };
+  assert.deepEqual(ranking.prizes, [{ position: 1, prize: "Mesa VIP" }, { position: 2, prize: "2 tragos" }]);
 
   await db.close();
 });
