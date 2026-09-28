@@ -1,5 +1,6 @@
 import { createAdminClient } from "../supabase/admin";
 import { isMissingTable } from "../quotes/auth";
+import { fetchAllRows } from "../supabase/fetch-all";
 import { computeTotals, DiscountType, PriceMode, QuoteItem, QuoteKind } from "../quotes/totals";
 
 type Admin = ReturnType<typeof createAdminClient>;
@@ -19,11 +20,15 @@ export type PendingCollection = {
 // todavia tiene saldo pendiente. Extraido de /api/admin/finanzas/cobros
 // para reusarlo tambien en el cron de recordatorio de cobros.
 export async function computePendingCollections(admin: Admin): Promise<PendingCollection[] | { error: "missing_table" }> {
-  const { data: quotesData, error: quotesError } = await admin
-    .from("quotes")
-    .select("id, number, kind, client_name, items, price_mode, package_price_minor, discount_type, discount_value, updated_at")
-    .in("status", ["a_pagar", "aceptado"])
-    .is("deleted_at", null);
+  const { data: quotesData, error: quotesError } = await fetchAllRows((rangeFrom, rangeTo) =>
+    admin
+      .from("quotes")
+      .select("id, number, kind, client_name, items, price_mode, package_price_minor, discount_type, discount_value, updated_at")
+      .in("status", ["a_pagar", "aceptado"])
+      .is("deleted_at", null)
+      .order("id", { ascending: true })
+      .range(rangeFrom, rangeTo)
+  );
 
   if (quotesError) {
     if (isMissingTable(quotesError)) return { error: "missing_table" };
@@ -45,19 +50,26 @@ export async function computePendingCollections(admin: Admin): Promise<PendingCo
 
   if (quotes.length === 0) return [];
 
-  const { data: paymentsData, error: paymentsError } = await admin
-    .from("quote_payments")
-    .select("quote_id, amount_minor")
-    .in("quote_id", quotes.map((q) => q.id))
-    .is("deleted_at", null);
+  // Todos los cobros (paginados) y se cruzan en memoria: un .in() con cientos
+  // de ids se pasa del largo maximo de la URL y la consulta falla.
+  const { data: paymentsData, error: paymentsError } = await fetchAllRows((rangeFrom, rangeTo) =>
+    admin
+      .from("quote_payments")
+      .select("quote_id, amount_minor")
+      .is("deleted_at", null)
+      .order("id", { ascending: true })
+      .range(rangeFrom, rangeTo)
+  );
 
   if (paymentsError) {
     if (isMissingTable(paymentsError)) return { error: "missing_table" };
     throw paymentsError;
   }
 
+  const pendingIds = new Set(quotes.map((q) => q.id));
   const cobradoPorQuote = new Map<string, number>();
   for (const payment of paymentsData ?? []) {
+    if (!pendingIds.has(payment.quote_id)) continue;
     cobradoPorQuote.set(payment.quote_id, (cobradoPorQuote.get(payment.quote_id) ?? 0) + Number(payment.amount_minor));
   }
 

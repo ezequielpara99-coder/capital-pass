@@ -1,5 +1,6 @@
 import { createAdminClient } from "../supabase/admin";
 import { isMissingTable } from "../quotes/auth";
+import { fetchAllRows } from "../supabase/fetch-all";
 import { computeTotals, DiscountType, PriceMode, QuoteItem, QuoteKind, QuoteStatus } from "../quotes/totals";
 
 type Admin = ReturnType<typeof createAdminClient>;
@@ -44,10 +45,14 @@ export async function computeFinanzasSummary(
   // subestimado (bug real: un cierre mensual podia mostrar $0 cobrado por
   // una factura vieja pagada ese mes). "facturadoIds" ahora es siempre el
   // conjunto completo, sin importar el rango.
-  const { data: quotesData, error: quotesError } = await admin
-    .from("quotes")
-    .select("id, status, kind, client_name, items, price_mode, package_price_minor, discount_type, discount_value, created_at")
-    .is("deleted_at", null);
+  const { data: quotesData, error: quotesError } = await fetchAllRows((rangeFrom, rangeTo) =>
+    admin
+      .from("quotes")
+      .select("id, status, kind, client_name, items, price_mode, package_price_minor, discount_type, discount_value, created_at")
+      .is("deleted_at", null)
+      .order("id", { ascending: true })
+      .range(rangeFrom, rangeTo)
+  );
 
   if (quotesError) {
     if (isMissingTable(quotesError)) return { error: "missing_table" };
@@ -73,10 +78,12 @@ export async function computeFinanzasSummary(
   const facturado = facturadas.reduce((sum, q) => sum + quoteTotal(q), 0);
   const allFacturadoIds = new Set(allQuotes.filter((q) => q.status === "a_pagar" || q.status === "aceptado").map((q) => q.id));
 
-  let paymentsQuery = admin.from("quote_payments").select("quote_id, amount_minor, paid_at").is("deleted_at", null);
-  if (from) paymentsQuery = paymentsQuery.gte("paid_at", from);
-  if (to) paymentsQuery = paymentsQuery.lte("paid_at", to);
-  const { data: paymentsData, error: paymentsError } = await paymentsQuery;
+  const { data: paymentsData, error: paymentsError } = await fetchAllRows((rangeFrom, rangeTo) => {
+    let query = admin.from("quote_payments").select("quote_id, amount_minor, paid_at").is("deleted_at", null);
+    if (from) query = query.gte("paid_at", from);
+    if (to) query = query.lte("paid_at", to);
+    return query.order("id", { ascending: true }).range(rangeFrom, rangeTo);
+  });
 
   if (paymentsError) {
     if (isMissingTable(paymentsError)) return { error: "missing_table" };
@@ -124,10 +131,12 @@ export async function computeFinanzasSummary(
     pendiente: Math.max(0, values.facturado - values.cobrado),
   }));
 
-  let expensesQuery = admin.from("expenses").select("amount_minor, expense_date, kind").is("deleted_at", null);
-  if (from) expensesQuery = expensesQuery.gte("expense_date", from);
-  if (to) expensesQuery = expensesQuery.lte("expense_date", to);
-  const { data: expensesData, error: expensesError } = await expensesQuery;
+  const { data: expensesData, error: expensesError } = await fetchAllRows((rangeFrom, rangeTo) => {
+    let query = admin.from("expenses").select("amount_minor, expense_date, kind").is("deleted_at", null);
+    if (from) query = query.gte("expense_date", from);
+    if (to) query = query.lte("expense_date", to);
+    return query.order("id", { ascending: true }).range(rangeFrom, rangeTo);
+  });
 
   if (expensesError) {
     if (isMissingTable(expensesError)) return { error: "missing_table" };
