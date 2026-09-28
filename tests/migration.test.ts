@@ -1,4 +1,4 @@
-import { test } from "node:test";
+﻿import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
@@ -73,6 +73,7 @@ const metasMigration = readFileSync(new URL("../supabase/migrations/20260978_met
 const softDeleteMigration = readFileSync(new URL("../supabase/migrations/20260979_soft_delete_capital.sql", import.meta.url), "utf8");
 const calendarioRentalMigration = readFileSync(new URL("../supabase/migrations/20260980_calendario_rental.sql", import.meta.url), "utf8");
 const softDeleteRpcFixesMigration = readFileSync(new URL("../supabase/migrations/20260981_soft_delete_rpc_fixes.sql", import.meta.url), "utf8");
+const appSocioMigration = readFileSync(new URL("../supabase/migrations/20260982_app_socio.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -194,6 +195,7 @@ async function database() {
   await db.exec(softDeleteMigration);
   await db.exec(calendarioRentalMigration);
   await db.exec(softDeleteRpcFixesMigration);
+  await db.exec(appSocioMigration);
   return db;
 }
 
@@ -1948,6 +1950,112 @@ test("soft-delete: un socio, entrada de lista negra y colectivo borrados dejan d
   // Indice unico parcial: un socio borrado libera su codigo.
   await db.exec(`update premium_members set deleted_at = now() where id='${member}'`);
   await db.exec(`insert into premium_members(organization_id, first_name, last_name, member_code) values ('${org}','Otra','Persona','SDSD11')`);
+
+  await db.close();
+});
+
+test("app del socio: pedidos con saldo y puntos, cancelacion con reembolso, mesas e idempotencia", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "acacacac-1111-4111-8111-111111111111";
+  const otherOrg = "acacacac-2222-4222-8222-222222222222";
+  const event = "acacacac-3333-4333-8333-333333333333";
+
+  await db.exec(`insert into organizations(id,name,slug) values ('${org}','Club App','club-app'), ('${otherOrg}','Otro Club','otro-club');
+    insert into events(id,organization_id,status) values ('${event}','${org}','upcoming');`);
+
+  const member = await scalar(`insert into premium_members(organization_id, first_name, last_name, member_code, balance_minor) values ('${org}','Ana','App','APP111', 10000) returning id::text`);
+  const fernet = await scalar(`insert into member_menu_items(organization_id, kind, name, price_minor, points_earned) values ('${org}','trago','Fernet',3000,10) returning id::text`);
+  const premio = await scalar(`insert into member_menu_items(organization_id, kind, name, points_cost) values ('${org}','premio','Trago gratis',15) returning id::text`);
+  const foreign = await scalar(`insert into member_menu_items(organization_id, kind, name, price_minor) values ('${otherOrg}','trago','Ajeno',100) returning id::text`);
+
+  // Pedido pagado con saldo: descuenta de la billetera, todavia no da puntos.
+  const placed = await db.query<{ order_id: string; total_minor: string; balance_minor: string }>(
+    `select * from member_place_order('${member}', 'consumo', '[{"id":"${fernet}","qty":2}]'::jsonb, 'wallet', null, null, 'key-1')`
+  );
+  const orderId = placed.rows[0].order_id;
+  assert.equal(Number(placed.rows[0].total_minor), 6000);
+  assert.equal(Number(placed.rows[0].balance_minor), 4000);
+  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 4000);
+  assert.equal(Number(await scalar(`select points_balance from premium_members where id='${member}'`)), 0, "los puntos se suman al entregar, no al pedir");
+
+  // Reintento con la misma key: no duplica ni vuelve a cobrar.
+  const again = await db.query<{ order_id: string; already_existed: boolean }>(
+    `select * from member_place_order('${member}', 'consumo', '[{"id":"${fernet}","qty":2}]'::jsonb, 'wallet', null, null, 'key-1')`
+  );
+  assert.equal(again.rows[0].order_id, orderId);
+  assert.equal(again.rows[0].already_existed, true);
+  assert.equal(await scalar(`select count(*)::int from member_orders where member_id='${member}'`), 1);
+  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 4000);
+
+  // Saldo insuficiente y producto de otra organizacion se rechazan.
+  await assert.rejects(() => db.query(`select * from member_place_order('${member}', 'consumo', '[{"id":"${fernet}","qty":5}]'::jsonb, 'wallet', null, null, null)`), /Saldo insuficiente/);
+  await assert.rejects(() => db.query(`select * from member_place_order('${member}', 'consumo', '[{"id":"${foreign}","qty":1}]'::jsonb, 'en_barra', null, null, null)`), /ya no esta disponible/);
+
+  // Entregar suma los puntos una sola vez.
+  await db.query(`select * from member_order_set_status('${orderId}', 'delivered', '${org}', null)`);
+  assert.equal(Number(await scalar(`select points_balance from premium_members where id='${member}'`)), 20);
+  await assert.rejects(() => db.query(`select * from member_order_set_status('${orderId}', 'delivered', '${org}', null)`), /cerrado/);
+  assert.equal(Number(await scalar(`select points_balance from premium_members where id='${member}'`)), 20);
+
+  // Canje de premio: descuenta puntos; cancelar los devuelve.
+  const redeemed = await db.query<{ order_id: string; points_balance: number }>(
+    `select * from member_place_order('${member}', 'consumo', '[{"id":"${premio}","qty":1}]'::jsonb, 'en_barra', null, null, null)`
+  );
+  assert.equal(Number(redeemed.rows[0].points_balance), 5);
+  await assert.rejects(() => db.query(`select * from member_place_order('${member}', 'consumo', '[{"id":"${premio}","qty":1}]'::jsonb, 'en_barra', null, null, null)`), /puntos/);
+  await db.query(`select * from member_order_set_status('${redeemed.rows[0].order_id}', 'cancelled', '${org}', null)`);
+  assert.equal(Number(await scalar(`select points_balance from premium_members where id='${member}'`)), 20);
+
+  // Cancelar un pedido pagado con saldo lo devuelve; otra organizacion no puede tocarlo.
+  const paid = await db.query<{ order_id: string }>(`select * from member_place_order('${member}', 'consumo', '[{"id":"${fernet}","qty":1}]'::jsonb, 'wallet', null, null, null)`);
+  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 1000);
+  await assert.rejects(() => db.query(`select * from member_order_set_status('${paid.rows[0].order_id}', 'cancelled', '${otherOrg}', null)`), /permiso/);
+  await db.query(`select * from member_order_set_status('${paid.rows[0].order_id}', 'cancelled', '${org}', null)`);
+  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 4000);
+  assert.equal(
+    Number(await scalar(`select sum(amount_minor)::text from wallet_transactions where member_id='${member}'`)),
+    -6000,
+    "el ledger refleja el pedido de 6000 y el de 3000 cobrado y reembolsado"
+  );
+
+  // Puntos por asistencia: una sola vez por fiesta, solo si el organizador los definio.
+  const noPoints = await db.query<{ points_awarded: number }>(`select * from member_checkin_award('${member}', '${event}')`);
+  assert.equal(Number(noPoints.rows[0].points_awarded), 0, "sin puntos configurados no suma nada");
+  await db.exec(`update organizations set member_checkin_points = 25 where id='${org}'; delete from member_checkins;`);
+  const first = await db.query<{ points_awarded: number }>(`select * from member_checkin_award('${member}', '${event}')`);
+  const second = await db.query<{ points_awarded: number }>(`select * from member_checkin_award('${member}', '${event}')`);
+  assert.equal(Number(first.rows[0].points_awarded), 25);
+  assert.equal(Number(second.rows[0].points_awarded), 0, "escanear de nuevo la misma fiesta no vuelve a sumar");
+  assert.equal(Number(await scalar(`select points_balance from premium_members where id='${member}'`)), 45);
+
+  // Entrega en mesa y metricas del panel.
+  const delivered = await db.query<{ order_id: string }>(
+    `select * from member_place_order('${member}', 'consumo', '[{"id":"${fernet}","qty":1}]'::jsonb, 'en_barra', null, 'sin hielo', null, 'Mesa 7')`
+  );
+  assert.equal(await scalar(`select delivery from member_orders where id='${delivered.rows[0].order_id}'`), "Mesa 7");
+  await db.query(`select * from member_order_set_status('${delivered.rows[0].order_id}', 'delivered', '${org}', null)`);
+  const metrics = await scalar(`select member_metrics('${org}', now() - interval '1 day')`) as {
+    members: { total: number }; period: { revenue_minor: number; delivered: number };
+    top_spenders: { code: string; spent_minor: number }[]; top_points: { code: string }[]; top_products: { name: string; qty: number }[];
+  };
+  assert.equal(metrics.members.total, 1);
+  assert.equal(metrics.period.delivered, 2);
+  assert.equal(Number(metrics.period.revenue_minor), 9000);
+  assert.equal(metrics.top_spenders[0].code, "APP111");
+  assert.equal(metrics.top_points[0].code, "APP111");
+  assert.equal(metrics.top_products[0].name, "Fernet");
+  assert.equal(Number(metrics.top_products[0].qty), 3);
+
+  // Reserva de mesa: se ocupa, nadie mas puede tomarla, cancelar la libera.
+  const table = await scalar(`insert into bar_tables(event_id,name,capacity,price_minor) values ('${event}','Mesa VIP',6,4000) returning id::text`);
+  const reserved = await db.query<{ order_id: string }>(`select * from member_place_order('${member}', 'mesa', '[]'::jsonb, 'wallet', '${table}', null, null)`);
+  assert.equal(await scalar(`select status from bar_tables where id='${table}'`), "reserved");
+  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 0, "la mesa se pago con el saldo restante");
+  await assert.rejects(() => db.query(`select * from member_place_order('${member}', 'mesa', '[]'::jsonb, 'en_barra', '${table}', null, null)`), /ya no esta disponible/);
+  await db.query(`select * from member_order_set_status('${reserved.rows[0].order_id}', 'cancelled', '${org}', null)`);
+  assert.equal(await scalar(`select status from bar_tables where id='${table}'`), "available");
+  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 4000, "cancelar la reserva devuelve el saldo");
 
   await db.close();
 });

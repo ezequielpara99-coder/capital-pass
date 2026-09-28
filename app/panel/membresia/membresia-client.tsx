@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useMemo, useEffect, useState } from "react";
 import { createClient } from "../../../lib/supabase/client";
+import { MembresiaHeader } from "./membresia-nav";
 
 type Member = {
   id: string;
@@ -17,6 +17,7 @@ type Member = {
   expires_at: string | null;
   notes: string | null;
   balance_minor: number;
+  points_balance: number;
   cardUrl: string;
 };
 
@@ -173,14 +174,7 @@ export default function MembresiaClient() {
   return (
     <main className="relative min-h-screen bg-[#050505] text-[#f7f3ed]">
       <section className="mx-auto w-full max-w-[900px] px-5 py-8 md:px-8">
-        <header className="border-b border-white/[0.07] pb-8">
-          <Link href="/panel" className="inline-flex h-10 items-center border border-white/[0.10] bg-white/[0.025] px-4 text-[9px] font-black uppercase tracking-[0.15em] text-white/45 transition hover:border-[#ff5a2a]/30 hover:text-white">
-            ← Panel
-          </Link>
-          <p className="mt-7 text-[9px] font-black uppercase tracking-[0.22em] text-[#ff7354]">Capital Pass</p>
-          <h1 className="mt-3 text-[clamp(32px,5vw,56px)] font-black uppercase leading-[0.95] tracking-[-0.04em]">Membresía premium.</h1>
-          <p className="mt-3 max-w-xl text-sm text-white/45">Tu padrón de socios premium, con código propio, válido en todos tus eventos.</p>
-        </header>
+        <MembresiaHeader active="socios" title="Membresía premium." subtitle="Tu padrón de socios premium: cada uno tiene su carnet, su app para pedir sin hacer fila y sus puntos." />
 
         {notEnabled && (
           <div className="mt-6 border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
@@ -279,6 +273,9 @@ export default function MembresiaClient() {
                         <button type="button" onClick={() => openWallet(member)} className="h-8 border border-emerald-400/25 px-3 text-[9px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-400/10">
                           Saldo: {formatMoney(member.balance_minor)}
                         </button>
+                        <span className="inline-flex h-8 items-center border border-violet-400/25 px-3 text-[9px] font-black uppercase tracking-wide text-violet-300">
+                          {member.points_balance ?? 0} pts
+                        </span>
                         <a href={member.cardUrl} target="_blank" rel="noopener noreferrer" className="h-8 border border-violet-400/25 px-3 text-[9px] font-black uppercase tracking-wide text-violet-300 hover:bg-violet-400/10">
                           Ver carnet
                         </a>

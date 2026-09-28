@@ -4,7 +4,7 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 import { createMemberPublicPath } from "../../../../lib/members/signature";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FIELDS = "id, first_name, last_name, dni, phone, email, member_code, status, starts_at, expires_at, notes, balance_minor, created_at";
+const FIELDS = "id, first_name, last_name, dni, phone, email, member_code, status, starts_at, expires_at, notes, balance_minor, points_balance, created_at";
 
 function isMissingTable(error: { code?: string; message?: string } | null | undefined) {
   if (!error) return false;

@@ -753,6 +753,11 @@ function Sidebar({
       active: false,
     },
     {
+      label: "Compras",
+      href: "/panel/compras",
+      active: false,
+    },
+    {
       label: "Notificaciones",
       href: withEvent(
         "/panel/notificaciones",

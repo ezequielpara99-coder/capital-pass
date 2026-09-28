@@ -56,7 +56,18 @@ export async function POST(request: NextRequest) {
       method: "qr",
     });
 
+    // Puntos por asistencia (una vez por fiesta). Best-effort: si la funcion
+    // todavia no existe en la base, el carnet se valida igual.
+    let pointsAwarded = 0;
+    const award = await admin.rpc("member_checkin_award", { p_member_id: member.id, p_event_id: eventId });
+    if (award.error) {
+      if (!/member_checkin_award|schema cache|does not exist/i.test(award.error.message ?? "")) console.error("VALIDAR SOCIO PUNTOS:", award.error);
+    } else {
+      pointsAwarded = Number((award.data ?? [])[0]?.points_awarded ?? 0);
+    }
+
     return NextResponse.json({
+      pointsAwarded,
       status: member.status,
       firstName: member.first_name,
       lastName: member.last_name,

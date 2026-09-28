@@ -18,6 +18,8 @@ const TABLES = [
   { table: "monthly_packs", type: "Pack mensual", select: "id, client_name, deleted_at", label: (r: Record<string, unknown>) => String(r.client_name) },
   { table: "premium_members", type: "Socio premium", select: "id, first_name, last_name, member_code, deleted_at", label: (r: Record<string, unknown>) => `${r.first_name} ${r.last_name} · ${r.member_code}` },
   { table: "blacklist_entries", type: "Lista negra", select: "id, dni, full_name, deleted_at", label: (r: Record<string, unknown>) => `${r.full_name || "Sin nombre"} · DNI ${r.dni}` },
+  { table: "member_menu_items", type: "Carta de socios", select: "id, name, kind, deleted_at", label: (r: Record<string, unknown>) => `${r.name} · ${r.kind}` },
+  { table: "organization_purchases", type: "Compra", select: "id, description, total_minor, deleted_at", label: (r: Record<string, unknown>) => `${r.description} · $ ${Number(r.total_minor).toLocaleString("es-AR")}` },
   { table: "transfer_routes", type: "Colectivo", select: "id, name, deleted_at", label: (r: Record<string, unknown>) => String(r.name) },
 ] as const;
 

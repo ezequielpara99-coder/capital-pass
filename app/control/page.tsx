@@ -81,6 +81,7 @@ type MemberScanResult = {
   lastName?: string;
   memberCode?: string;
   expiresAt?: string | null;
+  pointsAwarded?: number;
 };
 
 function formatRelativeTime(iso: string | null) {
@@ -1109,8 +1110,14 @@ export default function ControlPage() {
             <p className="mt-4 font-mono text-lg tracking-[0.15em] text-white/60">{memberResult.memberCode}</p>
           )}
 
+          {Number(memberResult.pointsAwarded ?? 0) > 0 && (
+            <p className="mt-3 inline-block border border-violet-400/30 bg-violet-400/10 px-3 py-1 text-sm font-black text-violet-300">
+              +{memberResult.pointsAwarded} puntos por asistencia
+            </p>
+          )}
+
           {memberResult.expiresAt && (
-            <p className="mt-2 text-sm text-white/35">Vence: {new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${memberResult.expiresAt}T00:00:00Z`))}</p>
+            <p className="mt-2 text-sm text-white/35">Vence:{new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${memberResult.expiresAt}T00:00:00Z`))}</p>
           )}
 
           <p className="mt-4 text-xs text-white/30">Esto es solo una identificación -- no reemplaza el control de la entrada.</p>
