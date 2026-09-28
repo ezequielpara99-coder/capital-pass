@@ -81,6 +81,7 @@ const seguimientoColectivoMigration = readFileSync(new URL("../supabase/migratio
 const avisosSocioMigration = readFileSync(new URL("../supabase/migrations/20260987_avisos_socio.sql", import.meta.url), "utf8");
 const pedidosCompletosMigration = readFileSync(new URL("../supabase/migrations/20260988_pedidos_completos.sql", import.meta.url), "utf8");
 const mesasOnlineMigration = readFileSync(new URL("../supabase/migrations/20260989_mesas_online.sql", import.meta.url), "utf8");
+const salesAgentMigration = readFileSync(new URL("../supabase/migrations/20260990_sales_agent.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -210,6 +211,7 @@ async function database() {
   await db.exec(avisosSocioMigration);
   await db.exec(pedidosCompletosMigration);
   await db.exec(mesasOnlineMigration);
+  await db.exec(salesAgentMigration);
   return db;
 }
 
@@ -1798,6 +1800,34 @@ test("seguimiento del colectivo: el escaneo mueve la posicion sin retroceder, ma
   const reused = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','${codeB}')`);
   assert.equal(reused.rows[0].result, "already_used");
   assert.equal(await current(), stopB);
+
+  await db.close();
+});
+
+test("sales agent: los indices de duplicados rechazan instagram/web/telefono/email repetidos, pero no bloquean valores nulos ni prospectos borrados", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  await db.exec(`insert into prospects(name, instagram_username) values ('Uno', 'clubexample')`);
+  await assert.rejects(() => db.exec(`insert into prospects(name, instagram_username) values ('Dos', 'clubexample')`), /duplicate key|unique/i);
+  // Mayusculas/minusculas distintas siguen siendo el mismo (el indice es sobre lower()).
+  await assert.rejects(() => db.exec(`insert into prospects(name, instagram_username) values ('Tres', 'ClubExample')`), /duplicate key|unique/i);
+  // Dos prospectos SIN instagram no chocan entre si (el indice es parcial).
+  await db.exec(`insert into prospects(name) values ('Sin insta 1'), ('Sin insta 2')`);
+  assert.equal(Number(await scalar(`select count(*)::int from prospects where instagram_username is null`)), 2);
+
+  await db.exec(`insert into prospects(name, website_domain) values ('Web A', 'clubexample.com')`);
+  await assert.rejects(() => db.exec(`insert into prospects(name, website_domain) values ('Web B', 'clubexample.com')`), /unique/i);
+
+  await db.exec(`insert into prospects(name, phone_digits) values ('Tel A', '5493411234567')`);
+  await assert.rejects(() => db.exec(`insert into prospects(name, phone_digits) values ('Tel B', '5493411234567')`), /unique/i);
+
+  await db.exec(`insert into prospects(name, email_norm) values ('Mail A', 'hola@club.test')`);
+  await assert.rejects(() => db.exec(`insert into prospects(name, email_norm) values ('Mail B', 'hola@club.test')`), /unique/i);
+
+  // Un prospecto borrado (soft-delete) libera su instagram para uno nuevo.
+  await db.exec(`update prospects set deleted_at = now() where instagram_username = 'clubexample'`);
+  await db.exec(`insert into prospects(name, instagram_username) values ('Reemplazo', 'clubexample')`);
+  assert.equal(Number(await scalar(`select count(*)::int from prospects where instagram_username = 'clubexample' and deleted_at is null`)), 1);
 
   await db.close();
 });

@@ -374,6 +374,7 @@ export default async function AdminPage() {
             <QuickLink number="09" label="Finanzas" href="/admin/finanzas" />
             <QuickLink number="10" label="Buscar" href="/admin/buscar" />
             <QuickLink number="11" label="Papelera" href="/admin/papelera" />
+            <QuickLink number="12" label="Sales Agent" href="/admin/sales-agent" />
           </div>
         </section>
       </section>
