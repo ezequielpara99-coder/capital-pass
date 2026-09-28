@@ -75,7 +75,7 @@ export default function CobrosClient() {
 
           {pending !== null && pending.length === 0 && (
             <div className="border border-dashed border-white/[0.10] p-8 text-center text-sm text-white/35">
-              No hay nada pendiente de cobro. ✓
+              No hay nada pendiente de cobro.
             </div>
           )}
 

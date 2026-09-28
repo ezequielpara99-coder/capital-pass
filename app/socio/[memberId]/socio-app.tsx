@@ -44,7 +44,9 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "ranking", label: "Ranking" },
 ];
 
-const MEDALS = ["🥇", "🥈", "🥉"];
+// Color del puesto en el podio (oro, plata, bronce) -- sin emojis, solo tipografia.
+const PODIUM_TONE = ["text-amber-300", "text-slate-300", "text-orange-400"];
+const podiumTone = (position: number) => PODIUM_TONE[position - 1] ?? "text-white/50";
 
 const STATUS_LABEL: Record<Order["status"], string> = { pending: "Preparando", ready: "Listo", delivered: "Entregado", cancelled: "Cancelado" };
 const STATUS_STYLE: Record<Order["status"], string> = {
@@ -511,8 +513,8 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
             {/* Premios del ranking mensual ganados y todavia sin retirar */}
             {(tab === "carnet" || tab === "ranking") && (data.wonPrizes ?? []).filter((p) => !p.claimed_at).map((prize) => (
               <div key={prize.id} className="mt-5 border border-amber-400/40 bg-gradient-to-r from-amber-400/[0.14] to-transparent px-5 py-4">
-                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-300">🏆 ¡Ganaste el ranking de {monthName(prize.period)}!</p>
-                <p className="mt-1 text-lg font-black">{MEDALS[prize.position - 1]} {prize.prize}</p>
+                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-300">¡Ganaste el ranking de {monthName(prize.period)}!</p>
+                <p className="mt-1 text-lg font-black"><span className={podiumTone(prize.position)}>{prize.position}° puesto</span> · {prize.prize}</p>
                 <p className="mt-1 text-xs text-white/50">Mostrá esta pantalla en la barra o en la puerta para retirar tu premio.</p>
               </div>
             ))}
@@ -748,10 +750,10 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                   <>
                     {rankingPeriod === "month" && (ranking.prizes ?? []).length > 0 && (
                       <div className="mt-4 border border-amber-400/30 bg-amber-400/[0.07] px-5 py-4">
-                        <p className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-300">🏆 Premios del mes</p>
+                        <p className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-300">Premios del mes</p>
                         <ul className="mt-2 space-y-1 text-sm">
                           {ranking.prizes.map((p) => (
-                            <li key={p.position} className="flex gap-2"><span>{MEDALS[p.position - 1]}</span><span className="font-bold">{p.prize}</span></li>
+                            <li key={p.position} className="flex gap-2"><span className={`w-6 shrink-0 font-black ${podiumTone(p.position)}`}>{p.position}°</span><span className="font-bold">{p.prize}</span></li>
                           ))}
                         </ul>
                         <p className="mt-2 text-[11px] text-white/40">Ganan los mejores del ranking al terminar el mes. Si hay empate, gana quien llegó primero.</p>
@@ -774,7 +776,7 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                       <ol className="mt-4 space-y-1.5">
                         {ranking.top.map((row) => (
                           <li key={`${row.position}-${row.name}`} className={`flex items-center gap-3 border px-4 py-3 ${row.isMe ? "border-violet-400/50 bg-violet-400/10" : "border-white/[0.06] bg-white/[0.02]"}`}>
-                            <span className="w-8 shrink-0 text-center text-lg font-black">{row.position <= 3 ? MEDALS[row.position - 1] : `#${row.position}`}</span>
+                            <span className={`w-8 shrink-0 text-center text-lg font-black ${podiumTone(row.position)}`}>{row.position}°</span>
                             <span className="min-w-0 flex-1 truncate text-sm font-bold">{row.name}{row.isMe ? " (vos)" : ""}</span>
                             <span className="shrink-0 text-sm font-black text-violet-300">{row.points} pts</span>
                           </li>
@@ -795,7 +797,7 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                         <p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/40">Ganadores de {monthName(lastWinners[0].period)}</p>
                         <ul className="mt-2 space-y-1 text-sm">
                           {lastWinners.map((w) => (
-                            <li key={w.position} className="flex flex-wrap gap-x-2"><span>{MEDALS[w.position - 1]}</span><span className="font-bold">{w.name}</span><span className="text-white/45">· {w.prize}</span></li>
+                            <li key={w.position} className="flex flex-wrap gap-x-2"><span className={`w-6 shrink-0 font-black ${podiumTone(w.position)}`}>{w.position}°</span><span className="font-bold">{w.name}</span><span className="text-white/45">· {w.prize}</span></li>
                           ))}
                         </ul>
                       </div>

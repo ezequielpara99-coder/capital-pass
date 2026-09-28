@@ -74,13 +74,13 @@ export default function ColectivoTracker({ endpoint }: { endpoint: string }) {
         let tone = "border-white/10 bg-white/[0.03] text-white";
         if (route.state === "not_started") headline = "El colectivo todavía no salió.";
         else if (route.state === "approaching") { headline = `El colectivo está en ${current?.name}.`; tone = "border-violet-400/40 bg-violet-400/[0.08] text-white"; }
-        else if (route.state === "at_my_stop") { headline = `🚌 ¡El colectivo está en tu parada (${mine?.name})!`; tone = "border-emerald-400/50 bg-emerald-400/[0.12] text-emerald-100"; }
+        else if (route.state === "at_my_stop") { headline = `¡El colectivo está en tu parada (${mine?.name})!`; tone = "border-emerald-400/50 bg-emerald-400/[0.12] text-emerald-100"; }
         else if (route.state === "passed") headline = onBoard ? "Ya estás a bordo." : `El colectivo ya pasó por ${mine?.name}.`;
         else headline = `El colectivo está en ${current?.name}.`;
 
         return (
           <div key={route.ticketId} className={`border px-5 py-4 ${tone}`}>
-            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/50">🚌 Tu colectivo · {route.eventName}</p>
+            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/50">Tu colectivo · {route.eventName}</p>
             <p className="mt-1 text-lg font-black leading-tight">{headline}</p>
 
             {route.state === "approaching" && (
@@ -112,7 +112,7 @@ export default function ColectivoTracker({ endpoint }: { endpoint: string }) {
                       </div>
                       <div className={`pb-3 text-sm ${passed ? "text-white/40" : "text-white"}`}>
                         <span className={isCurrent ? "font-black text-emerald-300" : isMine ? "font-black" : ""}>{stop.name}</span>
-                        {isCurrent && <span className="ml-2 text-[10px] font-black uppercase text-emerald-300">🚌 acá está</span>}
+                        {isCurrent && <span className="ml-2 text-[10px] font-black uppercase text-emerald-300">acá está</span>}
                         {isMine && <span className="ml-2 border border-violet-400/50 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-violet-300">Tu parada</span>}
                       </div>
                     </li>

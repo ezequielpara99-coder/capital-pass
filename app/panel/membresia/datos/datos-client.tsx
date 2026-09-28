@@ -104,7 +104,7 @@ export default function DatosClient() {
               <>
                 {featured && (
                   <div className="mt-6 border border-amber-400/30 bg-gradient-to-r from-amber-400/[0.10] to-transparent px-5 py-5">
-                    <p className="text-[9px] font-black uppercase tracking-[0.22em] text-amber-300">★ Cliente destacado</p>
+                    <p className="text-[9px] font-black uppercase tracking-[0.22em] text-amber-300">Cliente destacado</p>
                     <p className="mt-2 text-2xl font-black">{featured.name}</p>
                     <p className="mt-1 text-sm text-white/55">
                       {formatMoney(Number(featured.spent_minor))} en {featured.orders} {featured.orders === 1 ? "pedido" : "pedidos"} · código {featured.code}

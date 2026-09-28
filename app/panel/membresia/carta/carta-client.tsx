@@ -210,7 +210,7 @@ export default function CartaClient() {
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
                 {[0, 1, 2].map((i) => (
                   <label key={i} className="block">
-                    <span className={FIELD_LABEL}>{["🥇 Puesto 1", "🥈 Puesto 2", "🥉 Puesto 3"][i]}</span>
+                    <span className={FIELD_LABEL}>{["Puesto 1", "Puesto 2", "Puesto 3"][i]}</span>
                     <input
                       value={prizes[i] ?? ""}
                       onChange={(e) => setPrizes((prev) => prev.map((p, index) => (index === i ? e.target.value : p)))}
@@ -232,7 +232,7 @@ export default function CartaClient() {
                     {winners.map((winner) => (
                       <div key={winner.id} className="flex flex-wrap items-center justify-between gap-2 border border-white/[0.08] bg-white/[0.02] px-4 py-3">
                         <div>
-                          <p className="text-sm font-bold">{["🥇", "🥈", "🥉"][winner.position - 1]} {winner.memberName}</p>
+                          <p className="text-sm font-bold">{winner.position}° · {winner.memberName}</p>
                           <p className="mt-0.5 text-[11px] text-white/45">{winner.period} · {winner.points} pts · Premio: {winner.prize}</p>
                         </div>
                         {winner.claimed_at ? (
