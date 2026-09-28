@@ -1823,7 +1823,10 @@ test("script de borrado de eventos de prueba: borra el arbol completo de los eve
   await db.exec(`alter table ticket_types add constraint tt_ev_fk foreign key (event_id) references events(id);
     alter table sales add constraint s_ev_fk foreign key (event_id) references events(id);
     alter table sales add constraint s_buyer_fk foreign key (buyer_id) references buyers(id);
-    alter table sale_items add constraint si_sale_fk foreign key (sale_id) references sales(id);
+    -- Claves foraneas COMPUESTAS (varias columnas), como las de la base real (ej. sale_items -> sales).
+    alter table sales add constraint s_id_ev_uq unique (id, event_id);
+    alter table sale_items add constraint si_sale_fk foreign key (sale_id, event_id) references sales(id, event_id);
+    alter table tickets add constraint t_sale_ev_fk foreign key (sale_id, event_id) references sales(id, event_id);
     alter table sale_items add constraint si_tt_fk foreign key (ticket_type_id) references ticket_types(id);
     alter table tickets add constraint t_sale_fk foreign key (sale_id) references sales(id);
     alter table tickets add constraint t_si_fk foreign key (sale_item_id) references sale_items(id);
@@ -1864,8 +1867,17 @@ test("script de borrado de eventos de prueba: borra el arbol completo de los eve
   const testBody = body
     .replace(/slug in \(\s*'qa-control[\s\S]*?\);/, "slug in ('purga-a','purga-b');")
     .replace("cantidad <> 11", "cantidad <> 2")
+    // El script viene en modo ensayo (rollback); para verificar el borrado real se confirma.
+    .replace(/\nrollback;\s*$/, "\ncommit;")
     .replace(/\(select count\(\*\) from public\.events where slug like 'qa-%' or slug = 'primavera-2026'\)/, "(select count(*) from public.events where slug like 'purga-%')");
   assert.notEqual(testBody, body, "el reemplazo de la lista tiene que haber funcionado");
+  assert.match(body, /\nrollback;\s*$/, "el script viene en modo ensayo: termina en rollback");
+
+  // El ensayo (tal cual viene) no borra NADA.
+  await db.exec(body.replace(/slug in \(\s*'qa-control[\s\S]*?\);/, "slug in ('purga-a','purga-b');").replace("cantidad <> 11", "cantidad <> 2"));
+  assert.equal(await count("events", `id in ('${evA}','${evB}')`), 2, "el ensayo con rollback no borra los eventos");
+  assert.equal(await count("sales"), 3, "ni las ventas");
+
   await db.exec(testBody);
 
   // Se fueron los dos eventos y todo su arbol...

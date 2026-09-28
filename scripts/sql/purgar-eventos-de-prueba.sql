@@ -11,9 +11,12 @@
 -- COMO USARLO (Supabase -> SQL Editor):
 --   1) Corre primero el PASO 1 (vista previa, solo lectura) y confirma que
 --      son exactamente los eventos que queres borrar.
---   2) Recien despues corre el PASO 2. Va todo en una transaccion: si algo
---      falla, no se borra nada.
--- Es IRREVERSIBLE una vez ejecutado el PASO 2.
+--   2) Corre el PASO 2 tal cual esta: es un ENSAYO (termina en ROLLBACK, no
+--      borra nada) y te muestra si funciona y cuantas filas quedarian.
+--   3) Si el ensayo sale bien, cambia la ultima linea (rollback;) por commit;
+--      y corre el PASO 2 de nuevo: ahi si borra de verdad.
+-- Va todo en una transaccion: si algo falla, no se borra nada.
+-- Es IRREVERSIBLE una vez ejecutado con commit.
 -- =====================================================================
 
 
@@ -54,8 +57,9 @@ language plpgsql
 as $fn$
 declare
   fk record;
-  child_col text;
-  parent_col text;
+  child_cols text;
+  parent_cols text;
+  null_sets text;
   child_where text;
   n bigint;
   total bigint := 0;
@@ -69,16 +73,24 @@ begin
     from pg_constraint c
     where c.contype = 'f' and c.confrelid = p_table
   loop
-    if array_length(fk.conkey, 1) <> 1 then
-      raise exception 'Clave foranea compuesta no soportada en %', fk.child;
-    end if;
-    select attname into child_col from pg_attribute where attrelid = fk.conrelid and attnum = fk.conkey[1];
-    select attname into parent_col from pg_attribute where attrelid = fk.confrelid and attnum = fk.confkey[1];
-    child_where := format('%I in (select %I from %s where %s)', child_col, parent_col, p_table, p_where);
+    -- Soporta claves foraneas de una o de varias columnas (las columnas se
+    -- emparejan por posicion: la 1ra del hijo con la 1ra del padre, etc.).
+    select string_agg(format('%I', a.attname), ', ' order by k.ord),
+           string_agg(format('%I = null', a.attname), ', ' order by k.ord)
+      into child_cols, null_sets
+    from unnest(fk.conkey) with ordinality as k(attnum, ord)
+    join pg_attribute a on a.attrelid = fk.conrelid and a.attnum = k.attnum;
+
+    select string_agg(format('%I', a.attname), ', ' order by k.ord)
+      into parent_cols
+    from unnest(fk.confkey) with ordinality as k(attnum, ord)
+    join pg_attribute a on a.attrelid = fk.confrelid and a.attnum = k.attnum;
+
+    child_where := format('(%s) in (select %s from %s where %s)', child_cols, parent_cols, p_table, p_where);
 
     if fk.confdeltype = 'n' or fk.conrelid = fk.confrelid then
       -- La base pondria NULL (o es autorreferencia): se hace lo mismo, sin borrar filas ajenas.
-      execute format('update %s set %I = null where %s', fk.child, child_col, child_where);
+      execute format('update %s set %s where %s', fk.child, null_sets, child_where);
     else
       total := total + pg_temp.cp_purge(fk.child, child_where, p_depth + 1);
     end if;
@@ -141,4 +153,8 @@ select
   (select count(*) from public.sales s where s.event_id in (select id from _eventos_a_borrar)) as ventas_que_quedan,
   (select count(*) from public.tickets t where t.event_id in (select id from _eventos_a_borrar)) as entradas_que_quedan;
 
-commit;
+-- ENSAYO: por defecto termina en ROLLBACK, o sea que ejecuta todo, te muestra
+-- los resultados de arriba y DESHACE. No se borra nada.
+-- Cuando el ensayo salga bien (sin errores y con 0 / 0 / 0), cambia la linea
+-- de abajo por:  commit;   y volve a correr el PASO 2 para borrar de verdad.
+rollback;
