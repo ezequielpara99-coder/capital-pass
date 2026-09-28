@@ -1866,7 +1866,7 @@ test("script de borrado de eventos de prueba: borra el arbol completo de los eve
   const body = script.slice(script.indexOf("\nbegin;\n") + 1);
   const testBody = body
     .replace(/slug in \(\s*'qa-control[\s\S]*?\);/, "slug in ('purga-a','purga-b');")
-    .replace("cantidad <> 11", "cantidad <> 2")
+    .replace("cantidad <> 15", "cantidad <> 2")
     // El script viene en modo ensayo (rollback); para verificar el borrado real se confirma.
     .replace(/\nrollback;\s*$/, "\ncommit;")
     .replace(/\(select count\(\*\) from public\.events where slug like 'qa-%' or slug = 'primavera-2026'\)/, "(select count(*) from public.events where slug like 'purga-%')");
@@ -1874,7 +1874,7 @@ test("script de borrado de eventos de prueba: borra el arbol completo de los eve
   assert.match(body, /\nrollback;\s*$/, "el script viene en modo ensayo: termina en rollback");
 
   // El ensayo (tal cual viene) no borra NADA.
-  await db.exec(body.replace(/slug in \(\s*'qa-control[\s\S]*?\);/, "slug in ('purga-a','purga-b');").replace("cantidad <> 11", "cantidad <> 2"));
+  await db.exec(body.replace(/slug in \(\s*'qa-control[\s\S]*?\);/, "slug in ('purga-a','purga-b');").replace("cantidad <> 15", "cantidad <> 2"));
   assert.equal(await count("events", `id in ('${evA}','${evB}')`), 2, "el ensayo con rollback no borra los eventos");
   assert.equal(await count("sales"), 3, "ni las ventas");
 

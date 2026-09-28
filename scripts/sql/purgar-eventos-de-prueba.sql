@@ -1,5 +1,5 @@
 -- =====================================================================
--- BORRADO DEFINITIVO de 11 eventos de PRUEBA (y todo lo que cuelga de ellos).
+-- BORRADO DEFINITIVO de 15 eventos de PRUEBA (y todo lo que cuelga de ellos).
 --
 -- Que borra:  los eventos de la lista de abajo + sus ventas, entradas, tandas,
 --             escaneos, barras, mesas, colectivos, etc. (todo lo que los
@@ -39,10 +39,14 @@ where e.slug in (
   'qa-refund-event-1790209937581',
   'qa-verify-event-1790204520011',
   'qa-test-evento-ed4543',
-  'primavera-2026'
+  'primavera-2026',
+  'qa-control-devol-evt-1790102288613',
+  'qa-packs-ui-1790101996378',
+  'qa-evento-dos-206bf5',
+  'test-9498e7'
 )
 order by e.slug;
--- Tienen que salir 11 filas. Si no son esas, NO sigas.
+-- Tienen que salir 15 filas. Si no son esas, NO sigas.
 
 
 -- ---------------------------------------------------------------------
@@ -115,7 +119,11 @@ create temp table _eventos_a_borrar on commit drop as
     'qa-refund-event-1790209937581',
     'qa-verify-event-1790204520011',
     'qa-test-evento-ed4543',
-    'primavera-2026'
+    'primavera-2026',
+    'qa-control-devol-evt-1790102288613',
+    'qa-packs-ui-1790101996378',
+    'qa-evento-dos-206bf5',
+    'test-9498e7'
   );
 
 -- Compradores que solo aparecen en las ventas que se van a borrar.
@@ -129,8 +137,8 @@ declare
   filas bigint;
 begin
   select count(*) into cantidad from _eventos_a_borrar;
-  if cantidad <> 11 then
-    raise exception 'Se esperaban 11 eventos y se encontraron %. No se borro nada.', cantidad;
+  if cantidad <> 15 then
+    raise exception 'Se esperaban 15 eventos y se encontraron %. No se borro nada.', cantidad;
   end if;
 
   filas := pg_temp.cp_purge('public.events'::regclass, 'id in (select id from _eventos_a_borrar)');
@@ -149,7 +157,7 @@ end $$;
 
 -- Comprobacion final: tiene que dar 0 en las tres columnas.
 select
-  (select count(*) from public.events where slug like 'qa-%' or slug = 'primavera-2026') as eventos_de_prueba_que_quedan,
+  (select count(*) from public.events where slug like 'qa-%' or slug in ('primavera-2026','test-9498e7')) as eventos_de_prueba_que_quedan,
   (select count(*) from public.sales s where s.event_id in (select id from _eventos_a_borrar)) as ventas_que_quedan,
   (select count(*) from public.tickets t where t.event_id in (select id from _eventos_a_borrar)) as entradas_que_quedan;
 
