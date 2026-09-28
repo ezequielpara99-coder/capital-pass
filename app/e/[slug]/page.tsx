@@ -355,11 +355,43 @@ export default async function PublicEventPage({
 
       <div className="pointer-events-none fixed inset-0">
 
-        <div className="absolute left-[-280px] top-[-260px] h-[700px] w-[700px] rounded-full bg-[#ff2a1a]/[0.12] blur-[190px]" />
+        {hasVisualIdentity ? (
 
-        <div className="absolute bottom-[-280px] right-[-220px] h-[650px] w-[650px] rounded-full bg-[#ff5a2a]/[0.08] blur-[180px]" />
+          <>
 
-        <div className="absolute left-1/2 top-[30%] h-[720px] w-[300px] -translate-x-1/2 rotate-[22deg] bg-gradient-to-b from-[#ff2a1a]/[0.045] via-[#ff5a2a]/[0.03] to-transparent blur-[100px]" />
+            {/* La portada del evento, ampliada y desenfocada, como fondo de toda la pagina. */}
+            {mobileHeroUrl && (
+              <div
+                className="absolute -inset-16 bg-cover bg-center opacity-60 blur-3xl md:hidden"
+                style={{ backgroundImage: cssUrl(mobileHeroUrl) }}
+              />
+            )}
+
+            {desktopHeroUrl && (
+              <div
+                className="absolute -inset-24 hidden bg-cover bg-center opacity-60 blur-3xl md:block"
+                style={{ backgroundImage: cssUrl(desktopHeroUrl) }}
+              />
+            )}
+
+            {/* Oscurece para que el texto se lea siempre. */}
+            <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/50 to-black/80" />
+
+          </>
+
+        ) : (
+
+          <>
+
+            <div className="absolute left-[-280px] top-[-260px] h-[700px] w-[700px] rounded-full bg-[#ff2a1a]/[0.12] blur-[190px]" />
+
+            <div className="absolute bottom-[-280px] right-[-220px] h-[650px] w-[650px] rounded-full bg-[#ff5a2a]/[0.08] blur-[180px]" />
+
+            <div className="absolute left-1/2 top-[30%] h-[720px] w-[300px] -translate-x-1/2 rotate-[22deg] bg-gradient-to-b from-[#ff2a1a]/[0.045] via-[#ff5a2a]/[0.03] to-transparent blur-[100px]" />
+
+          </>
+
+        )}
 
       </div>
 
@@ -658,7 +690,7 @@ export default async function PublicEventPage({
                     <article key={route.id as string} className="rounded-[26px] border border-white/[0.09] bg-white/[0.025] p-6">
 
                       <div className="flex items-start justify-between gap-4">
-                        <h3 className="text-lg font-bold">🚌 {route.name}</h3>
+                        <h3 className="text-lg font-bold">{route.name}</h3>
                         <span className="shrink-0 rounded-full border border-white/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-white/60">
                           {route.is_paid ? formatMoney(Number(route.price_minor)) : "Gratis"}
                         </span>
@@ -727,6 +759,11 @@ function getAssetPublicUrl(
 // ============================================================
 // FORMATTERS
 // ============================================================
+
+// url("...") para usar como background-image, con las comillas escapadas.
+function cssUrl(value: string) {
+  return `url("${value.replace(/"/g, "%22")}")`;
+}
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", {

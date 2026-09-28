@@ -44,7 +44,7 @@ export function Countdown({ startsAt, endsAt }: { startsAt: string; endsAt: stri
 
   return (
     <p className="inline-flex items-center gap-2 rounded-full border border-[#ff5a2a]/25 bg-[#ff3b24]/[0.09] px-4 py-2 text-xs font-bold uppercase tracking-[0.12em] text-[#ffb09a]">
-      ⏳ Faltan {parts.join(" ")}
+      Faltan {parts.join(" ")}
     </p>
   );
 }
@@ -141,17 +141,17 @@ export function EventActions({ name, startsAt, endsAt, venueName, city, descript
     <div className="mt-7 flex flex-wrap gap-2">
       {mapsUrl && (
         <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className={ACTION}>
-          📍 Cómo llegar
+          Cómo llegar
         </a>
       )}
       <a href={googleCalendarUrl} target="_blank" rel="noopener noreferrer" className={ACTION}>
-        📅 Google Calendar
+        Google Calendar
       </a>
       <button type="button" onClick={downloadIcs} className={ACTION}>
-        ⬇ Guardar en el calendario
+        Guardar en el calendario
       </button>
       <button type="button" onClick={share} className={ACTION}>
-        {copied ? "✓ Link copiado" : "↗ Compartir"}
+        {copied ? "Link copiado" : "Compartir"}
       </button>
     </div>
   );

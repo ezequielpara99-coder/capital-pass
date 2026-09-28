@@ -189,7 +189,7 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs, 
                     )}
                     {ticket.includes && (
                       <p className="mt-3 inline-flex items-center gap-2 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.07] px-3 py-1.5 text-xs font-semibold text-emerald-200">
-                        🍸 Incluye {ticket.includes}
+                        Incluye {ticket.includes}
                       </p>
                     )}
                   </div>
