@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ColectivoTracker from "../../_components/colectivo-tracker";
 
 type MenuItem = { id: string; kind: "trago" | "combo" | "premio"; name: string; description: string | null; price_minor: number; points_earned: number; points_cost: number | null };
 type Table = { id: string; event_id: string; name: string; capacity: number | null; price_minor: number | null };
@@ -396,6 +397,9 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                 Tu membresía no está activa. Consultá con el boliche para poder pedir.
               </div>
             )}
+
+            {/* Por donde va el colectivo (si tiene pasaje de traslado) */}
+            {tab === "carnet" && <ColectivoTracker endpoint={`${base}/colectivo${query}`} />}
 
             {/* Premios del ranking mensual ganados y todavia sin retirar */}
             {(data.wonPrizes ?? []).filter((p) => !p.claimed_at).map((prize) => (

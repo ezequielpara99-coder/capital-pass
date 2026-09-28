@@ -3,7 +3,7 @@ import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FIELDS = "id, event_id, organization_member_id, name, departure_at, departure_location, capacity, is_paid, price_minor, active, created_at";
+const FIELDS = "id, event_id, organization_member_id, name, departure_at, departure_location, capacity, is_paid, price_minor, active, current_stop_id, current_stop_at, created_at";
 
 function isMissingTable(error: { code?: string; message?: string } | null | undefined) {
   if (!error) return false;
@@ -87,7 +87,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "No se pudieron cargar los colectivos." }, { status: 500 });
     }
 
-    const routes = (data ?? []).map((r) => ({ ...r, capacity: r.capacity === null ? null : Number(r.capacity), price_minor: Number(r.price_minor) }));
+    // Paradas de cada colectivo, en orden (para elegir donde sube cada pasajero
+    // y para marcar por donde va el colectivo).
+    const routeIds = (data ?? []).map((r) => r.id as string);
+    const stopsByRoute = new Map<string, { id: string; position: number; name: string }[]>();
+    if (routeIds.length > 0) {
+      const { data: stopRows } = await caller.admin
+        .from("transfer_route_stops")
+        .select("id, route_id, position, name")
+        .in("route_id", routeIds)
+        .order("position", { ascending: true });
+      for (const s of stopRows ?? []) {
+        const list = stopsByRoute.get(s.route_id as string) ?? [];
+        list.push({ id: s.id as string, position: Number(s.position), name: s.name as string });
+        stopsByRoute.set(s.route_id as string, list);
+      }
+    }
+
+    const routes = (data ?? []).map((r) => ({
+      ...r,
+      capacity: r.capacity === null ? null : Number(r.capacity),
+      price_minor: Number(r.price_minor),
+      stops: stopsByRoute.get(r.id as string) ?? [],
+    }));
     return NextResponse.json({ ok: true, routes, isOrganizer: caller.isOrganizer });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });

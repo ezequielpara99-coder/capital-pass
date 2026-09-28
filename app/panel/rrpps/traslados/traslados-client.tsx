@@ -20,6 +20,7 @@ export type TransferRoute = {
   price_minor: number;
   active: boolean;
   created_at: string;
+  stops: { id: string; position: number; name: string }[];
 };
 
 const INPUT =
@@ -96,9 +97,9 @@ export default function TrasladosClient({
       if (!response.ok) throw new Error(result.error ?? "No se pudo guardar.");
 
       if (editingId) {
-        setRows((prev) => prev.map((r) => (r.id === editingId ? result.route : r)));
+        setRows((prev) => prev.map((r) => (r.id === editingId ? { ...result.route, stops: r.stops } : r)));
       } else {
-        setRows((prev) => [...prev, result.route]);
+        setRows((prev) => [...prev, { ...result.route, stops: [] }]);
       }
       cancelEdit();
     } catch (err) {
@@ -118,7 +119,7 @@ export default function TrasladosClient({
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo actualizar.");
-      setRows((prev) => prev.map((r) => (r.id === route.id ? result.route : r)));
+      setRows((prev) => prev.map((r) => (r.id === route.id ? { ...result.route, stops: r.stops } : r)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo actualizar.");
     }
@@ -134,6 +135,38 @@ export default function TrasladosClient({
       setRows((prev) => prev.filter((r) => r.id !== route.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo borrar.");
+    }
+  }
+
+  // Paradas (recorrido): una localidad por linea, en el orden en que pasa el colectivo.
+  const [stopsOpenId, setStopsOpenId] = useState<string | null>(null);
+  const [stopsText, setStopsText] = useState("");
+  const [stopsSaving, setStopsSaving] = useState(false);
+
+  function openStops(route: TransferRoute) {
+    setStopsOpenId(stopsOpenId === route.id ? null : route.id);
+    setStopsText(route.stops.map((s) => s.name).join("\n"));
+    setError("");
+  }
+
+  async function saveStops(route: TransferRoute) {
+    if (stopsSaving) return;
+    setStopsSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/rrpps/traslados/paradas", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId: event.id, routeId: route.id, stops: stopsText.split("\n") }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudieron guardar las paradas.");
+      setRows((prev) => prev.map((r) => (r.id === route.id ? { ...r, stops: result.stops } : r)));
+      setStopsOpenId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron guardar las paradas.");
+    } finally {
+      setStopsSaving(false);
     }
   }
 
@@ -236,7 +269,10 @@ export default function TrasladosClient({
                       {route.is_paid ? ` · ${formatMoney(route.price_minor)}` : " · Gratis"}
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => openStops(route)} className="h-9 border border-violet-400/30 px-3 text-[10px] font-black uppercase tracking-wide text-violet-300 hover:bg-violet-400/10">
+                      Recorrido{route.stops.length > 0 ? ` (${route.stops.length})` : ""}
+                    </button>
                     <button type="button" onClick={() => startEdit(route)} className="h-9 border border-white/15 px-3 text-[10px] font-black uppercase tracking-wide text-white/60 hover:border-white/40 hover:text-white">
                       Editar
                     </button>
@@ -248,6 +284,30 @@ export default function TrasladosClient({
                     </button>
                   </div>
                 </div>
+
+                {route.stops.length > 0 && stopsOpenId !== route.id && (
+                  <p className="mt-2 text-[11px] text-white/40">Recorrido: {route.stops.map((s) => s.name).join(" → ")}</p>
+                )}
+
+                {stopsOpenId === route.id && (
+                  <div className="mt-3 border-t border-white/[0.06] pt-3">
+                    <span className={LABEL}>Paradas, una por línea y en orden (la primera es la salida)</span>
+                    <textarea
+                      value={stopsText}
+                      onChange={(e) => setStopsText(e.target.value)}
+                      rows={Math.min(12, Math.max(4, stopsText.split("\n").length + 1))}
+                      placeholder={"Rosario\nSan Nicolás\nPergamino\nSalto"}
+                      className="mt-2 w-full border border-white/[0.12] bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/20 focus:border-[#ff5a2a]/50"
+                    />
+                    <p className="mt-1 text-[11px] text-white/35">Cada pasajero elige en qué parada sube al venderle el traslado. Los clientes ven por dónde va el colectivo en su app.</p>
+                    <div className="mt-3 flex gap-2">
+                      <button type="button" disabled={stopsSaving} onClick={() => saveStops(route)} className="h-10 bg-[#ff2a1a] px-5 text-[10px] font-black uppercase tracking-[0.14em] text-white disabled:opacity-40">
+                        {stopsSaving ? "Guardando…" : "Guardar recorrido"}
+                      </button>
+                      <button type="button" onClick={() => setStopsOpenId(null)} className="h-10 border border-white/[0.14] px-4 text-[10px] font-black uppercase tracking-[0.14em] text-white/60">Cancelar</button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))
           )}

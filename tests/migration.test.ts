@@ -77,6 +77,7 @@ const appSocioMigration = readFileSync(new URL("../supabase/migrations/20260982_
 const rankingSociosMigration = readFileSync(new URL("../supabase/migrations/20260983_ranking_socios.sql", import.meta.url), "utf8");
 const recargaSaldoMigration = readFileSync(new URL("../supabase/migrations/20260984_recarga_saldo.sql", import.meta.url), "utf8");
 const premioMensualMigration = readFileSync(new URL("../supabase/migrations/20260985_premio_mensual.sql", import.meta.url), "utf8");
+const seguimientoColectivoMigration = readFileSync(new URL("../supabase/migrations/20260986_seguimiento_colectivo.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -202,6 +203,7 @@ async function database() {
   await db.exec(rankingSociosMigration);
   await db.exec(recargaSaldoMigration);
   await db.exec(premioMensualMigration);
+  await db.exec(seguimientoColectivoMigration);
   return db;
 }
 
@@ -1719,6 +1721,77 @@ test("sistema de traslados: cupo, permisos y validacion de embarque", async () =
   // Codigo que no existe.
   const invalid = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','ZZZZZZ')`);
   assert.equal(invalid.rows[0].result, "invalid");
+
+  await db.close();
+});
+
+test("seguimiento del colectivo: el escaneo mueve la posicion sin retroceder, marca manual y reinicio", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "b1b1b1b1-1111-4111-8111-111111111111";
+  const event = "b1b1b1b1-2222-4222-8222-222222222222";
+  const ownerUser = "b1b1b1b1-3333-4333-8333-333333333333";
+  const otherUser = "b1b1b1b1-4444-4444-8444-444444444444";
+
+  await db.exec(`insert into auth.users values ('${ownerUser}','owner-bus@example.test',now(),'{}'), ('${otherUser}','other-bus@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club Bus','club-bus');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${ownerUser}','rrpp','active'), ('${org}','${otherUser}','rrpp','active');`);
+  const owner = await scalar(`select id::text from organization_members where user_id='${ownerUser}'`);
+  const route = (await scalar(`insert into transfer_routes(event_id, organization_member_id, name) values ('${event}','${owner}','Rosario - Salto') returning id::text`)) as string;
+  const otherRoute = (await scalar(`insert into transfer_routes(event_id, organization_member_id, name) values ('${event}','${owner}','Otro') returning id::text`)) as string;
+
+  const stop = (routeId: string, position: number, name: string) =>
+    scalar(`insert into transfer_route_stops(route_id, position, name) values ('${routeId}', ${position}, '${name}') returning id::text`) as Promise<string>;
+  const stopA = await stop(route, 1, "Rosario");
+  const stopB = await stop(route, 2, "Pergamino");
+  const stopC = await stop(route, 3, "Salto");
+  const foreignStop = await stop(otherRoute, 1, "Ajena");
+
+  await db.exec(`select set_config('request.jwt.claim.sub','${ownerUser}',false)`);
+  const assign = async (name: string, stopId: string) =>
+    (await db.query<{ manual_code: string }>(`select * from assign_transfer_ticket('${route}', '${name}', null, null, '${stopId}')`)).rows[0].manual_code;
+
+  await assert.rejects(() => assign("Intruso", foreignStop), /parada no pertenece/, "la parada tiene que ser del mismo colectivo");
+  const codeA = await assign("Ana", stopA);
+  const codeB = await assign("Beto", stopB);
+  const codeC = await assign("Cami", stopC);
+  const current = () => scalar(`select current_stop_id::text from transfer_routes where id='${route}'`);
+
+  assert.equal(await current(), null, "antes de escanear a alguien el colectivo no tiene posicion");
+
+  // Se escanea primero a quien sube en la ultima parada (por ejemplo llego tarde): la posicion queda en esa.
+  const firstScan = await db.query<{ result: string; stop_name: string }>(`select * from validate_transfer_ticket('${route}','${codeC}')`);
+  assert.equal(firstScan.rows[0].result, "valid");
+  assert.equal(firstScan.rows[0].stop_name, "Salto");
+  assert.equal(await current(), stopC);
+
+  // Escanear a alguien de una parada ANTERIOR no hace retroceder al colectivo, pero registra la llegada.
+  await db.query(`select * from validate_transfer_ticket('${route}','${codeA}')`);
+  assert.equal(await current(), stopC, "la posicion nunca retrocede con un escaneo");
+  assert.equal(Number(await scalar(`select count(*)::int from transfer_route_arrivals where route_id='${route}'`)), 2);
+
+  // Marca manual (un pueblo donde no sube nadie, o corregir un error): si puede mover a cualquier parada.
+  await db.query(`select * from transfer_mark_stop('${route}', '${stopB}')`);
+  assert.equal(await current(), stopB);
+  assert.equal(await scalar(`select source from transfer_route_arrivals where route_id='${route}' and stop_id='${stopB}'`), "manual");
+
+  // Otro RRPP que no es dueño no puede marcar paradas.
+  await db.exec(`select set_config('request.jwt.claim.sub','${otherUser}',false)`);
+  await assert.rejects(() => db.query(`select * from transfer_mark_stop('${route}', '${stopA}')`), /permiso/);
+  await db.exec(`select set_config('request.jwt.claim.sub','${ownerUser}',false)`);
+
+  // Reiniciar limpia la posicion y las llegadas.
+  await db.query(`select * from transfer_mark_stop('${route}', null)`);
+  assert.equal(await current(), null);
+  assert.equal(Number(await scalar(`select count(*)::int from transfer_route_arrivals where route_id='${route}'`)), 0);
+
+  // Un pasaje ya usado sigue sin volver a mover nada.
+  const again = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','${codeB}')`);
+  assert.equal(again.rows[0].result, "valid");
+  const reused = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','${codeB}')`);
+  assert.equal(reused.rows[0].result, "already_used");
+  assert.equal(await current(), stopB);
 
   await db.close();
 });

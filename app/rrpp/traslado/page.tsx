@@ -5,13 +5,15 @@ import { useRouter } from "next/navigation";
 import { createClient } from "../../../lib/supabase/client";
 
 type EventRow = { id: string; name: string };
-type RouteRow = { id: string; name: string; departure_location: string | null };
+type StopRow = { id: string; position: number; name: string };
+type RouteRow = { id: string; name: string; departure_location: string | null; stops: StopRow[]; current_stop_id: string | null };
 
 type ValidationResult = {
   result: "valid" | "already_used" | "invalid" | "cancelled";
   transfer_ticket_id: string | null;
   passenger_name: string | null;
   validated_at: string | null;
+  stop_name?: string | null;
 };
 
 const RESULT_STYLE: Record<ValidationResult["result"], string> = {
@@ -39,6 +41,7 @@ export default function TrasladoRRPPPage() {
   const [routeId, setRouteId] = useState("");
   const [code, setCode] = useState("");
   const [checking, setChecking] = useState(false);
+  const [stopBusy, setStopBusy] = useState(false);
   const [result, setResult] = useState<ValidationResult | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -110,6 +113,33 @@ export default function TrasladoRRPPPage() {
     load();
   }, [supabase]);
 
+  // Vuelve a pedir los colectivos (para ver por donde va despues de un escaneo).
+  async function refreshRoutes(eventId: string) {
+    try {
+      const response = await fetch(`/api/rrpps/traslados?eventId=${eventId}`, { cache: "no-store" });
+      const data = await response.json();
+      if (response.ok) setRoutes((data.routes ?? []).filter((r: { active: boolean }) => r.active));
+    } catch {
+      // Si falla, se sigue mostrando lo que ya estaba.
+    }
+  }
+
+  async function markStop(stopId: string | null) {
+    if (!routeId || !event || stopBusy) return;
+    if (stopId === null && !window.confirm("¿Reiniciar el recorrido? Se borra por dónde pasó el colectivo.")) return;
+    setStopBusy(true);
+    setError("");
+    try {
+      const { error: rpcError } = await supabase.rpc("transfer_mark_stop", { p_route_id: routeId, p_stop_id: stopId });
+      if (rpcError) throw rpcError;
+      await refreshRoutes(event.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo marcar la parada.");
+    } finally {
+      setStopBusy(false);
+    }
+  }
+
   async function validate() {
     if (checking || !routeId || !code.trim()) return;
     setChecking(true);
@@ -125,6 +155,7 @@ export default function TrasladoRRPPPage() {
       if (row) setResult(row);
       setCode("");
       inputRef.current?.focus();
+      if (row?.result === "valid" && event) await refreshRoutes(event.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo validar el código.");
     } finally {
@@ -209,6 +240,38 @@ export default function TrasladoRRPPPage() {
               <div className={`rounded-2xl border px-5 py-4 text-center ${RESULT_STYLE[result.result]}`}>
                 <p className="text-lg font-bold">{RESULT_LABEL[result.result]}</p>
                 {result.passenger_name && <p className="mt-1 text-sm opacity-80">{result.passenger_name}</p>}
+                {result.stop_name && <p className="mt-1 text-xs opacity-70">Sube en {result.stop_name}</p>}
+              </div>
+            )}
+
+            {(routes.find((r) => r.id === routeId)?.stops.length ?? 0) > 0 && (
+              <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/40">Recorrido</p>
+                <p className="mt-1 text-xs text-white/35">Cuando escaneás a un pasajero, el colectivo pasa a estar en su parada. Si en una parada no sube nadie, marcala acá.</p>
+                <ol className="mt-4 space-y-2">
+                  {(routes.find((r) => r.id === routeId)?.stops ?? []).map((stop) => {
+                    const current = routes.find((r) => r.id === routeId)?.current_stop_id === stop.id;
+                    const currentPosition = routes.find((r) => r.id === routeId)?.stops.find((s) => s.id === routes.find((r) => r.id === routeId)?.current_stop_id)?.position ?? 0;
+                    const passed = stop.position < currentPosition;
+                    return (
+                      <li key={stop.id} className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 ${current ? "border-emerald-400/50 bg-emerald-500/10" : passed ? "border-white/5 bg-black/10 opacity-50" : "border-white/10 bg-black/20"}`}>
+                        <span className="text-sm">
+                          <span className="mr-2 text-white/35">{stop.position}.</span>
+                          {stop.name}
+                          {current && <span className="ml-2 text-[10px] font-bold uppercase text-emerald-300">🚌 Acá está</span>}
+                        </span>
+                        {!current && (
+                          <button type="button" disabled={stopBusy} onClick={() => markStop(stop.id)} className="shrink-0 rounded-lg border border-white/15 px-3 py-1.5 text-xs font-semibold text-white/70 hover:text-white disabled:opacity-40">
+                            Llegamos
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ol>
+                <button type="button" disabled={stopBusy} onClick={() => markStop(null)} className="mt-4 text-xs text-white/35 underline underline-offset-4 hover:text-white/60">
+                  Reiniciar recorrido
+                </button>
               </div>
             )}
           </div>

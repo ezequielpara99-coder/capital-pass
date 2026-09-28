@@ -84,10 +84,27 @@ export default async function TrasladosPage({
 
   const missingSql = Boolean(routesError && (routesError.code === "42P01" || routesError.code === "PGRST205" || /does not exist|schema cache/i.test(routesError.message ?? "")));
 
+  // Paradas de cada colectivo (tolerante: sin la migracion de seguimiento, queda vacio).
+  const stopsByRoute = new Map<string, { id: string; position: number; name: string }[]>();
+  const routeIds = (routesData ?? []).map((r) => r.id as string);
+  if (routeIds.length > 0) {
+    const { data: stopRows } = await admin
+      .from("transfer_route_stops")
+      .select("id, route_id, position, name")
+      .in("route_id", routeIds)
+      .order("position", { ascending: true });
+    for (const s of stopRows ?? []) {
+      const list = stopsByRoute.get(s.route_id as string) ?? [];
+      list.push({ id: s.id as string, position: Number(s.position), name: s.name as string });
+      stopsByRoute.set(s.route_id as string, list);
+    }
+  }
+
   const routes: TransferRoute[] = (routesData ?? []).map((r) => ({
     ...r,
     capacity: r.capacity === null ? null : Number(r.capacity),
     price_minor: Number(r.price_minor),
+    stops: stopsByRoute.get(r.id as string) ?? [],
   }));
 
   return <TrasladosClient event={{ id: event.id, name: event.name }} rrpps={rrpps} routes={routes} missingSql={missingSql} />;

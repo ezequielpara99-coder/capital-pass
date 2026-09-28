@@ -6,6 +6,7 @@ import { verifySessionToken, CUSTOMER_SESSION_COOKIE } from "../../lib/customer/
 import { createTicketPublicPath } from "../../lib/tickets/signature";
 import { createMemberPublicPath } from "../../lib/members/signature";
 import MiClient from "./mi-client";
+import ColectivoTracker from "../_components/colectivo-tracker";
 
 function formatMoney(minor: number) {
   return `$ ${new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(minor)}`;
@@ -113,6 +114,8 @@ export default async function MiPortalPage({
             </button>
           </form>
         </header>
+
+        <ColectivoTracker endpoint="/api/mi/colectivo" />
 
         {members && members.length > 0 && (
           <section className="mt-8">

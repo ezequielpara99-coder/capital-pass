@@ -52,6 +52,7 @@ type TransferRouteRow = {
   is_paid: boolean;
   price_minor: number;
   active: boolean;
+  stops?: { id: string; position: number; name: string }[];
 };
 
 type TransferInfo = { routeName: string; manualCode: string; isPaid: boolean; priceMinor: number } | null;
@@ -183,6 +184,7 @@ export default function NuevaVentaRRPPPage() {
 
   const [transferRoutes, setTransferRoutes] = useState<TransferRouteRow[]>([]);
   const [transferRouteId, setTransferRouteId] = useState("");
+  const [transferStopId, setTransferStopId] = useState("");
   const [transferResult, setTransferResult] = useState<TransferInfo>(null);
 
   const [quantity, setQuantity] =
@@ -649,6 +651,15 @@ export default function NuevaVentaRRPPPage() {
       return;
     }
 
+    // Si el colectivo tiene recorrido, hay que saber en que parada sube el
+    // pasajero: con eso el cliente ve por donde va el colectivo en su app.
+    const routeForStop = transferRoutes.find((r) => r.id === transferRouteId);
+    if (routeForStop && (routeForStop.stops?.length ?? 0) > 0 && !transferStopId) {
+      setError("Elegí en qué parada sube el pasajero al colectivo.");
+
+      return;
+    }
+
     if (!ticketTypeId) {
       setError(
         "Seleccioná un tipo de entrada."
@@ -765,6 +776,7 @@ export default function NuevaVentaRRPPPage() {
             p_passenger_name: `${firstName.trim()} ${lastName.trim()}`,
             p_passenger_phone: phone.trim(),
             p_sale_id: result.sale_id,
+            p_stop_id: transferStopId || null,
           });
           if (transferError) throw transferError;
           const transferRow = (transferData ?? [])[0];
@@ -956,6 +968,7 @@ export default function NuevaVentaRRPPPage() {
     setQuantity(1);
     setPackId("");
     setTransferRouteId("");
+    setTransferStopId("");
     setTransferResult(null);
 
     setSaleResult(null);
@@ -1559,7 +1572,7 @@ export default function NuevaVentaRRPPPage() {
                 <div className="space-y-2">
                   <button
                     type="button"
-                    onClick={() => setTransferRouteId("")}
+                    onClick={() => { setTransferRouteId(""); setTransferStopId(""); }}
                     className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition ${
                       transferRouteId === "" ? "border-[#ff5a2a]/50 bg-[#ff3b24]/15 text-white" : "border-white/10 bg-black/20 text-white/50 hover:text-white"
                     }`}
@@ -1570,7 +1583,7 @@ export default function NuevaVentaRRPPPage() {
                     <button
                       key={route.id}
                       type="button"
-                      onClick={() => setTransferRouteId(route.id)}
+                      onClick={() => { setTransferRouteId(route.id); setTransferStopId(""); }}
                       className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition ${
                         transferRouteId === route.id ? "border-[#ff5a2a]/50 bg-[#ff3b24]/15 text-white" : "border-white/10 bg-black/20 text-white/50 hover:text-white"
                       }`}
@@ -1583,6 +1596,22 @@ export default function NuevaVentaRRPPPage() {
                     </button>
                   ))}
                 </div>
+
+                {(transferRoutes.find((r) => r.id === transferRouteId)?.stops?.length ?? 0) > 0 && (
+                  <label className="mt-4 block">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-white/45">¿En qué parada sube?</span>
+                    <select
+                      value={transferStopId}
+                      onChange={(e) => setTransferStopId(e.target.value)}
+                      className="h-12 w-full rounded-xl border border-white/10 bg-black/20 px-4 text-sm text-white outline-none focus:border-[#ff5a2a]/60"
+                    >
+                      <option value="" className="bg-[#100817]">Elegí la parada…</option>
+                      {(transferRoutes.find((r) => r.id === transferRouteId)?.stops ?? []).map((stop) => (
+                        <option key={stop.id} value={stop.id} className="bg-[#100817]">{stop.position}. {stop.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
 
                 {transferRouteId && transferRoutes.find((r) => r.id === transferRouteId)?.is_paid && (
                   <p className="mt-3 text-xs text-[#ff9b82]">
