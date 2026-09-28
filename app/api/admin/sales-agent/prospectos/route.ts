@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyAdmin } from "../../../../../lib/quotes/auth";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { PROSPECT_FIELDS, isMissingTable, findDuplicate, normalizedColumns, rescoreProspect, type ProspectInput } from "../../../../../lib/sales-agent/prospect";
+import { investigateProspectById } from "../../../../../lib/sales-agent/investigate-prospect";
 
 const MISSING = "Falta aplicar la actualización de la base de datos (Capital Sales Agent, 20260990).";
 
@@ -128,7 +129,25 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await rescoreProspect(admin, data.id as string);
-    return NextResponse.json({ ok: true, prospect: { ...data, score: result.score, potential: result.potential, score_reasons: result.reasons, score_missing: result.missing } });
+    let prospect: Record<string, unknown> = { ...data, score: result.score, potential: result.potential, score_reasons: result.reasons, score_missing: result.missing };
+
+    // Si trae web o Instagram, lo investigamos ya mismo (un solo fetch
+    // puntual): asi el admin no tiene que apretar "Investigar" a mano para
+    // cada prospecto que carga. Si falla (sitio caido, timeout, etc.) no
+    // rompe la creacion -- queda "nuevo" y se puede investigar despues.
+    if (input.website || input.instagramUrl) {
+      try {
+        const outcome = await investigateProspectById(admin, data.id as string);
+        if (outcome.ok) {
+          const { data: fresh } = await admin.from("prospects").select(PROSPECT_FIELDS).eq("id", data.id as string).maybeSingle();
+          if (fresh) prospect = fresh;
+        }
+      } catch (investigateError) {
+        console.error("SALES AGENT AUTO-INVESTIGAR:", investigateError);
+      }
+    }
+
+    return NextResponse.json({ ok: true, prospect });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }

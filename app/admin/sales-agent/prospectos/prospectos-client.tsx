@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { SalesAgentHeader, INPUT, LABEL, POTENTIAL_LABEL, POTENTIAL_STYLE, STATUS_LABEL, CATEGORY_LABEL, TICKETING_LABEL } from "../nav";
 
@@ -26,6 +26,10 @@ export default function ProspectosClient() {
 
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+
+  const [investigating, setInvestigating] = useState(false);
+  const [investigateStatus, setInvestigateStatus] = useState<{ investigated: number; errors: number; remaining: number } | null>(null);
+  const investigateStop = useRef(false);
 
   async function load() {
     try {
@@ -61,6 +65,39 @@ export default function ProspectosClient() {
     load();
   }
 
+  // Llama al lote de "investigar pendientes" una y otra vez (cada llamada
+  // investiga hasta ~12 prospectos nuevos con web o Instagram) hasta que no
+  // quede ninguno o el admin lo cancele. Cada llamada es un fetch puntual
+  // por prospecto -- nada corre en segundo plano sin que esto siga abierto.
+  async function investigatePending() {
+    if (investigating) return;
+    investigateStop.current = false;
+    setInvestigating(true);
+    setInvestigateStatus(null);
+    let totalInvestigated = 0;
+    let totalErrors = 0;
+    try {
+      while (!investigateStop.current) {
+        const response = await fetch("/api/admin/sales-agent/prospectos/investigar-pendientes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ campaignId, limit: 8 }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "No se pudo investigar.");
+        totalInvestigated += result.investigated;
+        totalErrors += result.errors.length;
+        setInvestigateStatus({ investigated: totalInvestigated, errors: totalErrors, remaining: result.remaining });
+        if (result.processed === 0 || result.remaining === 0) break;
+      }
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo investigar.");
+    } finally {
+      setInvestigating(false);
+    }
+  }
+
   return (
     <main className="relative min-h-screen bg-[#050505] text-[#f7f3ed]">
       <section className="mx-auto w-full max-w-[1100px] px-5 py-8 md:px-8">
@@ -71,10 +108,22 @@ export default function ProspectosClient() {
 
         {!blocked && (
           <>
-            <div className="mt-8 flex flex-wrap gap-2">
+            <div className="mt-8 flex flex-wrap items-center gap-2">
               <button type="button" onClick={() => setAddOpen(true)} className="h-11 bg-[#ff2a1a] px-5 text-[10px] font-black uppercase tracking-[0.16em] text-white hover:bg-[#ff4a2d]">+ Agregar prospecto</button>
               <button type="button" onClick={() => setImportOpen(true)} className="h-11 border border-white/[0.14] px-5 text-[10px] font-black uppercase tracking-[0.16em] text-white/70 hover:text-white">Importar CSV</button>
               <a href={`/api/admin/sales-agent/prospectos/exportar${campaignId ? `?campaignId=${campaignId}` : ""}`} className="h-11 inline-flex items-center border border-white/[0.14] px-5 text-[10px] font-black uppercase tracking-[0.16em] text-white/70 hover:text-white">Exportar CSV</a>
+              {investigating ? (
+                <button type="button" onClick={() => { investigateStop.current = true; }} className="h-11 border border-amber-400/30 bg-amber-400/10 px-5 text-[10px] font-black uppercase tracking-[0.16em] text-amber-200">
+                  Investigando… {investigateStatus ? `${investigateStatus.investigated} listos, quedan ${investigateStatus.remaining}` : ""} · Detener
+                </button>
+              ) : (
+                <button type="button" onClick={investigatePending} className="h-11 border border-white/[0.14] px-5 text-[10px] font-black uppercase tracking-[0.16em] text-white/70 hover:text-white">Investigar pendientes</button>
+              )}
+              {!investigating && investigateStatus && (
+                <span className="text-[11px] text-white/40">
+                  {investigateStatus.investigated} investigados{investigateStatus.errors > 0 ? `, ${investigateStatus.errors} con error` : ""}.
+                </span>
+              )}
             </div>
 
             <form onSubmit={applyFilters} className="mt-6 grid gap-3 border border-white/[0.08] bg-white/[0.02] p-4 sm:grid-cols-5">
