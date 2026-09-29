@@ -42,6 +42,7 @@ const BACKGROUND_PRELOAD_INTERVAL_MS = 3 * 60 * 1000;
 type Conflict = PendingScan & {
   realResult: string;
   severity: "alta" | "normal";
+  forged?: boolean;
 };
 
 type StaffAssignment = {
@@ -439,11 +440,17 @@ export default function ControlPage() {
             scan.localResult === "valid" && realResult === "already_used";
           const isInvalidatedWhileOffline =
             scan.localResult === "valid" && realResult === "cancelled";
+          // El caso mas grave de todos: se dejo pasar offline como "valid"
+          // pero el servidor (que SI verifica la firma real) dice que la
+          // entrada no es valida -- un QR falsificado que entro gratis.
+          const isForged =
+            scan.localResult === "valid" && realResult === "invalid";
 
           newConflicts.push({
             ...scan,
             realResult,
-            severity: isDoubleEntry || isInvalidatedWhileOffline ? "alta" : "normal",
+            severity: isDoubleEntry || isInvalidatedWhileOffline || isForged ? "alta" : "normal",
+            forged: isForged,
           });
         }
 
@@ -548,15 +555,18 @@ export default function ControlPage() {
   // VALIDACIÓN OFFLINE (CONTRA EL CACHE LOCAL)
   //
   // Misma máquina de estados que el servidor, pero resuelta con lo
-  // que se precargó antes de perder la señal. Para QR, se saca el
-  // ticketId del payload sin verificar la firma -- no se puede sin el
-  // secret, que nunca sale del servidor -- confiando en que el
-  // ticketId está en la lista precargada (mismo nivel de confianza
-  // que ya tiene hoy el código manual, online, sin firma).
+  // que se precargó antes de perder la señal. Para QR, la precarga
+  // (/api/control/preload) ahora manda tambien la firma real de cada
+  // entrada (calculada en el servidor, unico lugar con el secret) --
+  // se compara la firma del QR escaneado contra esa, asi que un QR
+  // fabricado a mano con el ticketId de otra persona (dato publico,
+  // viaja sin cifrar en la URL de la entrada) se rechaza igual que
+  // online, en vez de aceptarse solo por estar el ticketId en el cache.
   // =====================================================
 
   async function runOfflineValidation(input: { type: "qr" | "manual"; raw: string }) {
     let ticketId: string | null = null;
+    let signature: string | null = null;
     let manualCode: string | null = null;
 
     if (input.type === "qr") {
@@ -566,6 +576,7 @@ export default function ControlPage() {
         return;
       }
       ticketId = parsed.ticketId;
+      signature = parsed.signature;
     } else {
       manualCode = normalizeCode(input.raw);
     }
@@ -576,9 +587,11 @@ export default function ControlPage() {
         ? await lookupByManualCode(manualCode)
         : null;
 
+    const forged = Boolean(cached && signature !== null && signature !== cached.signature);
+
     let result: "valid" | "already_used" | "cancelled" | "invalid";
 
-    if (!cached) {
+    if (!cached || forged) {
       result = "invalid";
     } else if (cached.status === "cancelled") {
       result = "cancelled";
@@ -592,14 +605,15 @@ export default function ControlPage() {
     await enqueueScan({
       type: input.type,
       input: input.raw,
-      ticketId: cached?.ticketId ?? ticketId,
+      ticketId: forged ? null : cached?.ticketId ?? ticketId,
       localResult: result,
       scannedAt: new Date().toISOString(),
     });
 
     // Lista negra guardada en el celular: advierte igual sin conexion.
+    // No se muestra para un QR con firma invalida -- no es una entrada real.
     let blacklist: { reason: string | null } | null = null;
-    if (cached?.buyerDni) {
+    if (cached?.buyerDni && !forged) {
       try {
         blacklist = await lookupBlacklistedDni(cached.buyerDni);
       } catch {
@@ -609,12 +623,12 @@ export default function ControlPage() {
 
     setValidation({
       result,
-      ticket_id: cached?.ticketId ?? null,
-      buyer_name: cached?.buyerName ?? null,
-      buyer_dni: cached?.buyerDni ?? null,
-      ticket_type: cached?.ticketType ?? null,
-      manual_code: cached?.manualCode ?? manualCode,
-      message: !cached ? "No encontramos esta entrada en los datos precargados." : null,
+      ticket_id: forged ? null : cached?.ticketId ?? null,
+      buyer_name: forged ? null : cached?.buyerName ?? null,
+      buyer_dni: forged ? null : cached?.buyerDni ?? null,
+      ticket_type: forged ? null : cached?.ticketType ?? null,
+      manual_code: forged ? null : cached?.manualCode ?? manualCode,
+      message: forged ? "La firma del QR no es válida (posible entrada falsa)." : !cached ? "No encontramos esta entrada en los datos precargados." : null,
       offline: true,
       ...(blacklist ? { blacklisted: true, blacklist_reason: blacklist.reason } : {}),
     });
@@ -1529,9 +1543,11 @@ export default function ControlPage() {
                   }`}
                 >
                   <p className="font-bold uppercase tracking-[0.1em]">
-                    {conflict.severity === "alta"
-                      ? "⚠ Entrada invalidada mientras estabas offline"
-                      : "Doble ingreso — otro dispositivo validó primero"}
+                    {conflict.forged
+                      ? "⚠ QR falsificado: dejó entrar con una firma inválida"
+                      : conflict.severity === "alta"
+                        ? "⚠ Entrada invalidada mientras estabas offline"
+                        : "Doble ingreso — otro dispositivo validó primero"}
                   </p>
                   <p className="mt-1 text-white/70">
                     Código {conflict.input.startsWith("CP1:") ? "(QR)" : conflict.input} — se

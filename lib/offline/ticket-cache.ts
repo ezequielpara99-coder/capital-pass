@@ -33,6 +33,14 @@ export type CachedTicket = {
   buyerName: string;
   buyerDni: string | null;
   ticketType: string;
+  // Firma HMAC real de este ticket (calculada en el servidor durante la
+  // precarga, con el secret que nunca sale de ahi) -- sin esto, el modo
+  // offline solo chequeaba que el ticketId (dato publico, viaja sin cifrar
+  // en la URL de la entrada) estuviera en el cache, dejando pasar CUALQUIER
+  // QR fabricado a mano con un ticketId ajeno mientras el celular esta sin
+  // señal. Comparando contra esta firma, un QR sin la firma real se rechaza
+  // igual que online.
+  signature: string;
 };
 
 export type PendingScanType = "qr" | "manual";

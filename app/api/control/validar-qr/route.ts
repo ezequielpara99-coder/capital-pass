@@ -5,6 +5,7 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 import { verifyTicketSignature } from "../../../../lib/tickets/signature";
 import { parseQRPayload } from "../../../../lib/tickets/qr-payload";
 import { verifyControllerForEvent } from "../../../../lib/control/auth";
+import { checkRateLimit } from "../../../../lib/http/rate-limit";
 
 type QRRequestBody = {
   eventId?: string;
@@ -53,13 +54,48 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Acotado a quien YA tiene sesion valida de controlador/organizador/admin
+    // de este evento (no hay riesgo de bloquear compradores externos) -- pero
+    // sin esto, ese mismo insider podia probar codigos/ticketId al azar sin
+    // ningun limite buscando una colision con una entrada real sin usar.
+    const withinRateLimit = await checkRateLimit(`qr-validate:${verification.userId}`, 120, 60);
+    if (!withinRateLimit) {
+      return NextResponse.json(
+        { error: "Demasiados intentos. Esperá un momento." },
+        { status: 429 }
+      );
+    }
+
+    const admin = createAdminClient();
+
+    // Escaneos rechazados ANTES de llegar a validate_ticket_manual (formato
+    // invalido, firma invalida, entrada de otro evento) no quedaban en
+    // entry_scans -- justo los casos que mas importa poder investigar
+    // despues (intento de entrada con QR falso/ajeno). Se deja el mismo
+    // rastro que ya deja el RPC para un codigo manual inexistente.
+    async function logRejectedScan(method: "qr" | "qr_offline") {
+      try {
+        await admin.from("entry_scans").insert({
+          event_id: eventId,
+          ticket_id: null,
+          controller_member_id: verification.ok ? verification.memberId : null,
+          method,
+          result: "invalid",
+        });
+      } catch (logError) {
+        console.error("ERROR LOG ENTRY_SCANS:", logError);
+      }
+    }
+
     // =====================================================
     // 5. LEER QR CAPITAL PASS
     // =====================================================
 
     const parsed = parseQRPayload(qrPayload);
+    const method = offline ? "qr_offline" : "qr";
 
     if (!parsed.ok) {
+      await logRejectedScan(method);
       return NextResponse.json(
         {
           result: "invalid",
@@ -81,6 +117,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (!signatureIsValid) {
+      await logRejectedScan(method);
       return NextResponse.json(
         {
           result: "invalid",
@@ -95,8 +132,6 @@ export async function POST(request: NextRequest) {
     // =====================================================
     // 7. BUSCAR EL TICKET REAL
     // =====================================================
-
-    const admin = createAdminClient();
 
     const {
       data: ticket,
@@ -129,6 +164,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!ticket) {
+      await logRejectedScan(method);
       return NextResponse.json(
         {
           result: "invalid",

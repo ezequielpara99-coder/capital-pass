@@ -1,14 +1,20 @@
 import "server-only";
 import { createClient } from "../supabase/server";
+import { isPlatformAdmin } from "../stock/auth";
 
 type VerifyResult =
-  | { ok: true; userId: string; memberId: string }
+  | { ok: true; userId: string; memberId: string | null }
   | { ok: false; status: number; error: string };
 
-// Confirma que hay una sesion activa y que ese usuario es controlador
-// activo asignado a ese evento puntual. Extraido de
-// app/api/control/validar-qr/route.ts para reusarlo tambien en
-// /api/control/preload (precarga del modo offline).
+// Confirma que hay una sesion activa y que ese usuario puede controlar
+// ingresos en ese evento puntual: admin de plataforma, organizador de la
+// organizacion dueña del evento, o controlador asignado -- el mismo
+// criterio de permiso que ya usa validate_ticket_manual (RPC) para el
+// codigo manual. Antes esta funcion (usada por el escaneo de QR por
+// camara y por la precarga offline) exigia SOLO role='controller', asi
+// que un organizador/admin podia validar por codigo tipeado pero recibia
+// 403 al intentar usar la camara o precargar el modo sin señal para su
+// propio evento.
 export async function verifyControllerForEvent(eventId: string): Promise<VerifyResult> {
   const supabase = await createClient();
 
@@ -21,11 +27,25 @@ export async function verifyControllerForEvent(eventId: string): Promise<VerifyR
     return { ok: false, status: 401, error: "No hay una sesión válida." };
   }
 
+  const { data: event, error: eventError } = await supabase
+    .from("events")
+    .select("id, organization_id")
+    .eq("id", eventId)
+    .maybeSingle();
+
+  if (eventError) {
+    console.error("ERROR EVENT CONTROL:", eventError);
+    return { ok: false, status: 500, error: "No se pudo verificar el evento." };
+  }
+  if (!event) {
+    return { ok: false, status: 404, error: "El evento no existe." };
+  }
+
   const { data: memberships, error: membershipError } = await supabase
     .from("organization_members")
-    .select("id")
+    .select("id, role")
+    .eq("organization_id", event.organization_id)
     .eq("user_id", user.id)
-    .eq("role", "controller")
     .eq("status", "active");
 
   if (membershipError) {
@@ -33,9 +53,17 @@ export async function verifyControllerForEvent(eventId: string): Promise<VerifyR
     return { ok: false, status: 500, error: "No se pudo verificar el acceso del controlador." };
   }
 
-  const memberIds = memberships?.map((item) => item.id) ?? [];
+  if (await isPlatformAdmin(user.id, user.email)) {
+    return { ok: true, userId: user.id, memberId: null };
+  }
 
-  if (memberIds.length === 0) {
+  const organizerMembership = (memberships ?? []).find((m) => m.role === "organizer");
+  if (organizerMembership) {
+    return { ok: true, userId: user.id, memberId: organizerMembership.id };
+  }
+
+  const controllerMemberIds = (memberships ?? []).filter((m) => m.role === "controller").map((m) => m.id);
+  if (controllerMemberIds.length === 0) {
     return { ok: false, status: 403, error: "Tu cuenta no tiene permisos de control." };
   }
 
@@ -43,7 +71,7 @@ export async function verifyControllerForEvent(eventId: string): Promise<VerifyR
     .from("event_staff")
     .select("organization_member_id")
     .eq("event_id", eventId)
-    .in("organization_member_id", memberIds)
+    .in("organization_member_id", controllerMemberIds)
     .eq("staff_role", "controller")
     .eq("active", true)
     .limit(1)

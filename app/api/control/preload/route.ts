@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { verifyControllerForEvent } from "../../../../lib/control/auth";
 import { fetchAllRows } from "../../../../lib/supabase/fetch-all";
+import { createTicketSignature } from "../../../../lib/tickets/signature";
 
 // Un .in() con cientos de UUID se pasa del largo maximo de la URL: se consulta
 // de a tandas.
@@ -89,6 +90,10 @@ export async function GET(request: NextRequest) {
       buyerName: buyer ? `${buyer.first_name} ${buyer.last_name}`.trim() : "",
       buyerDni: buyer?.dni ?? null,
       ticketType: ticket.ticket_type_id ? ticketTypeNameById.get(ticket.ticket_type_id) ?? "" : "",
+      // Firma real, calculada aca (unico lugar con el secret) para que el
+      // modo offline pueda comparar contra ella sin confiar solo en que el
+      // ticketId (publico) este en el cache.
+      signature: createTicketSignature(ticket.id),
     };
   });
 
