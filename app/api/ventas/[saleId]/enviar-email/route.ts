@@ -72,6 +72,21 @@ export async function POST(
       return NextResponse.json({ ok: true, skipped: true });
     }
 
+    // Reclamo atomico (mismo patron que el flujo online, lib/billing/server.ts):
+    // este endpoint se dispara solo, en automatico, despues de cada venta
+    // (puerta/RRPP/organizador) -- sin esto, un reintento de red o una
+    // llamada repetida al mismo saleId reenviaba el mismo mail con el QR
+    // una y otra vez al comprador.
+    const claimed = await admin
+      .from("sales")
+      .update({ ticket_email_sent_at: new Date().toISOString() })
+      .eq("id", saleId)
+      .is("ticket_email_sent_at", null)
+      .select("id");
+    if (!claimed.data || claimed.data.length === 0) {
+      return NextResponse.json({ ok: true, skipped: true });
+    }
+
     const { data: event } = await admin
       .from("events")
       .select("name")

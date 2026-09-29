@@ -90,6 +90,7 @@ const arreglaIdempotenciaCompraOnlineMigration = readFileSync(new URL("../supaba
 const arreglaCarreraRentalMigration = readFileSync(new URL("../supabase/migrations/20260996_arregla_carrera_y_edicion_reservas_rental.sql", import.meta.url), "utf8");
 const arreglaCarreraStockTotalMigration = readFileSync(new URL("../supabase/migrations/20260997_arregla_carrera_stock_total.sql", import.meta.url), "utf8");
 const bloqueaCupoMigration = readFileSync(new URL("../supabase/migrations/20260998_bloquea_bajar_cupo_por_debajo_de_lo_vendido.sql", import.meta.url), "utf8");
+const arreglaCarreraCreateSaleMigration = readFileSync(new URL("../supabase/migrations/20260999_arregla_carrera_idempotencia_create_sale.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -228,6 +229,7 @@ async function database() {
   await db.exec(arreglaCarreraRentalMigration);
   await db.exec(arreglaCarreraStockTotalMigration);
   await db.exec(bloqueaCupoMigration);
+  await db.exec(arreglaCarreraCreateSaleMigration);
   return db;
 }
 
