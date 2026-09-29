@@ -7,6 +7,13 @@
 -- automatico) -- simplemente con ticket_type_id null en vez de apuntar a una
 -- tanda, distinguido por la mesa de la venta (sales.table_id).
 --
+-- Confirmado en vivo (consulta de diagnostico): tickets.sale_item_id,
+-- tickets.ticket_type_id y tickets.manual_code son NOT NULL hoy. manual_code
+-- sigue igual (tiene su propio default, nunca se lo pisa). sale_item_id y
+-- ticket_type_id SI hace falta relajarlos -- una entrada de mesa nunca
+-- perteneció a una tanda ni a una linea de sale_items (la venta de mesa no
+-- arma sale_items).
+--
 -- De paso, dos bugs reales encontrados en la misma ronda de auditoria:
 -- confirm_online_sale (llamada por el webhook de Mercado Pago, que puede
 -- llegar minutos u horas despues de create_online_sale/create_online_table_sale,
@@ -17,6 +24,16 @@
 -- del lado del cliente en React, saltable con un POST directo a PostgREST),
 -- el mismo patron que ya habia mordido una vez con "capacity" (20260998).
 begin;
+
+-- =============================================================
+-- 0. tickets.sale_item_id / ticket_type_id: relajar a NULLABLE. Una entrada
+--    de mesa no tiene ninguno de los dos (no pertenece a una tanda ni a una
+--    linea de sale_items) -- las filas existentes no se tocan, esto solo
+--    permite que una fila NUEVA los deje vacios.
+-- =============================================================
+
+alter table public.tickets alter column sale_item_id drop not null;
+alter table public.tickets alter column ticket_type_id drop not null;
 
 -- =============================================================
 -- 1. confirm_online_sale: crea el ticket de la mesa al confirmar el pago,
