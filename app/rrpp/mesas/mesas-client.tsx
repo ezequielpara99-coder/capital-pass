@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { createClient } from "../../../lib/supabase/client";
 import { friendlyErrorMessage } from "../../../lib/errors/friendly-message";
 
 type Table = { id: string; name: string; capacity: number | null; price_minor: number | null; status: string };
@@ -133,8 +132,11 @@ export default function MesasClient({ eventId, eventName }: { eventId: string; e
   }
 
   async function logout() {
-    await createClient().auth.signOut();
-    window.location.replace("/login");
+    // /logout (no un signOut directo aca) da de baja la suscripcion push de
+    // este dispositivo antes de cerrar sesion -- si no, en un celular
+    // compartido entre RRPP le siguen llegando notificaciones de esta
+    // cuenta a quien lo use despues.
+    window.location.replace("/logout");
   }
 
   if (loading) {

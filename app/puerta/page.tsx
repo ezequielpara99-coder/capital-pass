@@ -794,11 +794,11 @@ export default function DoorSellerPage() {
   // =====================================================
 
   async function logout() {
-    await supabase.auth.signOut();
-
-    window.location.replace(
-      "/login"
-    );
+    // /logout (no un signOut directo aca) da de baja la suscripcion push de
+    // este dispositivo antes de cerrar sesion -- si no, en una tablet
+    // compartida entre turnos le siguen llegando notificaciones de esta
+    // cuenta a quien la use despues.
+    window.location.replace("/logout");
   }
 
   // =====================================================

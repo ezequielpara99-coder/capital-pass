@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { checkRateLimit, getClientIp } from "../../../../lib/http/rate-limit";
+
+// Mismo tope que ya tiene el equivalente de socios
+// (app/api/socio/[memberId]/push/route.ts): sin esto, cualquier usuario
+// logueado (bartender/rrpp/puerta/organizador) podia mandar POST con miles
+// de endpoints validos-pero-inventados y acumular filas sin limite en
+// push_subscriptions bajo su propio user_id -- cada push futuro a ese
+// usuario disparaba un envio real contra cada uno.
+const MAX_DEVICES = 5;
 
 // Hosts reales de los servicios de push de cada navegador. El endpoint que
 // manda el cliente no se validaba antes de guardarlo: cualquier usuario
@@ -36,6 +45,10 @@ const BASE64URL_KEY = /^[A-Za-z0-9_-]{20,120}$/;
 
 export async function POST(request: NextRequest) {
   try {
+    if (!(await checkRateLimit(`push-subscribe:${getClientIp(request)}`, 20, 60))) {
+      return NextResponse.json({ error: "Demasiados intentos. Esperá un momento." }, { status: 429 });
+    }
+
     const body = await request.json();
     const endpoint = String(body.endpoint ?? "").trim();
     const p256dh = String(body.keys?.p256dh ?? "").trim();
@@ -63,6 +76,16 @@ export async function POST(request: NextRequest) {
       .upsert({ user_id: user.id, endpoint, p256dh, auth_key: authKey }, { onConflict: "endpoint" });
 
     if (error) return NextResponse.json({ error: "No se pudo activar la notificación." }, { status: 500 });
+
+    // Tope de dispositivos por usuario: se borran los mas viejos.
+    const { data: all } = await admin
+      .from("push_subscriptions")
+      .select("id")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+    const extra = (all ?? []).slice(MAX_DEVICES).map((s) => s.id as string);
+    if (extra.length > 0) await admin.from("push_subscriptions").delete().in("id", extra);
+
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
