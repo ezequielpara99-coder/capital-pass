@@ -208,10 +208,11 @@ export default function PerfilClient({
           first_name: first.trim().slice(0, 200),
           last_name: last.trim().slice(0, 200),
           phone: phoneValue.trim().slice(0, 60) || null,
-          updated_at: new Date().toISOString(),
         })
         .eq("id", user.id);
-      if (updateError) throw new Error("No se pudo guardar el perfil.");
+      // Se muestra el motivo real (en vez de un mensaje generico) para no
+      // tener que adivinar a ciegas la proxima vez que esto falle.
+      if (updateError) throw new Error(`No se pudo guardar el perfil: ${updateError.message}`);
       notify("Perfil guardado.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar el perfil.");

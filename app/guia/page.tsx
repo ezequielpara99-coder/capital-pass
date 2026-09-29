@@ -94,7 +94,6 @@ const GUIDE: Record<Role, RoleGuide> = {
         title: "Informes y finanzas",
         steps: [
           "En Informes vas a ver ventas por canal (online, RRPP, puerta, mesas), comisiones y totales del evento.",
-          "Si además usás Capital Finanzas (presupuestos de diseño o alquiler de terminales), cada presupuesto muestra si está sin pagar, con pago parcial o pagado, calculado siempre contra lo que realmente cobraste.",
         ],
       },
     ],
