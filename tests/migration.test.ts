@@ -89,6 +89,7 @@ const arreglaFinanzasComisionesMigration = readFileSync(new URL("../supabase/mig
 const arreglaIdempotenciaCompraOnlineMigration = readFileSync(new URL("../supabase/migrations/20260995_arregla_idempotencia_compra_online_y_reapertura_tanda.sql", import.meta.url), "utf8");
 const arreglaCarreraRentalMigration = readFileSync(new URL("../supabase/migrations/20260996_arregla_carrera_y_edicion_reservas_rental.sql", import.meta.url), "utf8");
 const arreglaCarreraStockTotalMigration = readFileSync(new URL("../supabase/migrations/20260997_arregla_carrera_stock_total.sql", import.meta.url), "utf8");
+const bloqueaCupoMigration = readFileSync(new URL("../supabase/migrations/20260998_bloquea_bajar_cupo_por_debajo_de_lo_vendido.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -226,6 +227,7 @@ async function database() {
   await db.exec(arreglaIdempotenciaCompraOnlineMigration);
   await db.exec(arreglaCarreraRentalMigration);
   await db.exec(arreglaCarreraStockTotalMigration);
+  await db.exec(bloqueaCupoMigration);
   return db;
 }
 
@@ -456,6 +458,55 @@ test("ventas online: carrito, confirmacion, cupo y limpieza de pendientes", asyn
   // Idempotente: un reintento del mismo aviso de reembolso no debe romper nada.
   await db.query("select confirm_online_sale($1,'refunded')", [refundSale]);
   assert.equal(await scalar(`select status from sales where id='${refundSale}'`), "refunded");
+
+  await db.close();
+});
+
+test("tandas: no se puede bajar el cupo por debajo de lo ya vendido (bloqueado en la base, no solo en la pantalla)", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "d2d1d0d0-1111-4111-8111-111111111111";
+  const event = "d2d1d0d0-2222-4222-8222-222222222222";
+  const ticketType = "d2d1d0d0-3333-4333-8333-333333333333";
+
+  await db.exec(`insert into organizations(id,name,slug) values ('${org}','Club Cupo','club-cupo');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into ticket_types(id,event_id,name,price_minor,capacity,active,status) values ('${ticketType}','${event}','General',5000,10,true,'available');`);
+
+  const buyerId = await scalar(`insert into buyers(organization_id,first_name,last_name,dni) values ('${org}','C','omprador','1') returning id::text`);
+  const saleId = await scalar(`insert into sales(organization_id,event_id,buyer_id,status,total_minor,channel) values ('${org}','${event}','${buyerId}','confirmed',15000,'online') returning id::text`);
+  const itemId = await scalar(`insert into sale_items(sale_id,event_id,ticket_type_id,quantity,unit_price_minor) values ('${saleId}','${event}','${ticketType}',3,5000) returning id::text`);
+  await db.exec(`insert into tickets(sale_item_id,sale_id,event_id,ticket_type_id,manual_code,status) values
+    ('${itemId}','${saleId}','${event}','${ticketType}','CUPO01','issued'),
+    ('${itemId}','${saleId}','${event}','${ticketType}','CUPO02','issued'),
+    ('${itemId}','${saleId}','${event}','${ticketType}','CUPO03','cancelled')`);
+  // 3 entradas cargadas, pero 1 esta cancelada -> solo cuentan 2 como "vendidas".
+
+  await assert.rejects(
+    () => db.query(`update ticket_types set capacity = 1 where id='${ticketType}'`),
+    /No podés reducir el cupo.*2 entradas vendidas/,
+    "no puede bajar a menos de las 2 entradas realmente vendidas (la cancelada no cuenta)"
+  );
+  assert.equal(await scalar(`select capacity from ticket_types where id='${ticketType}'`), 10, "el rechazo no toco el cupo");
+
+  // Bajarlo justo a lo vendido (2) si se permite.
+  await db.query(`update ticket_types set capacity = 2 where id='${ticketType}'`);
+  assert.equal(await scalar(`select capacity from ticket_types where id='${ticketType}'`), 2);
+
+  // Subirlo siempre esta permitido.
+  await db.query(`update ticket_types set capacity = 100 where id='${ticketType}'`);
+  assert.equal(await scalar(`select capacity from ticket_types where id='${ticketType}'`), 100);
+
+  // Editar otro campo sin tocar capacity no dispara el chequeo.
+  await db.query(`update ticket_types set name = 'General (renombrada)' where id='${ticketType}'`);
+  assert.equal(await scalar(`select name from ticket_types where id='${ticketType}'`), "General (renombrada)");
+
+  // Nota: borrar una tanda con ventas ya esta bloqueado por la FK de
+  // sale_items en la base real (confirmado en vivo con Eze via pg_constraint
+  // -- confdeltype "sin accion"). El fixture de este harness no declara esa
+  // FK (igual que otros tests de este archivo que la agregan a mano cuando
+  // la necesitan), asi que no se reproduce aca para no duplicar cobertura
+  // de algo ya verificado contra la base real.
 
   await db.close();
 });
