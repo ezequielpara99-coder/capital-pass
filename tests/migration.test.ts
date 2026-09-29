@@ -91,6 +91,7 @@ const arreglaCarreraRentalMigration = readFileSync(new URL("../supabase/migratio
 const arreglaCarreraStockTotalMigration = readFileSync(new URL("../supabase/migrations/20260997_arregla_carrera_stock_total.sql", import.meta.url), "utf8");
 const bloqueaCupoMigration = readFileSync(new URL("../supabase/migrations/20260998_bloquea_bajar_cupo_por_debajo_de_lo_vendido.sql", import.meta.url), "utf8");
 const endurecePresenciaPerfilMigration = readFileSync(new URL("../supabase/migrations/20261000_endurece_presencia_y_perfil.sql", import.meta.url), "utf8");
+const protegePresenciaMigration = readFileSync(new URL("../supabase/migrations/20261001_protege_presencia_de_organizadores.sql", import.meta.url), "utf8");
 const arreglaCarreraCreateSaleMigration = readFileSync(new URL("../supabase/migrations/20260999_arregla_carrera_idempotencia_create_sale.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
@@ -232,6 +233,7 @@ async function database() {
   await db.exec(bloqueaCupoMigration);
   await db.exec(arreglaCarreraCreateSaleMigration);
   await db.exec(endurecePresenciaPerfilMigration);
+  await db.exec(protegePresenciaMigration);
   return db;
 }
 
@@ -1497,6 +1499,20 @@ test("presencia: cp_touch_presence marca last_active_at del usuario logueado", a
   const others = rows.rows.find((r) => r.id === other);
   assert.ok(mine?.last_active_at, "se marco la presencia del usuario logueado");
   assert.equal(others?.last_active_at ?? null, null, "no toca la presencia de otro usuario");
+
+  // Un UPDATE directo (no via cp_touch_presence) no puede pisar
+  // last_active_at, sin importar que privilegios de UPDATE tenga
+  // "authenticated" sobre la tabla -- se simula aca el caso mas permisivo
+  // (grant de tabla completa, el habitual por defecto en Supabase) para
+  // probar que el trigger protege igual.
+  await db.exec("grant update on public.profiles to authenticated;");
+  const before = String((await db.query<{ last_active_at: string }>(`select last_active_at from profiles where id = '${user}'`)).rows[0].last_active_at);
+  await db.exec(`select set_config('request.jwt.claim.sub','${user}',false); set role authenticated;`);
+  await db.query(`update profiles set first_name = 'Editado', last_active_at = now() + interval '1 year' where id = '${user}'`);
+  await db.exec("reset role;");
+  const after = await db.query<{ first_name: string; last_active_at: string }>(`select first_name, last_active_at from profiles where id = '${user}'`);
+  assert.equal(after.rows[0].first_name, "Editado", "el resto de los campos del propio perfil si se pueden editar");
+  assert.equal(String(after.rows[0].last_active_at), before, "last_active_at no se movio ni un click, aunque el UPDATE directo no dio ningun error");
 
   // Limites de largo en first_name/last_name/phone -- antes no tenian ninguno.
   await assert.rejects(
