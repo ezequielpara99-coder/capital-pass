@@ -76,7 +76,6 @@ export async function computeFinanzasSummary(
   const presupuestado = quotes.filter((q) => q.status !== "rechazado").reduce((sum, q) => sum + quoteTotal(q), 0);
   const facturadas = quotes.filter((q) => q.status === "a_pagar" || q.status === "aceptado");
   const facturado = facturadas.reduce((sum, q) => sum + quoteTotal(q), 0);
-  const allFacturadoIds = new Set(allQuotes.filter((q) => q.status === "a_pagar" || q.status === "aceptado").map((q) => q.id));
 
   const { data: paymentsData, error: paymentsError } = await fetchAllRows((rangeFrom, rangeTo) => {
     let query = admin.from("quote_payments").select("quote_id, amount_minor, paid_at").is("deleted_at", null);
@@ -90,9 +89,15 @@ export async function computeFinanzasSummary(
     throw paymentsError;
   }
 
+  // Un pago solo se pudo haber registrado mientras el presupuesto ESTABA en
+  // a_pagar/aceptado (esa es la regla del propio endpoint de pagos) -- asi
+  // que se cuenta siempre, sin volver a filtrar por el status ACTUAL. Antes
+  // se descartaba si el presupuesto ya no calificaba (cambio de estado, o
+  // se borro), y esa plata ya cobrada desaparecia en silencio de "cobrado"
+  // y "resultado" sin que nadie lo note -- el dinero seguia estando, el
+  // informe mentia.
   const cobradoPorQuote = new Map<string, number>();
   for (const payment of paymentsData ?? []) {
-    if (!allFacturadoIds.has(payment.quote_id)) continue;
     cobradoPorQuote.set(payment.quote_id, (cobradoPorQuote.get(payment.quote_id) ?? 0) + Number(payment.amount_minor));
   }
   const cobrado = [...cobradoPorQuote.values()].reduce((sum, value) => sum + value, 0);

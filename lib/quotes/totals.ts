@@ -122,6 +122,18 @@ export function contentCount(items: Pick<QuoteItem, "quantity">[]) {
   return items.reduce((sum, item) => sum + item.quantity, 0);
 }
 
+// package_price_minor es bigint y discount_value es numeric: PostgREST los
+// devuelve como string, no como number. Cada pantalla que lee un presupuesto
+// lo sabia y lo normalizaba por su cuenta (con el mismo comentario repetido
+// varias veces) -- las rutas de API que DEVUELVEN el presupuesto recien
+// creado/editado no lo hacian, quedaba enmascarado porque el unico
+// consumidor real lo volvia a envolver, pero cualquier otro cliente futuro
+// de estos endpoints se rompia en silencio con un string en vez de un
+// numero (ej. "0" es truthy en JS).
+export function normalizeQuoteResponse<T extends { package_price_minor: unknown; discount_value: unknown }>(quote: T) {
+  return { ...quote, package_price_minor: Number(quote.package_price_minor), discount_value: Number(quote.discount_value) };
+}
+
 export function normalizeDiscount(type: unknown, value: unknown): { type: DiscountType; value: number } {
   const normalizedType = (DISCOUNT_TYPES as readonly string[]).includes(String(type)) ? (type as DiscountType) : "none";
   const number = Number(value);

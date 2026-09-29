@@ -1,5 +1,6 @@
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { isMissingTable, requireAdminPage } from "../../../lib/quotes/auth";
+import { fetchAllRows } from "../../../lib/supabase/fetch-all";
 import PresupuestosClient, { QuoteRow } from "./presupuestos-client";
 
 export const dynamic = "force-dynamic";
@@ -9,12 +10,20 @@ export default async function AdminPresupuestosPage() {
   await requireAdminPage();
 
   const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("quotes")
-    .select("id, number, kind, status, client_name, event_name, modality, items, price_mode, package_price_minor, discount_type, discount_value, created_at")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .limit(300);
+  // fetchAllRows: el ".limit(300)" que tenia antes esta consulta escondia
+  // (sin ningun aviso, ni en la lista ni en el buscador que filtra en
+  // memoria sobre lo ya traido) cualquier presupuesto mas viejo que el
+  // #300 por fecha de creacion -- seguia existiendo y editable por URL
+  // directa, pero invisible desde el listado.
+  const { data, error } = await fetchAllRows((from, to) =>
+    admin
+      .from("quotes")
+      .select("id, number, kind, status, client_name, event_name, modality, items, price_mode, package_price_minor, discount_type, discount_value, created_at")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to)
+  );
 
   if (error && !isMissingTable(error)) console.error("ADMIN PRESUPUESTOS:", error);
 

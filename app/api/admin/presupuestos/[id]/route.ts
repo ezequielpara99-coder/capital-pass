@@ -7,6 +7,7 @@ import {
   normalizeModality,
   normalizeMoney,
   normalizePriceMode,
+  normalizeQuoteResponse,
   normalizeStatus,
   sanitizeItems,
 } from "../../../../../lib/quotes/totals";
@@ -40,7 +41,7 @@ export async function GET(_request: NextRequest, context: Context) {
     }
     if (!data) return NextResponse.json({ error: "No se encontró el presupuesto." }, { status: 404 });
 
-    return NextResponse.json({ ok: true, quote: data });
+    return NextResponse.json({ ok: true, quote: normalizeQuoteResponse(data) });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }
@@ -64,7 +65,31 @@ export async function PATCH(request: NextRequest, context: Context) {
       updates.client_name = name.slice(0, 200);
     }
     if (body.kind !== undefined) updates.kind = normalizeKind(body.kind);
-    if (body.status !== undefined) updates.status = normalizeStatus(body.status);
+
+    const admin = createAdminClient();
+
+    if (body.status !== undefined) {
+      const newStatus = normalizeStatus(body.status);
+      // Si el presupuesto ya tiene pagos registrados, no lo dejamos volver a
+      // un estado no facturable (borrador/revision/rechazado) -- esos pagos
+      // ya cobrados dejan de contar como "cobrado" en los informes de
+      // finanzas apenas el status deja de ser a_pagar/aceptado (el resto de
+      // la plata sigue ahi, pero desaparece de la vista sin ningun aviso).
+      if (newStatus !== "a_pagar" && newStatus !== "aceptado") {
+        const { count: paymentsCount } = await admin
+          .from("quote_payments")
+          .select("id", { count: "exact", head: true })
+          .eq("quote_id", id)
+          .is("deleted_at", null);
+        if ((paymentsCount ?? 0) > 0) {
+          return NextResponse.json(
+            { error: "Este presupuesto ya tiene pagos registrados: no se puede volver a un estado sin facturar. Borrá los pagos primero si es un error." },
+            { status: 409 }
+          );
+        }
+      }
+      updates.status = newStatus;
+    }
     if (body.clientContact !== undefined) updates.client_contact = optionalText(body.clientContact, 200);
     if (body.clientPhone !== undefined) updates.client_phone = optionalText(body.clientPhone, 60);
     if (body.clientEmail !== undefined) updates.client_email = optionalText(body.clientEmail, 200);
@@ -88,7 +113,6 @@ export async function PATCH(request: NextRequest, context: Context) {
       updates.valid_days = Number.isFinite(days) ? Math.min(Math.max(Math.round(days), 0), 365) : 15;
     }
 
-    const admin = createAdminClient();
     const { data, error } = await admin.from("quotes").update(updates).eq("id", id).is("deleted_at", null).select(QUOTE_FIELDS).maybeSingle();
 
     if (error) {
@@ -98,7 +122,7 @@ export async function PATCH(request: NextRequest, context: Context) {
     }
     if (!data) return NextResponse.json({ error: "No se encontró el presupuesto." }, { status: 404 });
 
-    return NextResponse.json({ ok: true, quote: data });
+    return NextResponse.json({ ok: true, quote: normalizeQuoteResponse(data) });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }

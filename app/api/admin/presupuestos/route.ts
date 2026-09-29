@@ -7,6 +7,7 @@ import {
   normalizeModality,
   normalizeMoney,
   normalizePriceMode,
+  normalizeQuoteResponse,
   sanitizeItems,
 } from "../../../../lib/quotes/totals";
 
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No se pudo crear el presupuesto." }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, quote: data });
+    return NextResponse.json({ ok: true, quote: normalizeQuoteResponse(data) });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }
