@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 type TicketType = {
@@ -78,6 +78,15 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs, 
   const returningSaleId = searchParams.get("venta");
 
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+
+  // Evita una doble venta/doble cobro si la respuesta se pierde por mala
+  // conexion y el comprador reintenta: mientras el carrito no cambie, se
+  // reenvia la MISMA clave y el servidor devuelve la venta ya creada en
+  // vez de generar otra (y otra preferencia de pago) por el mismo pedido.
+  const idempotencyKeyRef = useRef<string>(crypto.randomUUID());
+  useEffect(() => {
+    idempotencyKeyRef.current = crypto.randomUUID();
+  }, [quantities]);
   const [showForm, setShowForm] = useState(false);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -147,6 +156,7 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs, 
           dni,
           phone,
           email: email || undefined,
+          idempotencyKey: idempotencyKeyRef.current,
         }),
       });
 

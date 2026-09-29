@@ -15,6 +15,7 @@ export async function POST(
   context: { params: Promise<{ slug: string }> }
 ) {
   const { slug } = await context.params;
+  let saleIdForRollback: string | null = null;
 
   try {
     // Cada request exitosa toma un lock sobre la tanda (compite con
@@ -47,6 +48,8 @@ export async function POST(
     const buyerDni = String(body.dni ?? "").trim().slice(0, 30);
     const buyerPhone = String(body.phone ?? "").trim().slice(0, 40);
     const buyerEmail = body.email ? String(body.email).trim().slice(0, 200) : null;
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const idempotencyKey = typeof body.idempotencyKey === "string" && UUID.test(body.idempotencyKey) ? body.idempotencyKey : null;
 
     const admin = createAdminClient();
 
@@ -69,6 +72,7 @@ export async function POST(
       p_buyer_dni: buyerDni,
       p_buyer_phone: buyerPhone,
       p_buyer_email: buyerEmail,
+      p_idempotency_key: idempotencyKey,
     });
 
     if (created.error) {
@@ -76,8 +80,14 @@ export async function POST(
     }
 
     type SaleItem = { ticket_type_id: string; name: string; quantity: number; unit_price_minor: number; line_total_minor: number; pack_id: string | null };
-    const sale = created.data?.[0] as { sale_id: string; total_minor: number; items: SaleItem[] } | undefined;
+    const sale = created.data?.[0] as { sale_id: string; total_minor: number; items: SaleItem[]; already_existed: boolean } | undefined;
     if (!sale) throw new Error("La compra no devolvió un identificador.");
+    // Si es una venta recien creada (no una que ya existia por la misma
+    // clave de idempotencia), y algo falla mas abajo, se cancela para no
+    // dejar cupo reservado en el aire. Una venta YA existente (reintento)
+    // no se cancela: sigue siendo un intento valido, se puede reintentar
+    // de nuevo con la misma clave.
+    if (!sale.already_existed) saleIdForRollback = sale.sale_id;
 
     // total_minor es bigint: PostgREST/el RPC lo devuelve como STRING, no
     // como number. "total_minor + feeAmount" mas abajo usaba "+", que con
@@ -149,6 +159,21 @@ export async function POST(
     return NextResponse.json({ ok: true, checkoutUrl });
   } catch (error) {
     console.error("VENTAS ONLINE: no se pudo iniciar el checkout.", error);
+
+    // Si la venta ya se creo (reservando cupo real) pero el pago no pudo
+    // iniciarse (ej. token de Mercado Pago del organizador invalido, o MP
+    // caido), se cancela enseguida -- antes quedaba "pending_approval"
+    // reservando cupo real hasta que pasara el cron de 30 minutos, y cada
+    // reintento del comprador agotaba mas cupo sin ningun pago real.
+    if (saleIdForRollback) {
+      try {
+        const rolledBack = await createAdminClient().rpc("cp_cancel_online_sale", { p_sale_id: saleIdForRollback });
+        if (rolledBack.error) console.error("VENTAS ONLINE: no se pudo liberar el cupo.", rolledBack.error.message);
+      } catch (rollbackError) {
+        console.error("VENTAS ONLINE: no se pudo liberar el cupo.", rollbackError);
+      }
+    }
+
     return NextResponse.json({ ok: false, error: "No pudimos iniciar la compra. Intentá de nuevo en unos instantes." }, { status: 503 });
   }
 }

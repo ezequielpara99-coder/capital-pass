@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 type TableOption = { id: string; name: string; capacity: number | null; priceMinor: number };
@@ -23,6 +23,12 @@ export default function EventTables({ slug, tables, feePercent }: { slug: string
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // Evita reservar/cobrar dos veces si la respuesta se pierde y el
+  // comprador reintenta (mismo motivo que event-checkout.tsx).
+  const idempotencyKeyRef = useRef<string>(crypto.randomUUID());
+  useEffect(() => {
+    idempotencyKeyRef.current = crypto.randomUUID();
+  }, [selected?.id]);
   // Al volver de Mercado Pago (?venta=...) se muestra el estado del pago, no las mesas.
   const returningFromPayment = Boolean(useSearchParams().get("venta"));
 
@@ -49,7 +55,7 @@ export default function EventTables({ slug, tables, feePercent }: { slug: string
       const response = await fetch(`/api/e/${slug}/mesa/checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId: selected.id, firstName, lastName, dni, phone, email: email || undefined }),
+        body: JSON.stringify({ tableId: selected.id, firstName, lastName, dni, phone, email: email || undefined, idempotencyKey: idempotencyKeyRef.current }),
       });
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error ?? "No pudimos reservar la mesa.");

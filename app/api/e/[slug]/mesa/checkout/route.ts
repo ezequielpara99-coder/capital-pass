@@ -38,6 +38,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     const dni = String(body.dni ?? "").trim().slice(0, 30);
     const phone = String(body.phone ?? "").trim().slice(0, 40);
     const email = body.email ? String(body.email).trim().slice(0, 200) : null;
+    const idempotencyKey = typeof body.idempotencyKey === "string" && UUID.test(body.idempotencyKey) ? body.idempotencyKey : null;
 
     const admin = createAdminClient();
     const { data: event } = await admin.from("events").select("id, name, organization_id").eq("slug", slug).maybeSingle();
@@ -62,6 +63,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
       p_buyer_dni: dni,
       p_buyer_phone: phone,
       p_buyer_email: email,
+      p_idempotency_key: idempotencyKey,
     });
 
     if (created.error) {
@@ -70,9 +72,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
       return NextResponse.json({ ok: false, error: BUSINESS_ERRORS.test(message) ? message : "No pudimos reservar la mesa." }, { status: 400 });
     }
 
-    const sale = created.data?.[0] as { sale_id: string; total_minor: number | string; table_name: string } | undefined;
+    const sale = created.data?.[0] as { sale_id: string; total_minor: number | string; table_name: string; already_existed: boolean } | undefined;
     if (!sale) throw new Error("La reserva no devolvió un identificador.");
-    saleIdForRollback = sale.sale_id;
+    // Solo se cancela en el catch si esta reserva es NUEVA -- una ya
+    // existente (reintento con la misma clave) sigue siendo valida.
+    if (!sale.already_existed) saleIdForRollback = sale.sale_id;
 
     // total_minor es bigint: PostgREST lo devuelve como STRING.
     const tableTotal = Number(sale.total_minor);

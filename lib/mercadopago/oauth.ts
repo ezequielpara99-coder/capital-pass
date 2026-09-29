@@ -85,7 +85,23 @@ export async function accessTokenFor(organizationId: string) {
   const expiresInMs = new Date(data.expires_at).getTime() - Date.now();
   if (expiresInMs > 5 * 60 * 1000) return data.access_token as string;
 
-  const refreshed = await tokenRequest({ grant_type: "refresh_token", refresh_token: data.refresh_token });
+  let refreshed: OAuthTokenResponse;
+  try {
+    refreshed = await tokenRequest({ grant_type: "refresh_token", refresh_token: data.refresh_token });
+  } catch (refreshError) {
+    // Los refresh tokens de Mercado Pago rotan: si dos checkouts casi
+    // simultaneos refrescan a la vez, el segundo puede usar el
+    // refresh_token viejo, ya invalidado por el primero. Antes de rendirse,
+    // relee la fila -- si el otro intento ya guardo un token fresco, se usa
+    // ese en vez de romperle el checkout a un organizador con una conexion
+    // perfectamente valida.
+    const { data: fresh } = await admin.from("organization_mercadopago_accounts")
+      .select("access_token, expires_at").eq("organization_id", organizationId).maybeSingle();
+    if (fresh && new Date(fresh.expires_at).getTime() - Date.now() > 5 * 60 * 1000) {
+      return fresh.access_token as string;
+    }
+    throw refreshError;
+  }
 
   // Mercado Pago ya invalido el refresh_token viejo apenas respondio esto
   // (rotacion estandar de OAuth): si el guardado en la base falla por un

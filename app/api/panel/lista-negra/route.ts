@@ -1,33 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "../../../../lib/supabase/server";
-import { createAdminClient } from "../../../../lib/supabase/admin";
+import { isMissingTable, resolveOrganizer } from "../../../../lib/panel/organizer";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FIELDS = "id, dni, full_name, reason, active, created_at";
-
-function isMissingTable(error: { code?: string; message?: string } | null | undefined) {
-  if (!error) return false;
-  return error.code === "42P01" || error.code === "PGRST205" || /does not exist|schema cache/i.test(error.message ?? "");
-}
-
-async function resolveOrganizer() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: "No hay una sesión válida.", status: 401 } as const;
-
-  const admin = createAdminClient();
-  const { data: membership } = await admin
-    .from("organization_members")
-    .select("organization_id")
-    .eq("user_id", user.id)
-    .eq("role", "organizer")
-    .eq("status", "active")
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) return { error: "No tenés permisos de organizador.", status: 403 } as const;
-  return { admin, organizationId: membership.organization_id as string };
-}
 
 // GET: lista las personas restringidas de la organizacion.
 export async function GET() {

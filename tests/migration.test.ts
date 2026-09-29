@@ -86,6 +86,7 @@ const arreglaStockYExpiracionMigration = readFileSync(new URL("../supabase/migra
 const arreglaDuplicadosSalesAgentMigration = readFileSync(new URL("../supabase/migrations/20260992_arregla_duplicados_y_conversion_sales_agent.sql", import.meta.url), "utf8");
 const arreglaColectivosGeneralMigration = readFileSync(new URL("../supabase/migrations/20260993_arregla_colectivos_general_y_carreras.sql", import.meta.url), "utf8");
 const arreglaFinanzasComisionesMigration = readFileSync(new URL("../supabase/migrations/20260994_arregla_finanzas_y_comisiones_rrpp.sql", import.meta.url), "utf8");
+const arreglaIdempotenciaCompraOnlineMigration = readFileSync(new URL("../supabase/migrations/20260995_arregla_idempotencia_compra_online_y_reapertura_tanda.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -220,6 +221,7 @@ async function database() {
   await db.exec(arreglaDuplicadosSalesAgentMigration);
   await db.exec(arreglaColectivosGeneralMigration);
   await db.exec(arreglaFinanzasComisionesMigration);
+  await db.exec(arreglaIdempotenciaCompraOnlineMigration);
   return db;
 }
 
@@ -450,6 +452,94 @@ test("ventas online: carrito, confirmacion, cupo y limpieza de pendientes", asyn
   // Idempotente: un reintento del mismo aviso de reembolso no debe romper nada.
   await db.query("select confirm_online_sale($1,'refunded')", [refundSale]);
   assert.equal(await scalar(`select status from sales where id='${refundSale}'`), "refunded");
+
+  await db.close();
+});
+
+test("ventas online: create_online_sale y create_online_table_sale son idempotentes por clave", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const admin = "d0d0d0d0-dddd-4ddd-8ddd-dddddddddddd";
+  const org = "d0d0d0d0-eeee-4eee-8eee-eeeeeeeeeeee";
+  const event = "d0d0d0d0-ffff-4fff-8fff-ffffffffffff";
+  const ticketType = "d0d0d0d0-1111-4111-8111-111111111111";
+  const table = "d0d0d0d0-2222-4222-8222-222222222222";
+  const key = "d0d0d0d0-3333-4333-8333-333333333333";
+  const buyer = (n: string) => `'Comprador','${n}','30${n}','3462${n}',null`;
+
+  await db.exec(`insert into auth.users values ('${admin}','admin-idem@example.test',now(),'{}');
+    insert into platform_admins(user_id) values ('${admin}');
+    insert into organizations(id,name,slug) values ('${org}','Club Idempotencia','club-idempotencia');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into ticket_types(id,event_id,name,price_minor,capacity,active,status)
+      values ('${ticketType}','${event}','General',5000,10,true,'available');
+    insert into bar_tables(id,event_id,name,capacity,price_minor,status) values ('${table}','${event}','Mesa 1',6,10000,'available');
+    insert into organization_mercadopago_accounts(organization_id,mp_user_id,access_token,refresh_token,expires_at)
+      values ('${org}', 1, 'tok', 'ref', now() + interval '1 day');
+    select set_config('request.jwt.claim.sub','${admin}',false);`);
+
+  const cart = `'[{"ticket_type_id":"${ticketType}","quantity":2}]'::jsonb`;
+
+  const first = await db.query<{ sale_id: string; already_existed: boolean }>(
+    `select sale_id, already_existed from create_online_sale('${event}', ${cart}, ${buyer("111111")}, '${key}')`
+  );
+  assert.equal(first.rows[0].already_existed, false, "la primera vez es una venta nueva");
+
+  const retry = await db.query<{ sale_id: string; already_existed: boolean; total_minor: string }>(
+    `select sale_id, already_existed, total_minor from create_online_sale('${event}', ${cart}, ${buyer("111111")}, '${key}')`
+  );
+  assert.equal(retry.rows[0].sale_id, first.rows[0].sale_id, "un reintento con la misma clave devuelve la MISMA venta");
+  assert.equal(retry.rows[0].already_existed, true);
+  assert.equal(Number(retry.rows[0].total_minor), 10000);
+  assert.equal(Number(await scalar(`select count(*)::int from sales where event_id='${event}'`)), 1, "no se duplico la venta");
+  assert.equal(Number(await scalar(`select count(*)::int from sale_items where sale_id='${first.rows[0].sale_id}'`)), 1, "tampoco los items");
+
+  // Sin clave (null), sigue funcionando como siempre: cada llamada crea una venta nueva.
+  const noKey1 = await scalar(`select sale_id::text from create_online_sale('${event}', ${cart}, ${buyer("222222")})`);
+  const noKey2 = await scalar(`select sale_id::text from create_online_sale('${event}', ${cart}, ${buyer("333333")})`);
+  assert.notEqual(noKey1, noKey2, "sin clave, cada llamada sigue creando una venta distinta (no rompe el comportamiento existente)");
+
+  // Mismo mecanismo para la reserva de mesa online.
+  const tableKey = "d0d0d0d0-4444-4444-8444-444444444444";
+  const firstTable = await db.query<{ sale_id: string; already_existed: boolean }>(
+    `select sale_id, already_existed from create_online_table_sale('${event}','${table}', ${buyer("444444")}, '${tableKey}')`
+  );
+  assert.equal(firstTable.rows[0].already_existed, false);
+  const retryTable = await db.query<{ sale_id: string; already_existed: boolean }>(
+    `select sale_id, already_existed from create_online_table_sale('${event}','${table}', ${buyer("444444")}, '${tableKey}')`
+  );
+  assert.equal(retryTable.rows[0].sale_id, firstTable.rows[0].sale_id, "misma clave -> misma reserva, no reclama la mesa dos veces");
+  assert.equal(retryTable.rows[0].already_existed, true);
+  assert.equal(await scalar(`select status from bar_tables where id='${table}'`), "reserved", "la mesa sigue reservada una sola vez");
+
+  await db.close();
+});
+
+test("devoluciones: anular una entrada a mano reabre la tanda agotada si vuelve a haber lugar", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "d1d0d0d0-1111-4111-8111-111111111111";
+  const event = "d1d0d0d0-2222-4222-8222-222222222222";
+  const organizerUser = "d1d0d0d0-3333-4333-8333-333333333333";
+  const ticketType = "d1d0d0d0-4444-4444-8444-444444444444";
+
+  await db.exec(`insert into auth.users values ('${organizerUser}','org-devol@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club Devol','club-devol');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${organizerUser}','organizer','active');
+    insert into ticket_types(id,event_id,name,price_minor,capacity,active,status) values ('${ticketType}','${event}','VIP',5000,1,true,'sold_out');`);
+
+  const buyerId = await scalar(`insert into buyers(organization_id,first_name,last_name,dni) values ('${org}','C','omprador','1') returning id::text`);
+  const saleId = await scalar(`insert into sales(organization_id,event_id,buyer_id,status,total_minor,channel) values ('${org}','${event}','${buyerId}','confirmed',5000,'online') returning id::text`);
+  const itemId = await scalar(`insert into sale_items(sale_id,event_id,ticket_type_id,quantity,unit_price_minor) values ('${saleId}','${event}','${ticketType}',1,5000) returning id::text`);
+  const ticketId = await scalar(`insert into tickets(sale_item_id,sale_id,event_id,ticket_type_id,manual_code,status) values ('${itemId}','${saleId}','${event}','${ticketType}','VIPX01','issued') returning id::text`);
+
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false)`);
+  assert.equal(await scalar(`select status from ticket_types where id='${ticketType}'`), "sold_out");
+
+  await db.query(`select * from process_ticket_return('${ticketId}','Se devuelve a mano','no_refund',null)`);
+  assert.equal(await scalar(`select status from ticket_types where id='${ticketType}'`), "available", "vuelve a haber lugar real -> la tanda se reabre para la venta online");
+  assert.equal(await scalar(`select status from tickets where id='${ticketId}'`), "cancelled");
 
   await db.close();
 });

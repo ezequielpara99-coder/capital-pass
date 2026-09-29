@@ -45,9 +45,10 @@ export default function LoginPage() {
         email: email.trim().toLowerCase(), password,
       });
       if (authError || !data.user) {
-        throw new Error(authError?.code === "email_not_confirmed"
-          ? "Confirmá tu email desde el enlace que recibiste por correo."
-          : "Email o contraseña incorrectos.");
+        // Mismo mensaje genérico sin importar el motivo (igual que registro
+        // y recuperar contraseña): decir "confirmá tu email" a diferencia
+        // de "contraseña incorrecta" revela si ese email tiene cuenta.
+        throw new Error("Email o contraseña incorrectos.");
       }
       window.location.replace("/cuenta");
     } catch (err) {
