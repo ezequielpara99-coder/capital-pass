@@ -778,6 +778,11 @@ function Sidebar({
       href: "/panel/cobros",
       active: false,
     },
+    {
+      label: "Guía de uso",
+      href: "/guia",
+      active: false,
+    },
   ];
 
   return (

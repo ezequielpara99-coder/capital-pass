@@ -650,6 +650,13 @@ export default function Home() {
               Suscripción
             </a>
 
+            <Link
+              href="/guia"
+              className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--cp-muted)] transition hover:text-[var(--cp-text)]"
+            >
+              Guía de uso
+            </Link>
+
             <a
               href={whatsappUrl}
               target="_blank"
@@ -736,6 +743,14 @@ export default function Home() {
             >
               Suscripción
             </a>
+
+            <Link
+              href="/guia"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--cp-muted)] transition hover:text-[var(--cp-text)]"
+            >
+              Guía de uso
+            </Link>
 
             <a
               href={whatsappUrl}
@@ -1486,6 +1501,10 @@ export default function Home() {
               <a href="#pricing">
                 Suscripción
               </a>
+
+              <Link href="/guia">
+                Guía de uso
+              </Link>
 
               <Link href="/login">
                 Login

@@ -60,9 +60,22 @@ export async function computeFinanzasSummary(
   }
 
   const allQuotes = (quotesData ?? []) as QuoteRow[];
+  // Comparacion por STRING (no por fecha real) tenia un bug real: created_at
+  // es timestamptz y PostgREST lo devuelve con "T" como separador
+  // ("...T22:10:00+00:00"), pero el limite de "hasta" se armaba con un
+  // ESPACIO ("2026-08-31 23:59:59") -- 'T' (0x54) es mayor que ' ' (0x20),
+  // asi que CUALQUIER hora del ultimo dia del rango quedaba excluida por la
+  // comparacion de strings. Un presupuesto creado el 31 a la noche no
+  // entraba en el cierre de ese mes ni en el del siguiente: desaparecia de
+  // "presupuestado"/"facturado" para siempre. Se compara por timestamp real.
+  const fromMs = from ? new Date(from).getTime() : null;
+  const toMs = to ? new Date(`${to}T23:59:59.999Z`).getTime() : null;
   const quotes =
     from || to
-      ? allQuotes.filter((q) => (!from || q.created_at >= from) && (!to || q.created_at <= `${to} 23:59:59`))
+      ? allQuotes.filter((q) => {
+          const t = new Date(q.created_at).getTime();
+          return (fromMs === null || t >= fromMs) && (toMs === null || t <= toMs);
+        })
       : allQuotes;
 
   const quoteTotal = (quote: QuoteRow) =>

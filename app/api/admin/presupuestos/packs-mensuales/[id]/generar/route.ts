@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../../../../../lib/supabase/admin";
 import { isMissingTable, QUOTE_FIELDS, verifyAdmin } from "../../../../../../../lib/quotes/auth";
+import { normalizeQuoteResponse } from "../../../../../../../lib/quotes/totals";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -40,7 +41,7 @@ export async function POST(_request: NextRequest, context: Context) {
     const packPrice = Number(pack.package_price_minor);
 
     const { data: existing } = await admin.from("quotes").select(QUOTE_FIELDS).eq("monthly_pack_id", id).eq("pack_period", period).is("deleted_at", null).maybeSingle();
-    if (existing) return NextResponse.json({ ok: true, quote: existing, alreadyExisted: true });
+    if (existing) return NextResponse.json({ ok: true, quote: normalizeQuoteResponse(existing), alreadyExisted: true });
 
     const { data: quote, error: insertError } = await admin
       .from("quotes")
@@ -70,13 +71,13 @@ export async function POST(_request: NextRequest, context: Context) {
       // duplicado -- se devuelve la que quedó creada, no un error.
       if (insertError.code === "23505") {
         const { data: raced } = await admin.from("quotes").select(QUOTE_FIELDS).eq("monthly_pack_id", id).eq("pack_period", period).is("deleted_at", null).maybeSingle();
-        if (raced) return NextResponse.json({ ok: true, quote: raced, alreadyExisted: true });
+        if (raced) return NextResponse.json({ ok: true, quote: normalizeQuoteResponse(raced), alreadyExisted: true });
       }
       console.error("GENERAR PACK INSERT:", insertError);
       return NextResponse.json({ error: "No se pudo generar la factura del mes." }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, quote, alreadyExisted: false });
+    return NextResponse.json({ ok: true, quote: normalizeQuoteResponse(quote), alreadyExisted: false });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }

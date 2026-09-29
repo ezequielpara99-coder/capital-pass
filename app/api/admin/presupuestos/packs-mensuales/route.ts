@@ -119,7 +119,15 @@ export async function PATCH(request: NextRequest) {
     if (body.clientEmail !== undefined) updates.client_email = optionalText(body.clientEmail, 200);
     if (body.kind !== undefined) updates.kind = normalizeKind(body.kind);
     if (body.description !== undefined) updates.description = optionalText(body.description, 2000);
-    if (body.packagePrice !== undefined) updates.package_price_minor = normalizeMoney(body.packagePrice);
+    if (body.packagePrice !== undefined) {
+      const price = normalizeMoney(body.packagePrice);
+      // normalizeMoney devuelve 0 en silencio para cualquier valor no
+      // positivo (ej. el campo vacio) -- sin este chequeo, borrar el monto
+      // por error dejaba el pack facturando $0 el mes siguiente sin ningun
+      // aviso, hasta que alguien notara que faltaba ese ingreso.
+      if (price <= 0) return NextResponse.json({ error: "Ingresá el monto mensual." }, { status: 400 });
+      updates.package_price_minor = price;
+    }
     if (body.notes !== undefined) updates.notes = optionalText(body.notes, 2000);
     if (body.active !== undefined) updates.active = Boolean(body.active);
 
