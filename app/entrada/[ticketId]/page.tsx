@@ -124,7 +124,7 @@ export default async function EntradaPage({
     error: saleError,
   } = await admin
     .from("sales")
-    .select("buyer_id")
+    .select("buyer_id, table_id")
     .eq("id", ticket.sale_id)
     .maybeSingle();
 
@@ -196,19 +196,36 @@ export default async function EntradaPage({
       : null;
 
   // =====================================================
-  // 5. TIPO DE ENTRADA
+  // 5. TIPO DE ENTRADA (o, si es una mesa, el nombre de la mesa: una
+  //    entrada de mesa no tiene ticket_type_id, no pertenece a ninguna
+  //    tanda)
   // =====================================================
 
-  const {
-    data: ticketType,
-    error: ticketTypeError,
-  } = await admin
-    .from("ticket_types")
-    .select("name")
-    .eq("id", ticket.ticket_type_id)
-    .maybeSingle();
+  let ticketTypeName: string;
 
-  if (ticketTypeError || !ticketType) {
+  if (ticket.ticket_type_id) {
+    const { data: ticketType, error: ticketTypeError } = await admin
+      .from("ticket_types")
+      .select("name")
+      .eq("id", ticket.ticket_type_id)
+      .maybeSingle();
+
+    if (ticketTypeError || !ticketType) {
+      notFound();
+    }
+    ticketTypeName = ticketType.name;
+  } else if (sale.table_id) {
+    const { data: table, error: tableError } = await admin
+      .from("bar_tables")
+      .select("name")
+      .eq("id", sale.table_id)
+      .maybeSingle();
+
+    if (tableError || !table) {
+      notFound();
+    }
+    ticketTypeName = `Mesa: ${table.name}`;
+  } else {
     notFound();
   }
 
@@ -264,7 +281,7 @@ export default async function EntradaPage({
             eventMeta={eventMeta}
             buyerName={`${buyer.first_name} ${buyer.last_name}`.trim()}
             dni={formatDni(buyer.dni)}
-            ticketTypeName={ticketType.name}
+            ticketTypeName={ticketTypeName}
             manualCode={ticket.manual_code}
             number={formatTicketNumber(ticket.display_number)}
             status={status}

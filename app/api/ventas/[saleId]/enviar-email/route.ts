@@ -32,7 +32,7 @@ export async function POST(
 
     const { data: sale } = await admin
       .from("sales")
-      .select("id, event_id, buyer_id, seller_member_id, organization_id, channel, status")
+      .select("id, event_id, buyer_id, seller_member_id, organization_id, channel, status, table_id")
       .eq("id", saleId)
       .maybeSingle();
 
@@ -110,13 +110,17 @@ export async function POST(
       const { data: types } = await admin.from("ticket_types").select("id, name").in("id", typeIds);
       typeNames = new Map((types ?? []).map((t) => [t.id, t.name]));
     }
+    // Ticket de mesa: sin ticket_type_id, se etiqueta con el nombre de la mesa.
+    const tableName = sale.table_id
+      ? (await admin.from("bar_tables").select("name").eq("id", sale.table_id).maybeSingle()).data?.name ?? null
+      : null;
 
     const baseUrl = getAppBaseUrl();
 
     const ticketsForEmail = await Promise.all(
       tickets.map(async (ticket) => ({
         ticketId: ticket.id,
-        ticketType: typeNames.get(ticket.ticket_type_id) ?? "Entrada",
+        ticketType: ticket.ticket_type_id ? typeNames.get(ticket.ticket_type_id) ?? "Entrada" : tableName ? `Mesa: ${tableName}` : "Mesa",
         manualCode: ticket.manual_code,
         qrPngBase64: (await ticketQrPngBuffer(ticket.id)).toString("base64"),
         publicUrl: `${baseUrl}${createTicketPublicPath(ticket.id)}`,

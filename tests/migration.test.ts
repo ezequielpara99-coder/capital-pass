@@ -93,6 +93,7 @@ const bloqueaCupoMigration = readFileSync(new URL("../supabase/migrations/202609
 const endurecePresenciaPerfilMigration = readFileSync(new URL("../supabase/migrations/20261000_endurece_presencia_y_perfil.sql", import.meta.url), "utf8");
 const protegePresenciaMigration = readFileSync(new URL("../supabase/migrations/20261001_protege_presencia_de_organizadores.sql", import.meta.url), "utf8");
 const arreglaCarreraCreateSaleMigration = readFileSync(new URL("../supabase/migrations/20260999_arregla_carrera_idempotencia_create_sale.sql", import.meta.url), "utf8");
+const qrDeMesaMigration = readFileSync(new URL("../supabase/migrations/20261002_qr_de_mesa.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -234,6 +235,7 @@ async function database() {
   await db.exec(arreglaCarreraCreateSaleMigration);
   await db.exec(endurecePresenciaPerfilMigration);
   await db.exec(protegePresenciaMigration);
+  await db.exec(qrDeMesaMigration);
   return db;
 }
 
@@ -2274,6 +2276,7 @@ test("mesas online: la mesa se reserva al pagar, se libera si no se paga o se re
     insert into platform_admins(user_id) values ('${admin}');
     insert into organizations(id,name,slug) values ('${org}','Club Mesas','club-mesas');
     insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${admin}','organizer','active');
     select set_config('request.jwt.claim.sub','${admin}',false);`);
 
   const mkTable = (name: string, price: string) =>
@@ -2300,16 +2303,25 @@ test("mesas online: la mesa se reserva al pagar, se libera si no se paga o se re
   assert.equal(await scalar(`select status from sales where id='${s1.sale_id}'`), "pending_approval");
   await assert.rejects(() => create(t1, "444444"), /ya no esta disponible/, "nadie mas puede tomar la misma mesa");
 
-  // Pago aprobado: la venta se confirma, la mesa sigue reservada y no se emite ninguna entrada.
+  // Pago aprobado: la venta se confirma, la mesa sigue reservada, y ahora
+  // se emite un ticket propio para la mesa (QR escaneable en la puerta) sin
+  // ticket_type_id (no pertenece a ninguna tanda).
   await db.query(`select confirm_online_sale('${s1.sale_id}', 'approved')`);
   assert.equal(await scalar(`select status from sales where id='${s1.sale_id}'`), "confirmed");
   assert.equal(await status(t1), "reserved");
-  assert.equal(Number(await scalar(`select count(*)::int from tickets where sale_id='${s1.sale_id}'`)), 0);
+  const t1TicketRow = (await db.query<{ id: string; ticket_type_id: string | null; manual_code: string; status: string }>(
+    `select id::text, ticket_type_id, manual_code, status from tickets where sale_id='${s1.sale_id}'`
+  )).rows;
+  assert.equal(t1TicketRow.length, 1, "la mesa tiene exactamente un ticket");
+  assert.equal(t1TicketRow[0].ticket_type_id, null, "no pertenece a ninguna tanda");
+  assert.equal(t1TicketRow[0].status, "issued");
+  const t1TicketId = t1TicketRow[0].id;
 
-  // Reembolso posterior: se anula la venta y la mesa se libera.
+  // Reembolso posterior: se anula la venta, se cancela el ticket de la mesa, y la mesa se libera.
   await db.query(`select confirm_online_sale('${s1.sale_id}', 'refunded')`);
   assert.equal(await scalar(`select status from sales where id='${s1.sale_id}'`), "refunded");
   assert.equal(await status(t1), "available");
+  assert.equal(await scalar(`select status from tickets where id='${t1TicketId}'`), "cancelled");
 
   // Carrito abandonado: el cron de 30 minutos cancela la venta y libera la mesa.
   const s2 = (await create(t2, "555555")).rows[0];
@@ -2321,6 +2333,45 @@ test("mesas online: la mesa se reserva al pagar, se libera si no se paga o se re
   await db.query(`select confirm_online_sale('${s2.sale_id}', 'approved')`);
   assert.equal(await scalar(`select status from sales where id='${s2.sale_id}'`), "confirmed");
   assert.equal(await status(t2), "reserved");
+
+  // El ticket de la mesa se puede validar en la puerta igual que cualquier
+  // entrada (mismo validate_ticket_manual, ticket_types es LEFT JOIN ahora):
+  // se identifica por el nombre de la mesa, no por una tanda. El fixture de
+  // pglite no simula el default real de manual_code (vive en la base fuera
+  // de las migraciones versionadas), asi que se fija a mano como ya hacen
+  // otros tests de este archivo (ej. 'VIPCODE2' mas arriba).
+  const t2ManualCode = "MESA2CODE";
+  await db.exec(`update tickets set manual_code = '${t2ManualCode}' where sale_id='${s2.sale_id}'`);
+  const t2Validation = (await db.query<{ result: string; ticket_type: string }>(
+    `select result, ticket_type from validate_ticket_manual('${event}', '${t2ManualCode}')`
+  )).rows[0];
+  assert.equal(t2Validation.result, "valid");
+  assert.match(t2Validation.ticket_type, /Mesa 2/, "identifica la mesa, no una tanda");
+  const t2SecondScan = (await db.query<{ result: string }>(
+    `select result from validate_ticket_manual('${event}', '${t2ManualCode}')`
+  )).rows[0];
+  assert.equal(t2SecondScan.result, "already_used", "no se puede volver a escanear la misma mesa");
+
+  // Una mesa ya usada no se puede devolver.
+  const t2TicketId = await scalar(`select id::text from tickets where sale_id='${s2.sale_id}'`);
+  await assert.rejects(
+    () => db.query(`select process_ticket_return('${t2TicketId}', 'motivo', 'no_refund')`),
+    /ya fue utilizada/
+  );
+
+  // Devolver el ticket de una mesa TODAVIA sin usar: usa el total de la
+  // venta como precio original (no tiene sale_item_id) y libera la mesa,
+  // igual que cancelar la venta completa.
+  const t5 = await mkTable("Mesa 5", "4500");
+  const s5 = (await create(t5, "999911")).rows[0];
+  await db.query(`select confirm_online_sale('${s5.sale_id}', 'approved')`);
+  const t5TicketId = await scalar(`select id::text from tickets where sale_id='${s5.sale_id}'`);
+  const t5Return = (await db.query<{ refund_amount_minor: string }>(
+    `select refund_amount_minor from process_ticket_return('${t5TicketId}', 'no puede venir', 'refunded')`
+  )).rows[0];
+  assert.equal(Number(t5Return.refund_amount_minor), 4500, "el reintegro sale del total de la venta de la mesa");
+  assert.equal(await scalar(`select status from tickets where id='${t5TicketId}'`), "cancelled");
+  assert.equal(await status(t5), "available", "devolver el ticket de la mesa la libera");
 
   // Si el pago no pudo iniciarse, cp_cancel_online_sale cancela la venta pendiente y libera la mesa al instante.
   const t4 = await mkTable("Mesa 4", "3500");
@@ -2343,6 +2394,82 @@ test("mesas online: la mesa se reserva al pagar, se libera si no se paga o se re
   assert.equal(await scalar(`select status from sales where id='${s3.sale_id}'`), "cancelled", "la mesa ya era de otro comprador");
   assert.equal(await status(t3), "reserved", "la mesa sigue reservada para quien la tomo");
   assert.equal(await scalar(`select status from sales where id='${s4.sale_id}'`), "pending_approval");
+
+  await db.close();
+});
+
+test("confirm_online_sale: rechaza confirmar si el evento se cancelo o la tanda se pauso/desactivo mientras el pago estaba pendiente", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const admin = "c1c1c1c1-1111-4111-8111-111111111111";
+  const org = "c1c1c1c1-2222-4222-8222-222222222222";
+  const event = "c1c1c1c1-3333-4333-8333-333333333333";
+  const ticketTypeA = "c1c1c1c1-4444-4444-8444-444444444444";
+  const ticketTypeB = "c1c1c1c1-5555-4555-8555-555555555555";
+  const cart = (typeId: string, qty: number) => `'[{"ticket_type_id":"${typeId}","quantity":${qty}}]'::jsonb`;
+  const buyer = (n: string) => `'Comprador','${n}','30${n}','3462${n}',null`;
+
+  await db.exec(`insert into auth.users values ('${admin}','admin-cancela@example.test',now(),'{}');
+    insert into platform_admins(user_id) values ('${admin}');
+    insert into organizations(id,name,slug) values ('${org}','Club Cancela','club-cancela');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into ticket_types(id,event_id,name,price_minor,capacity,active,status)
+      values ('${ticketTypeA}','${event}','General A',5000,10,true,'available'),
+             ('${ticketTypeB}','${event}','General B',5000,10,true,'available');
+    insert into organization_mercadopago_accounts(organization_id,mp_user_id,access_token,refresh_token,expires_at)
+      values ('${org}', 888, 'tok', 'ref', now() + interval '1 day');
+    select set_config('request.jwt.claim.sub','${admin}',false);`);
+
+  // El evento se cancela DESPUES de armar el carrito, y el pago aprobado
+  // (ej. efectivo tipo Pago Facil) llega recien despues -- antes,
+  // confirm_online_sale solo revisaba cupo y emitia la entrada igual.
+  const saleA = await scalar(`select sale_id::text from create_online_sale('${event}', ${cart(ticketTypeA, 1)}, ${buyer("111111")})`);
+  await db.exec(`update events set status='cancelled' where id='${event}'`);
+  await db.query(`select confirm_online_sale('${saleA}', 'approved')`);
+  assert.equal(await scalar(`select status from sales where id='${saleA}'`), "cancelled", "no confirma una venta de un evento ya cancelado");
+  assert.equal(Number(await scalar(`select count(*)::int from tickets where sale_id='${saleA}'`)), 0, "no emite entradas");
+  await db.exec(`update events set status='active' where id='${event}'`);
+
+  // La tanda se pausa despues de armar el carrito.
+  const saleB = await scalar(`select sale_id::text from create_online_sale('${event}', ${cart(ticketTypeB, 1)}, ${buyer("222222")})`);
+  await db.exec(`update ticket_types set status='paused' where id='${ticketTypeB}'`);
+  await db.query(`select confirm_online_sale('${saleB}', 'approved')`);
+  assert.equal(await scalar(`select status from sales where id='${saleB}'`), "cancelled", "no confirma si la tanda se pauso mientras el pago estaba pendiente");
+  assert.equal(Number(await scalar(`select count(*)::int from tickets where sale_id='${saleB}'`)), 0);
+
+  // La tanda se desactiva (active=false) despues de armar el carrito.
+  await db.exec(`update ticket_types set status='available', active=true where id='${ticketTypeB}'`);
+  const saleC = await scalar(`select sale_id::text from create_online_sale('${event}', ${cart(ticketTypeB, 1)}, ${buyer("333333")})`);
+  await db.exec(`update ticket_types set active=false where id='${ticketTypeB}'`);
+  await db.query(`select confirm_online_sale('${saleC}', 'approved')`);
+  assert.equal(await scalar(`select status from sales where id='${saleC}'`), "cancelled", "no confirma si la tanda se desactivo mientras el pago estaba pendiente");
+
+  // Camino normal (nada cambio mientras tanto): sigue confirmando y emitiendo la entrada.
+  await db.exec(`update ticket_types set active=true where id='${ticketTypeB}'`);
+  const saleD = await scalar(`select sale_id::text from create_online_sale('${event}', ${cart(ticketTypeA, 1)}, ${buyer("444444")})`);
+  await db.query(`select confirm_online_sale('${saleD}', 'approved')`);
+  assert.equal(await scalar(`select status from sales where id='${saleD}'`), "confirmed");
+  assert.equal(Number(await scalar(`select count(*)::int from tickets where sale_id='${saleD}' and status='issued'`)), 1);
+
+  await db.close();
+});
+
+test("ticket_types: el precio no puede quedar negativo (0 si se permite, gratis)", async () => {
+  const db = await database();
+  const org = "c2c2c2c2-1111-4111-8111-111111111111";
+  const event = "c2c2c2c2-2222-4222-8222-222222222222";
+
+  await db.exec(`insert into organizations(id,name,slug) values ('${org}','Club Precio','club-precio');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');`);
+
+  await assert.rejects(
+    () => db.exec(`insert into ticket_types(event_id,name,price_minor,capacity) values ('${event}','Precio malo',-100,10)`),
+    /ticket_types_price_non_negative|violates check constraint/,
+    "un precio negativo debe rechazarse a nivel de base, no solo del lado del cliente"
+  );
+
+  // Entrada gratis (0) sigue permitida a proposito.
+  await db.exec(`insert into ticket_types(event_id,name,price_minor,capacity) values ('${event}','Gratis',0,10)`);
 
   await db.close();
 });

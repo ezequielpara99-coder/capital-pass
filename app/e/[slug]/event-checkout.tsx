@@ -416,6 +416,7 @@ export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs, 
 }
 
 type SaleStatus = "checking" | "pending_approval" | "confirmed" | "cancelled" | "refunded" | "unknown";
+type ConfirmedTicket = { ticketId: string; manualCode: string | null; publicUrl: string };
 
 // Pantalla de vuelta de Mercado Pago. El webhook normalmente confirma la
 // venta en segundos, pero si esa notificacion puntual se pierde o llega
@@ -426,6 +427,7 @@ type SaleStatus = "checking" | "pending_approval" | "confirmed" | "cancelled" | 
 function ReturningSaleStatus({ slug, saleId, isTable = false }: { slug: string; saleId: string; isTable?: boolean }) {
   const [status, setStatus] = useState<SaleStatus>("checking");
   const [checking, setChecking] = useState(false);
+  const [tickets, setTickets] = useState<ConfirmedTicket[]>([]);
 
   async function verify() {
     setChecking(true);
@@ -437,6 +439,7 @@ function ReturningSaleStatus({ slug, saleId, isTable = false }: { slug: string; 
       });
       const result = await response.json();
       setStatus(response.ok && result.status ? (result.status as SaleStatus) : "unknown");
+      setTickets(Array.isArray(result.tickets) ? result.tickets : []);
     } catch {
       setStatus("unknown");
     } finally {
@@ -456,10 +459,39 @@ function ReturningSaleStatus({ slug, saleId, isTable = false }: { slug: string; 
         <p className="text-lg font-bold text-emerald-200">¡Pago confirmado!</p>
         <p className="mt-2 text-white/60">
           {isTable
-            ? "Tu mesa quedó reservada a tu nombre. Presentá tu DNI en la puerta y el equipo te lleva a tu mesa."
+            ? "Tu mesa quedó reservada a tu nombre. Además de tu DNI, tenés un código QR para presentar en la puerta."
             : "Tu entrada te va a llegar a tu WhatsApp o email en unos instantes."}{" "}
           Número de referencia: <span className="font-mono text-white/80">{saleId}</span>.
         </p>
+
+        {tickets.length > 0 && (
+          <div className="mt-4 space-y-3">
+            {tickets.map((ticket) => (
+              <div key={ticket.ticketId} className="rounded-2xl border border-emerald-300/20 bg-black/20 p-4">
+                {ticket.manualCode && <p className="font-mono text-xs text-emerald-100/70">Código: {ticket.manualCode}</p>}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <a
+                    href={ticket.publicUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-10 items-center rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-4 text-xs font-bold text-emerald-200 hover:bg-emerald-400/20"
+                  >
+                    Ver {isTable ? "el QR de la mesa" : "mi entrada"}
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      window.open(`https://wa.me/?text=${encodeURIComponent(`Mi ${isTable ? "mesa" : "entrada"} para el evento: ${ticket.publicUrl}`)}`, "_blank", "noopener,noreferrer")
+                    }
+                    className="inline-flex h-10 items-center rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-4 text-xs font-bold text-emerald-200 hover:bg-emerald-400/20"
+                  >
+                    Enviar por WhatsApp
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }

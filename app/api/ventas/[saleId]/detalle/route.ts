@@ -88,7 +88,8 @@ export async function GET(
         total_minor,
         currency,
         confirmed_at,
-        created_at
+        created_at,
+        table_id
       `)
       .eq(
         "id",
@@ -376,6 +377,19 @@ export async function GET(
         )
       );
 
+    // Ticket de mesa: sin ticket_type_id (no pertenece a ninguna tanda), se
+    // etiqueta con el nombre de la mesa y el precio sale del total de la
+    // venta (no tiene sale_item que lo guarde).
+    let tableName: string | null = null;
+    if (sale.table_id) {
+      const { data: table } = await admin
+        .from("bar_tables")
+        .select("name")
+        .eq("id", sale.table_id)
+        .maybeSingle();
+      tableName = table?.name ?? null;
+    }
+
     // ========================================================
     // ITEM MAP
     // ========================================================
@@ -568,17 +582,16 @@ export async function GET(
               ticket.ticket_type_id,
 
             ticketType:
-              typeMap.get(
-                ticket.ticket_type_id
-              ) ??
-              "Entrada",
+              ticket.ticket_type_id
+                ? typeMap.get(ticket.ticket_type_id) ?? "Entrada"
+                : tableName
+                  ? `Mesa: ${tableName}`
+                  : "Mesa",
 
             unitPriceMinor:
-              Number(
-                saleItem
-                  ?.unit_price_minor ??
-                  0
-              ),
+              ticket.sale_item_id
+                ? Number(saleItem?.unit_price_minor ?? 0)
+                : Number(sale.total_minor ?? 0),
 
             issuedAt:
               ticket.issued_at,

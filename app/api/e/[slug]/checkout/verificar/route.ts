@@ -3,6 +3,8 @@ import { createAdminClient } from "../../../../../../lib/supabase/admin";
 import { reconcileOnlineSale } from "../../../../../../lib/billing/server";
 import { validResourceId } from "../../../../../../lib/billing/rules";
 import { checkRateLimit, getClientIp } from "../../../../../../lib/http/rate-limit";
+import { createTicketPublicPath } from "../../../../../../lib/tickets/signature";
+import { getAppBaseUrl } from "../../../../../../lib/mercadopago/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,7 +66,28 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     }
 
     const { data: refreshed } = await admin.from("sales").select("status").eq("id", saleId).maybeSingle();
-    return NextResponse.json({ ok: true, status: refreshed?.status ?? sale.status }, { headers: { "Cache-Control": "no-store" } });
+    const status = refreshed?.status ?? sale.status;
+
+    // Confirmada: se devuelven los tickets (entradas o mesa) para que el
+    // comprador los vea/comparta ahi mismo, sin depender solo del mail
+    // (email es opcional en el checkout, puede no haber nada que mandarle).
+    let tickets: { ticketId: string; manualCode: string | null; publicUrl: string }[] = [];
+    if (status === "confirmed") {
+      const { data: rows } = await admin
+        .from("tickets")
+        .select("id, manual_code")
+        .eq("sale_id", saleId)
+        .eq("status", "issued")
+        .order("display_number", { ascending: true });
+      const baseUrl = getAppBaseUrl();
+      tickets = (rows ?? []).map((t) => ({
+        ticketId: t.id as string,
+        manualCode: t.manual_code as string | null,
+        publicUrl: `${baseUrl}${createTicketPublicPath(t.id as string)}`,
+      }));
+    }
+
+    return NextResponse.json({ ok: true, status, tickets }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("VERIFICAR VENTA:", error);
     return NextResponse.json({ error: "No pudimos verificar el pago. Intentá de nuevo en unos instantes." }, { status: 503 });

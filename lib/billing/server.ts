@@ -194,18 +194,21 @@ async function applyUpgradeCharge(payment: ProviderPayment, chargeId: string) {
 // (pago aprobado), se manda un mail con el/los QR adjuntos si el
 // comprador cargo email (es opcional en el checkout, asi que puede no
 // haber nada que mandar). Best-effort: nunca debe poder revertir ni
-// bloquear la confirmacion de una venta ya cobrada.
-async function sendOnlineSaleTicketEmail(saleId: string) {
+// bloquear la confirmacion de una venta ya cobrada. Tambien vale para una
+// mesa (confirm_online_sale le crea un ticket propio, sin ticket_type_id
+// -- se etiqueta con el nombre de la mesa en vez de una tanda) y de paso
+// avisa al organizador por push cuando es una venta de mesa.
+async function sendOnlineSaleTicketEmail(saleId: string, opts?: { organizationId: string; tableId: string }) {
   try {
     const admin = createAdminClient();
 
     // Reclamo atomico ANTES de armar/mandar nada: el webhook real de
     // Mercado Pago y el "Verificar mi pago" del comprador (o un reintento
     // de cualquiera de los dos) pueden llegar casi al mismo tiempo -- solo
-    // el que gane este UPDATE...WHERE...IS NULL manda el mail. Reemplaza
-    // el chequeo wasAlreadyConfirmed de applySalePayment, que leia el
-    // estado ANTES del RPC y por eso podia dejar pasar a dos llamadas
-    // concurrentes.
+    // el que gane este UPDATE...WHERE...IS NULL manda el mail (y, si es una
+    // mesa, tambien el aviso al organizador -- van juntos en el mismo
+    // reclamo para no mandar el aviso dos veces si esta funcion se llama
+    // otra vez en simultaneo).
     const claimed = await admin.from("sales")
       .update({ ticket_email_sent_at: new Date().toISOString() })
       .eq("id", saleId)
@@ -213,6 +216,17 @@ async function sendOnlineSaleTicketEmail(saleId: string) {
       .select("id, event_id, buyer_id");
     if (!claimed.data || claimed.data.length === 0) return;
     const sale = claimed.data[0];
+
+    let tableName: string | null = null;
+    if (opts) {
+      const { data: table } = await admin.from("bar_tables").select("name").eq("id", opts.tableId).maybeSingle();
+      tableName = table?.name ?? null;
+      await sendPushToOrganizers(opts.organizationId, "bar_sale", {
+        title: "Mesa vendida online",
+        body: `${tableName ?? "Una mesa"} fue reservada y pagada por Mercado Pago.`,
+        url: "/panel/stock",
+      });
+    }
 
     const { data: buyer } = await admin.from("buyers").select("first_name, last_name, email").eq("id", sale.buyer_id).maybeSingle();
     const email = buyer?.email?.trim();
@@ -239,7 +253,7 @@ async function sendOnlineSaleTicketEmail(saleId: string) {
     const ticketsForEmail = await Promise.all(
       tickets.map(async (ticket) => ({
         ticketId: ticket.id,
-        ticketType: typeNames.get(ticket.ticket_type_id) ?? "Entrada",
+        ticketType: ticket.ticket_type_id ? typeNames.get(ticket.ticket_type_id) ?? "Entrada" : tableName ? `Mesa: ${tableName}` : "Mesa",
         manualCode: ticket.manual_code,
         qrPngBase64: (await ticketQrPngBuffer(ticket.id)).toString("base64"),
         publicUrl: `${baseUrl}${createTicketPublicPath(ticket.id)}`,
@@ -257,32 +271,6 @@ async function sendOnlineSaleTicketEmail(saleId: string) {
     }
   } catch (error) {
     console.error("BILLING: fallo inesperado mandando la entrada por email.", error);
-  }
-}
-
-// Aviso al organizador cuando se vende una mesa online. Se reclama de forma
-// atomica en sales.ticket_email_sent_at (la misma marca que evita mandar dos
-// veces el mail de la entrada), asi el webhook y el "verificar mi pago" del
-// comprador, que pueden llegar juntos, avisan una sola vez. Best-effort: nunca
-// puede revertir una venta ya cobrada.
-async function notifyTableSale(saleId: string, organizationId: string, tableId: string, previousStatus: string) {
-  try {
-    if (previousStatus === "confirmed") return; // reintento del mismo pago
-    const admin = createAdminClient();
-    const claimed = await admin.from("sales")
-      .update({ ticket_email_sent_at: new Date().toISOString() })
-      .eq("id", saleId).eq("status", "confirmed").is("ticket_email_sent_at", null)
-      .select("id");
-    if (!claimed.data || claimed.data.length === 0) return;
-
-    const { data: table } = await admin.from("bar_tables").select("name").eq("id", tableId).maybeSingle();
-    await sendPushToOrganizers(organizationId, "bar_sale", {
-      title: "Mesa vendida online",
-      body: `${table?.name ?? "Una mesa"} fue reservada y pagada por Mercado Pago.`,
-      url: "/panel/stock",
-    });
-  } catch (error) {
-    console.error("BILLING: no se pudo avisar la venta de mesa.", error instanceof Error ? error.message : error);
   }
 }
 
@@ -316,7 +304,7 @@ export async function applySalePayment(payment: ProviderPayment, saleId: string)
   if (result.error) throw new Error("No se pudo confirmar la venta.");
   if (verified.status === "approved") {
     if (sale.table_id) {
-      await notifyTableSale(saleId, sale.organization_id as string, sale.table_id as string, sale.status as string);
+      await sendOnlineSaleTicketEmail(saleId, { organizationId: sale.organization_id as string, tableId: sale.table_id as string });
     } else {
       await sendOnlineSaleTicketEmail(saleId);
     }
