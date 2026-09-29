@@ -204,7 +204,12 @@ export default function PerfilClient({
       if (!user) throw new Error("No hay una sesión válida.");
       const { error: updateError } = await supabase
         .from("profiles")
-        .update({ first_name: first.trim(), last_name: last.trim(), phone: phoneValue.trim() || null, updated_at: new Date().toISOString() })
+        .update({
+          first_name: first.trim().slice(0, 200),
+          last_name: last.trim().slice(0, 200),
+          phone: phoneValue.trim().slice(0, 60) || null,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", user.id);
       if (updateError) throw new Error("No se pudo guardar el perfil.");
       notify("Perfil guardado.");

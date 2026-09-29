@@ -14,7 +14,7 @@ const TABLES = [
   { table: "quote_catalog", type: "Catálogo", select: "id, description, deleted_at", label: (r: Record<string, unknown>) => String(r.description) },
   { table: "quote_packages", type: "Paquete", select: "id, name, deleted_at", label: (r: Record<string, unknown>) => String(r.name) },
   { table: "expenses", type: "Gasto", select: "id, description, amount_minor, deleted_at", label: (r: Record<string, unknown>) => `${r.description} · $ ${Number(r.amount_minor).toLocaleString("es-AR")}` },
-  { table: "quote_payments", type: "Cobro", select: "id, amount_minor, paid_at, deleted_at", label: (r: Record<string, unknown>) => `Cobro $ ${Number(r.amount_minor).toLocaleString("es-AR")} · ${r.paid_at}` },
+  { table: "quote_payments", type: "Cobro", select: "id, amount_minor, paid_at, quote_id, deleted_at", label: (r: Record<string, unknown>) => `Cobro $ ${Number(r.amount_minor).toLocaleString("es-AR")} · ${r.paid_at}${r.quoteLabel ? ` · ${r.quoteLabel}` : ""}` },
   { table: "monthly_packs", type: "Pack mensual", select: "id, client_name, deleted_at", label: (r: Record<string, unknown>) => String(r.client_name) },
   { table: "premium_members", type: "Socio premium", select: "id, first_name, last_name, member_code, deleted_at", label: (r: Record<string, unknown>) => `${r.first_name} ${r.last_name} · ${r.member_code}` },
   { table: "blacklist_entries", type: "Lista negra", select: "id, dni, full_name, deleted_at", label: (r: Record<string, unknown>) => `${r.full_name || "Sin nombre"} · DNI ${r.dni}` },
@@ -36,23 +36,29 @@ export async function GET() {
     const admin = createAdminClient();
     const since = new Date(Date.now() - DAYS * 24 * 60 * 60 * 1000).toISOString();
 
+    const LIMIT = 50;
     const results = await Promise.all(
       TABLES.map(async (t) => {
-        const { data, error } = await admin.from(t.table).select(t.select).not("deleted_at", "is", null).gte("deleted_at", since).order("deleted_at", { ascending: false }).limit(50);
+        const [{ data, error }, { count }] = await Promise.all([
+          admin.from(t.table).select(t.select).not("deleted_at", "is", null).gte("deleted_at", since).order("deleted_at", { ascending: false }).limit(LIMIT),
+          admin.from(t.table).select("id", { count: "exact", head: true }).not("deleted_at", "is", null).gte("deleted_at", since),
+        ]);
         if (error) {
-          if (isMissingTable(error)) return { missing: true as const, items: [] };
+          if (isMissingTable(error)) return { missing: true as const, truncated: 0, rows: [], type: t.type, tableName: t.table, labelFn: t.label };
           console.error(`PAPELERA ${t.table}:`, error);
-          return { missing: false as const, items: [] };
+          return { missing: false as const, truncated: 0, rows: [], type: t.type, tableName: t.table, labelFn: t.label };
         }
+        const rows = (data ?? []) as unknown as Record<string, unknown>[];
         return {
           missing: false as const,
-          items: ((data ?? []) as unknown as Record<string, unknown>[]).map((row) => ({
-            table: t.table,
-            type: t.type,
-            id: String(row.id),
-            label: t.label(row),
-            deletedAt: String(row.deleted_at),
-          })),
+          // Si hay mas de las 50 mostradas, se avisa en vez de esconderlas
+          // sin ningun rastro -- antes un borrado masivo de una tabla dejaba
+          // el resto invisible e irrecuperable desde la papelera.
+          truncated: Math.max(0, (count ?? rows.length) - rows.length),
+          rows,
+          type: t.type,
+          tableName: t.table,
+          labelFn: t.label,
         };
       })
     );
@@ -61,8 +67,41 @@ export async function GET() {
       return NextResponse.json({ error: "Falta aplicar la actualización de la base de datos (papelera)." }, { status: 503 });
     }
 
-    const items = results.flatMap((r) => r.items).sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
-    return NextResponse.json({ ok: true, items });
+    // "Cobro" no mostraba a que presupuesto pertenecia -- si el presupuesto
+    // tambien esta borrado, quedaba totalmente intrazable desde la papelera.
+    const paymentQuoteIds = [
+      ...new Set(
+        results
+          .filter((r): r is Extract<typeof r, { missing: false }> => !r.missing && r.tableName === "quote_payments")
+          .flatMap((r) => r.rows.map((row) => row.quote_id).filter(Boolean) as string[])
+      ),
+    ];
+    const quoteLabelById = new Map<string, string>();
+    if (paymentQuoteIds.length > 0) {
+      const { data: quotesForPayments } = await admin.from("quotes").select("id, number, client_name").in("id", paymentQuoteIds);
+      for (const q of quotesForPayments ?? []) {
+        quoteLabelById.set(q.id as string, `${q.client_name} · ${quoteCode(Number(q.number))}`);
+      }
+    }
+
+    const items = results
+      .filter((r): r is Extract<typeof r, { missing: false }> => !r.missing)
+      .flatMap((r) =>
+        r.rows.map((row) => ({
+          table: r.tableName,
+          type: r.type,
+          id: String(row.id),
+          label: r.labelFn({ ...row, quoteLabel: row.quote_id ? quoteLabelById.get(row.quote_id as string) : undefined }),
+          deletedAt: String(row.deleted_at),
+        }))
+      )
+      .sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
+
+    const truncatedByType = Object.fromEntries(
+      results.filter((r): r is Extract<typeof r, { missing: false }> => !r.missing && r.truncated > 0).map((r) => [r.type, r.truncated])
+    );
+
+    return NextResponse.json({ ok: true, items, truncatedByType });
   } catch (error) {
     console.error("PAPELERA GET:", error);
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });

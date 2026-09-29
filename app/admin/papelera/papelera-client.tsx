@@ -11,6 +11,7 @@ function formatDate(value: string) {
 
 export default function PapeleraClient() {
   const [items, setItems] = useState<Item[] | null>(null);
+  const [truncatedByType, setTruncatedByType] = useState<Record<string, number>>({});
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -20,6 +21,7 @@ export default function PapeleraClient() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo cargar.");
       setItems(result.items);
+      setTruncatedByType(result.truncatedByType ?? {});
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo cargar.");
     }
@@ -63,6 +65,16 @@ export default function PapeleraClient() {
         </header>
 
         {error && <div className="mt-6 border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>}
+
+        {Object.keys(truncatedByType).length > 0 && (
+          <div className="mt-6 border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
+            Se muestran solo los 50 borrados más recientes de cada tipo. Hay más sin mostrar en:{" "}
+            {Object.entries(truncatedByType)
+              .map(([type, count]) => `${type} (${count} más)`)
+              .join(", ")}
+            . Restaurá los que ves para que aparezcan los siguientes, o pedime que te arme un listado completo.
+          </div>
+        )}
 
         <div className="mt-6 space-y-2">
           {items === null && !error && <div className="border border-dashed border-white/[0.10] p-8 text-center text-sm text-white/35">Cargando…</div>}

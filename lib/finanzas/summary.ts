@@ -104,13 +104,16 @@ export async function computeFinanzasSummary(
 
   // Un pago solo se pudo haber registrado mientras el presupuesto ESTABA en
   // a_pagar/aceptado (esa es la regla del propio endpoint de pagos) -- asi
-  // que se cuenta siempre, sin volver a filtrar por el status ACTUAL. Antes
-  // se descartaba si el presupuesto ya no calificaba (cambio de estado, o
-  // se borro), y esa plata ya cobrada desaparecia en silencio de "cobrado"
-  // y "resultado" sin que nadie lo note -- el dinero seguia estando, el
-  // informe mentia.
+  // que se cuenta sin volver a filtrar por el status ACTUAL (cambiar el
+  // estado no lo hace desaparecer). Pero SI se descarta si el presupuesto
+  // en si ya no existe (se borro): borrar un presupuesto no arrastra sus
+  // pagos, y sin este chequeo un pago restaurado desde la papelera mientras
+  // el presupuesto sigue borrado inflaba "cobrado"/"resultado" para siempre,
+  // sin ningun rastro visible de a que presupuesto pertenecia.
+  const activeQuoteIds = new Set(allQuotes.map((q) => q.id));
   const cobradoPorQuote = new Map<string, number>();
   for (const payment of paymentsData ?? []) {
+    if (!activeQuoteIds.has(payment.quote_id)) continue;
     cobradoPorQuote.set(payment.quote_id, (cobradoPorQuote.get(payment.quote_id) ?? 0) + Number(payment.amount_minor));
   }
   const cobrado = [...cobradoPorQuote.values()].reduce((sum, value) => sum + value, 0);

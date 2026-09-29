@@ -90,6 +90,7 @@ const arreglaIdempotenciaCompraOnlineMigration = readFileSync(new URL("../supaba
 const arreglaCarreraRentalMigration = readFileSync(new URL("../supabase/migrations/20260996_arregla_carrera_y_edicion_reservas_rental.sql", import.meta.url), "utf8");
 const arreglaCarreraStockTotalMigration = readFileSync(new URL("../supabase/migrations/20260997_arregla_carrera_stock_total.sql", import.meta.url), "utf8");
 const bloqueaCupoMigration = readFileSync(new URL("../supabase/migrations/20260998_bloquea_bajar_cupo_por_debajo_de_lo_vendido.sql", import.meta.url), "utf8");
+const endurecePresenciaPerfilMigration = readFileSync(new URL("../supabase/migrations/20261000_endurece_presencia_y_perfil.sql", import.meta.url), "utf8");
 const arreglaCarreraCreateSaleMigration = readFileSync(new URL("../supabase/migrations/20260999_arregla_carrera_idempotencia_create_sale.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
@@ -230,6 +231,7 @@ async function database() {
   await db.exec(arreglaCarreraStockTotalMigration);
   await db.exec(bloqueaCupoMigration);
   await db.exec(arreglaCarreraCreateSaleMigration);
+  await db.exec(endurecePresenciaPerfilMigration);
   return db;
 }
 
@@ -1495,6 +1497,16 @@ test("presencia: cp_touch_presence marca last_active_at del usuario logueado", a
   const others = rows.rows.find((r) => r.id === other);
   assert.ok(mine?.last_active_at, "se marco la presencia del usuario logueado");
   assert.equal(others?.last_active_at ?? null, null, "no toca la presencia de otro usuario");
+
+  // Limites de largo en first_name/last_name/phone -- antes no tenian ninguno.
+  await assert.rejects(
+    () => db.exec(`update profiles set first_name = repeat('x', 201) where id = '${user}'`),
+    /profiles_first_name_length|violates check constraint/
+  );
+  await assert.rejects(
+    () => db.exec(`update profiles set phone = repeat('1', 61) where id = '${user}'`),
+    /profiles_phone_length|violates check constraint/
+  );
 
   await db.close();
 });
