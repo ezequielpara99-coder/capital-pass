@@ -25,8 +25,15 @@ export async function GET(request: NextRequest) {
     const like = `%${safeQ}%`;
     const numericQuery = Number(q.replace(/^p-?0*/i, ""));
 
+    // number es integer (tope ~2.147.483.647) -- un termino de busqueda
+    // numerico mas largo que eso (ej. un telefono pegado sin espacios) hace
+    // fallar el filtro "number.eq." en Postgres; sin este tope, esa unica
+    // tabla devuelve error y el resultado se perdia en silencio (quedaba
+    // vacio como si no hubiera coincidencias).
+    const safeNumericQuery = Number.isFinite(numericQuery) && numericQuery > 0 && numericQuery <= 2147483647 ? numericQuery : null;
+
     const [quotes, clients, expenses, packs, catalog, members, blacklist] = await Promise.all([
-      admin.from("quotes").select("id, number, client_name, status").is("deleted_at", null).or(`client_name.ilike.${like}${Number.isFinite(numericQuery) && numericQuery > 0 ? `,number.eq.${numericQuery}` : ""}`).limit(8),
+      admin.from("quotes").select("id, number, client_name, status").is("deleted_at", null).or(`client_name.ilike.${like}${safeNumericQuery ? `,number.eq.${safeNumericQuery}` : ""}`).limit(8),
       admin.from("quote_clients").select("id, name, contact, phone, email").is("deleted_at", null).or(`name.ilike.${like},contact.ilike.${like},email.ilike.${like}`).limit(8),
       admin.from("expenses").select("id, description, amount_minor, expense_date").is("deleted_at", null).ilike("description", like).limit(8),
       admin.from("monthly_packs").select("id, client_name, package_price_minor, active").is("deleted_at", null).ilike("client_name", like).limit(8),
@@ -34,6 +41,21 @@ export async function GET(request: NextRequest) {
       admin.from("premium_members").select("id, first_name, last_name, dni, member_code").is("deleted_at", null).or(`first_name.ilike.${like},last_name.ilike.${like},dni.ilike.${like},member_code.ilike.${like}`).limit(8),
       admin.from("blacklist_entries").select("id, dni, full_name").is("deleted_at", null).or(`dni.ilike.${like},full_name.ilike.${like}`).limit(8),
     ]);
+
+    // Si alguna de las 7 tablas todavia no existe (migracion no aplicada) o
+    // la query falla por otro motivo, no se pierde en silencio: se loguea
+    // para poder investigar, igual que hacen las otras rutas de finanzas.
+    for (const [name, result] of [
+      ["quotes", quotes],
+      ["quote_clients", clients],
+      ["expenses", expenses],
+      ["monthly_packs", packs],
+      ["quote_catalog", catalog],
+      ["premium_members", members],
+      ["blacklist_entries", blacklist],
+    ] as const) {
+      if (result.error) console.error(`BUSCAR ${name}:`, result.error);
+    }
 
     const results = [
       ...(quotes.data ?? []).map((row) => ({

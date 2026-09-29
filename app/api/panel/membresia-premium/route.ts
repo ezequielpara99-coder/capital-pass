@@ -84,6 +84,22 @@ export async function POST(request: NextRequest) {
     const lastName = String(body.lastName ?? "").trim();
     if (!firstName || !lastName) return NextResponse.json({ error: "Ingresá nombre y apellido." }, { status: 400 });
 
+    const dni = String(body.dni ?? "").trim().slice(0, 30) || null;
+    const email = String(body.email ?? "").trim().slice(0, 200) || null;
+    const startsAt = body.startsAt || new Date().toISOString().slice(0, 10);
+    const expiresAt = body.expiresAt || null;
+    if (expiresAt && expiresAt < startsAt) return NextResponse.json({ error: "La fecha de vencimiento no puede ser anterior al alta." }, { status: 400 });
+
+    // DNI/email no tienen constraint unico en la base (una misma persona
+    // puede legitimamente no tener uno de los dos) -- pero cargar dos veces
+    // al mismo socio le divide el saldo y los puntos en dos cuentas
+    // distintas sin que nadie lo note, asi que se avisa antes de duplicar.
+    if (dni || email) {
+      const orFilters = [dni ? `dni.eq.${dni}` : null, email ? `email.eq.${email}` : null].filter(Boolean).join(",");
+      const { data: existing } = await caller.admin.from("premium_members").select("id, first_name, last_name, member_code").eq("organization_id", caller.organizationId).is("deleted_at", null).or(orFilters).limit(1).maybeSingle();
+      if (existing) return NextResponse.json({ error: `Ya existe un socio con ese DNI o email: ${existing.first_name} ${existing.last_name} (código ${existing.member_code}).` }, { status: 409 });
+    }
+
     let code = "";
     let attempt = 0;
     let data: Record<string, unknown> | null = null;
@@ -99,12 +115,12 @@ export async function POST(request: NextRequest) {
           organization_id: caller.organizationId,
           first_name: firstName.slice(0, 120),
           last_name: lastName.slice(0, 120),
-          dni: String(body.dni ?? "").trim().slice(0, 30) || null,
+          dni,
           phone: String(body.phone ?? "").trim().slice(0, 60) || null,
-          email: String(body.email ?? "").trim().slice(0, 200) || null,
+          email,
           member_code: code,
-          starts_at: body.startsAt || new Date().toISOString().slice(0, 10),
-          expires_at: body.expiresAt || null,
+          starts_at: startsAt,
+          expires_at: expiresAt,
           notes: String(body.notes ?? "").trim().slice(0, 2000) || null,
         })
         .select(FIELDS)
@@ -150,6 +166,17 @@ export async function PATCH(request: NextRequest) {
     if (body.expiresAt !== undefined) updates.expires_at = body.expiresAt || null;
     if (body.notes !== undefined) updates.notes = String(body.notes).trim().slice(0, 2000) || null;
     if (body.status !== undefined && ["active", "expired", "cancelled"].includes(body.status)) updates.status = body.status;
+
+    if (updates.dni || updates.email) {
+      const orFilters = [updates.dni ? `dni.eq.${updates.dni}` : null, updates.email ? `email.eq.${updates.email}` : null].filter(Boolean).join(",");
+      const { data: existing } = await caller.admin.from("premium_members").select("id, first_name, last_name, member_code").eq("organization_id", caller.organizationId).is("deleted_at", null).neq("id", id).or(orFilters).limit(1).maybeSingle();
+      if (existing) return NextResponse.json({ error: `Ya existe otro socio con ese DNI o email: ${existing.first_name} ${existing.last_name} (código ${existing.member_code}).` }, { status: 409 });
+    }
+
+    if (updates.expires_at) {
+      const { data: current } = await caller.admin.from("premium_members").select("starts_at").eq("id", id).eq("organization_id", caller.organizationId).maybeSingle();
+      if (current && (updates.expires_at as string) < current.starts_at) return NextResponse.json({ error: "La fecha de vencimiento no puede ser anterior al alta." }, { status: 400 });
+    }
 
     const { data, error } = await caller.admin
       .from("premium_members")

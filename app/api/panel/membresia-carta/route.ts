@@ -220,11 +220,19 @@ export async function PATCH(request: NextRequest) {
     }
     if (body.description !== undefined) updates.description = String(body.description).trim().slice(0, 300) || null;
     if (body.active !== undefined) updates.active = Boolean(body.active);
-    if (body.productId !== undefined || body.stockUnits !== undefined) {
+    if (body.productId !== undefined) {
+      // Se manda productId (aunque sea "" para desvincular): se resuelve el
+      // vinculo completo, incluido product_id.
       const stockLink = await parseStockLink(caller.admin, caller.organizationId, body);
       if ("error" in stockLink) return NextResponse.json({ error: stockLink.error }, { status: 400 });
       updates.product_id = stockLink.productId;
       updates.stock_units = stockLink.units;
+    } else if (body.stockUnits !== undefined) {
+      // Solo cambian las unidades -- no tocar product_id, si no un PATCH que
+      // solo manda stockUnits desvincularia el producto sin que nadie lo pida.
+      const units = Math.round(Number(body.stockUnits));
+      if (!Number.isFinite(units) || units < 1 || units > 100) return NextResponse.json({ error: "Las unidades de stock tienen que ser entre 1 y 100." }, { status: 400 });
+      updates.stock_units = units;
     }
     if (current.kind === "premio") {
       if (body.pointsCost !== undefined) {

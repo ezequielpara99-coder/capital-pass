@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { formatMoney } from "../../../lib/quotes/totals";
+import { currentPeriodAR, currentMonthEndAR } from "../../../lib/finanzas/period";
 
 type Summary = {
   presupuestado: number;
@@ -79,9 +80,8 @@ export default function FinanzasClient() {
 
   async function loadGoal() {
     try {
-      const now = new Date();
-      const period = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
-      const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+      const period = currentPeriodAR();
+      const monthEnd = currentMonthEndAR();
 
       const [goalRes, summaryRes] = await Promise.all([
         fetch(`/api/admin/finanzas/metas?period=${period}`),

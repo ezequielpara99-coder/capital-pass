@@ -2,20 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { isMissingTable, verifyAdmin } from "../../../../../lib/quotes/auth";
 import { computeFinanzasSummary } from "../../../../../lib/finanzas/summary";
+import { previousMonthPeriodAR } from "../../../../../lib/finanzas/period";
 
-const PERIOD = /^\d{4}-\d{2}-01$/;
+const PERIOD = /^\d{4}-(0[1-9]|1[0-2])-01$/;
 
 function lastDayOfMonth(period: string) {
   const [year, month] = period.split("-").map(Number);
   return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
-}
-
-function previousMonthPeriod() {
-  const now = new Date();
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth(); // mes anterior: restar 1 al mes actual (0-index ya lo hace)
-  const date = new Date(Date.UTC(year, month - 1, 1));
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-01`;
 }
 
 // GET: lista los cierres ya hechos, mas nuevos primero.
@@ -45,7 +38,7 @@ export async function GET() {
       closedAt: row.closed_at,
     }));
 
-    return NextResponse.json({ ok: true, closures, suggestedPeriod: previousMonthPeriod() });
+    return NextResponse.json({ ok: true, closures, suggestedPeriod: previousMonthPeriodAR() });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }
@@ -60,7 +53,7 @@ export async function POST(request: NextRequest) {
     if (!verification.ok) return NextResponse.json({ error: verification.error }, { status: verification.status });
 
     const body = await request.json().catch(() => ({}));
-    const period = PERIOD.test(body.period) ? body.period : previousMonthPeriod();
+    const period = PERIOD.test(body.period) ? body.period : previousMonthPeriodAR();
     const to = lastDayOfMonth(period);
 
     const admin = createAdminClient();

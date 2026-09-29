@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { isMissingTable, verifyAdmin } from "../../../../../lib/quotes/auth";
+import { currentPeriodAR } from "../../../../../lib/finanzas/period";
 
-const PERIOD = /^\d{4}-\d{2}-01$/;
-
-function currentPeriod() {
-  const now = new Date();
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
-}
+const PERIOD = /^\d{4}-(0[1-9]|1[0-2])-01$/;
 
 function normalizeGoal(value: unknown) {
   const number = Number(value);
@@ -21,7 +17,7 @@ export async function GET(request: NextRequest) {
     if (!verification.ok) return NextResponse.json({ error: verification.error }, { status: verification.status });
 
     const requestedPeriod = request.nextUrl.searchParams.get("period");
-    const period = requestedPeriod && PERIOD.test(requestedPeriod) ? requestedPeriod : currentPeriod();
+    const period = requestedPeriod && PERIOD.test(requestedPeriod) ? requestedPeriod : currentPeriodAR();
 
     const admin = createAdminClient();
     const { data, error } = await admin.from("finance_goals").select("id, period, goal_minor").eq("period", period).maybeSingle();
@@ -45,7 +41,7 @@ export async function POST(request: NextRequest) {
     if (!verification.ok) return NextResponse.json({ error: verification.error }, { status: verification.status });
 
     const body = await request.json();
-    const period = PERIOD.test(body.period) ? body.period : currentPeriod();
+    const period = PERIOD.test(body.period) ? body.period : currentPeriodAR();
     const goalMinor = normalizeGoal(body.goalMinor);
     if (goalMinor <= 0) return NextResponse.json({ error: "Ingresá un monto válido." }, { status: 400 });
 
