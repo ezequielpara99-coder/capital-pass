@@ -27,6 +27,26 @@ export default async function AdminPresupuestosPage() {
 
   if (error && !isMissingTable(error)) console.error("ADMIN PRESUPUESTOS:", error);
 
+  // Cuanto se cobro de cada presupuesto, para mostrar un estado de pago
+  // (sin pagar / pago parcial / pagado) calculado -- nunca uno tildado a
+  // mano, que se podria desincronizar de la plata real (el mismo problema
+  // que se arreglo en lib/finanzas/summary.ts). Cuenta TODOS los pagos sin
+  // importar el estado actual del presupuesto, mismo criterio que ahi.
+  const { data: paymentsData, error: paymentsError } = await fetchAllRows((from, to) =>
+    admin
+      .from("quote_payments")
+      .select("quote_id, amount_minor")
+      .is("deleted_at", null)
+      .order("id", { ascending: true })
+      .range(from, to)
+  );
+  if (paymentsError && !isMissingTable(paymentsError)) console.error("ADMIN PRESUPUESTOS (pagos):", paymentsError);
+
+  const cobradoPorQuote = new Map<string, number>();
+  for (const payment of paymentsData ?? []) {
+    cobradoPorQuote.set(payment.quote_id, (cobradoPorQuote.get(payment.quote_id) ?? 0) + Number(payment.amount_minor));
+  }
+
   // package_price_minor es bigint y discount_value es numeric: PostgREST
   // los serializa como string, no como number (mismo patron ya corregido
   // en catalogo/paquetes/el editor) -- se normaliza aca para que el tipo
@@ -35,6 +55,7 @@ export default async function AdminPresupuestosPage() {
     ...quote,
     package_price_minor: Number(quote.package_price_minor),
     discount_value: Number(quote.discount_value),
+    cobrado: cobradoPorQuote.get(quote.id) ?? 0,
   }));
 
   return <PresupuestosClient quotes={normalizedQuotes as QuoteRow[]} missingSql={isMissingTable(error)} />;

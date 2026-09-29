@@ -32,6 +32,7 @@ export type QuoteRow = {
   discount_type: DiscountType;
   discount_value: number;
   created_at: string;
+  cobrado: number;
 };
 
 const STATUS_STYLE: Record<QuoteStatus, string> = {
@@ -41,6 +42,31 @@ const STATUS_STYLE: Record<QuoteStatus, string> = {
   aceptado: "border-emerald-400/30 bg-emerald-400/10 text-emerald-300",
   rechazado: "border-red-400/30 bg-red-400/10 text-red-300",
 };
+
+// Estado de pago: siempre CALCULADO comparando lo cobrado (quote_payments)
+// contra el total, nunca tildado a mano -- si se tildara a mano se podria
+// desincronizar de la plata real apenas alguien se olvida de actualizarlo,
+// el mismo tipo de bug que se arreglo en lib/finanzas/summary.ts (plata
+// cobrada que desaparecia de los informes). Solo tiene sentido mostrarlo
+// para presupuestos ya facturados (a_pagar/aceptado); en borrador/revision/
+// rechazado todavia no corresponde cobrar nada.
+type PaymentStatus = "sin_pagar" | "pago_parcial" | "pagado";
+const PAYMENT_STATUS_LABEL: Record<PaymentStatus, string> = {
+  sin_pagar: "Sin pagar",
+  pago_parcial: "Pago parcial",
+  pagado: "Pagado",
+};
+const PAYMENT_STATUS_STYLE: Record<PaymentStatus, string> = {
+  sin_pagar: "border-white/15 bg-white/[0.03] text-white/40",
+  pago_parcial: "border-amber-400/30 bg-amber-400/10 text-amber-300",
+  pagado: "border-emerald-400/30 bg-emerald-400/10 text-emerald-300",
+};
+function paymentStatusOf(row: QuoteRow, total: number): PaymentStatus | null {
+  if (row.status !== "a_pagar" && row.status !== "aceptado") return null;
+  if (row.cobrado <= 0) return "sin_pagar";
+  if (row.cobrado < total) return "pago_parcial";
+  return "pagado";
+}
 
 const KIND_STYLE: Record<QuoteKind, string> = {
   diseno: "border-violet-400/30 bg-violet-400/10 text-violet-300",
@@ -64,6 +90,7 @@ function formatDate(value: string) {
 export default function PresupuestosClient({ quotes, missingSql }: { quotes: QuoteRow[]; missingSql: boolean }) {
   const [rows, setRows] = useState(quotes);
   const [kind, setKind] = useState<"all" | QuoteKind>("all");
+  const [paymentFilter, setPaymentFilter] = useState<"all" | PaymentStatus>("all");
   const [search, setSearch] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -73,9 +100,10 @@ export default function PresupuestosClient({ quotes, missingSql }: { quotes: Quo
     return rows.filter(
       (row) =>
         (kind === "all" || row.kind === kind) &&
+        (paymentFilter === "all" || paymentStatusOf(row, totalOf(row)) === paymentFilter) &&
         (!term || `${row.client_name} ${row.event_name ?? ""} ${quoteCode(row.number)}`.toLowerCase().includes(term))
     );
-  }, [rows, kind, search]);
+  }, [rows, kind, paymentFilter, search]);
 
   const accepted = useMemo(
     () => rows.filter((row) => row.status === "aceptado").reduce((sum, row) => sum + totalOf(row), 0),
@@ -182,6 +210,20 @@ export default function PresupuestosClient({ quotes, missingSql }: { quotes: Quo
               </button>
             ))}
           </div>
+          <div className="flex gap-2">
+            {(["all", "sin_pagar", "pago_parcial", "pagado"] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setPaymentFilter(value)}
+                className={`h-11 border px-4 text-[10px] font-black uppercase tracking-[0.12em] transition ${
+                  paymentFilter === value ? "border-white/40 bg-white/10 text-white" : "border-white/[0.12] text-white/45 hover:text-white"
+                }`}
+              >
+                {value === "all" ? "Cualquier pago" : PAYMENT_STATUS_LABEL[value]}
+              </button>
+            ))}
+          </div>
         </div>
 
         {visible.length === 0 ? (
@@ -218,6 +260,16 @@ export default function PresupuestosClient({ quotes, missingSql }: { quotes: Quo
                         </option>
                       ))}
                     </select>
+                    {(() => {
+                      const payment = paymentStatusOf(row, totalOf(row));
+                      if (!payment) return null;
+                      return (
+                        <p className={`mt-1.5 inline-block rounded-full border px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wide ${PAYMENT_STATUS_STYLE[payment]}`}>
+                          {PAYMENT_STATUS_LABEL[payment]}
+                          {payment === "pago_parcial" && ` · ${formatMoney(row.cobrado)}`}
+                        </p>
+                      );
+                    })()}
                   </div>
                 </div>
 
