@@ -50,55 +50,29 @@ export async function POST(request: NextRequest) {
     const totalStock = Math.max(0, Math.round(Number(body.totalStock ?? 0)));
     const lowStockThreshold = Math.max(0, Math.round(Number(body.lowStockThreshold ?? 5)));
 
-    // Si el producto ya estaba cargado y se está bajando total_stock, no
-    // puede quedar por debajo de lo que ya se repartió a las barras --
-    // si no, "disponible para repartir" (total_stock - suma en barras)
-    // queda negativo en el panel hasta que se vuelva a subir.
-    const { data: existing } = await admin
-      .from("event_products")
-      .select("id")
-      .eq("event_id", eventId)
-      .eq("product_id", productId)
-      .maybeSingle();
+    // Chequeo de "no bajes de lo ya repartido en barras" + guardado en una
+    // sola funcion con lock (cp_upsert_event_product): antes eran dos
+    // consultas separadas sin ningun lock, y una baja de total_stock a la
+    // vez que se asignaba stock a una barra podian pasar sus chequeos
+    // juntas y dejar mas repartido en barras que el total comprado.
+    const { data: eventProductId, error } = await admin.rpc("cp_upsert_event_product", {
+      p_event_id: eventId,
+      p_product_id: productId,
+      p_cost_price_minor: costPriceMinor,
+      p_sale_price_minor: salePriceMinor,
+      p_profit_margin_percent: profitMarginPercent,
+      p_total_stock: totalStock,
+      p_low_stock_threshold: lowStockThreshold,
+    });
 
-    if (existing) {
-      const { data: assignedRows } = await admin
-        .from("bar_stock")
-        .select("quantity")
-        .eq("event_product_id", existing.id);
-      const assignedTotal = (assignedRows ?? []).reduce((sum, row) => sum + row.quantity, 0);
-      if (totalStock < assignedTotal) {
-        return NextResponse.json(
-          { error: `No podés bajar el stock total a menos de lo ya repartido en barras (${assignedTotal}).` },
-          { status: 400 }
-        );
-      }
-    }
-
-    const { data: eventProduct, error } = await admin
-      .from("event_products")
-      .upsert(
-        {
-          event_id: eventId,
-          product_id: productId,
-          cost_price_minor: costPriceMinor,
-          sale_price_minor: salePriceMinor,
-          profit_margin_percent: profitMarginPercent,
-          total_stock: totalStock,
-          low_stock_threshold: lowStockThreshold,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "event_id,product_id" }
-      )
-      .select("id")
-      .single();
-
-    if (error || !eventProduct) {
+    if (error || !eventProductId) {
+      const message = error?.message ?? "";
+      if (/no podés bajar/i.test(message)) return NextResponse.json({ error: message }, { status: 400 });
       console.error("STOCK: no se pudo guardar event_product.", error);
       return NextResponse.json({ error: "No se pudo guardar el producto." }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, eventProductId: eventProduct.id });
+    return NextResponse.json({ ok: true, eventProductId });
   } catch (error) {
     console.error("STOCK: error inesperado en event-products.", error);
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });

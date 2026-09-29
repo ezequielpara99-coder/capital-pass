@@ -43,6 +43,11 @@ export default function CalendarioClient() {
 
   const [bookingDraft, setBookingDraft] = useState(emptyBookingDraft());
   const [savingBooking, setSavingBooking] = useState(false);
+  // Si no es null, el formulario de abajo edita esta reserva (PATCH, en vez
+  // de crear una nueva) -- mover una reserva de fecha ya no pasa por
+  // cancelarla y volver a crearla a mano (si el segundo paso fallaba, la
+  // original se perdia sin dejar rastro).
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const assetColor = useMemo(() => {
     const map = new Map<string, string>();
@@ -157,19 +162,38 @@ export default function CalendarioClient() {
     setError("");
     try {
       const response = await fetch("/api/admin/rentals/bookings", {
-        method: "POST",
+        method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bookingDraft),
+        body: JSON.stringify(editingId ? { ...bookingDraft, id: editingId } : bookingDraft),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "No se pudo crear la reserva.");
+      if (!response.ok) throw new Error(result.error ?? (editingId ? "No se pudo actualizar la reserva." : "No se pudo crear la reserva."));
       setBookingDraft(emptyBookingDraft());
+      setEditingId(null);
       await loadBookings();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo crear la reserva.");
+      setError(err instanceof Error ? err.message : "No se pudo guardar la reserva.");
     } finally {
       setSavingBooking(false);
     }
+  }
+
+  function editBooking(booking: Booking) {
+    setError("");
+    setEditingId(booking.id);
+    setBookingDraft({
+      assetId: booking.asset_id,
+      clientName: booking.client_name,
+      startsOn: booking.starts_on,
+      endsOn: booking.ends_on,
+      quoteId: booking.quote_id ?? "",
+      notes: booking.notes ?? "",
+    });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setBookingDraft(emptyBookingDraft());
   }
 
   async function removeBooking(booking: Booking) {
@@ -180,6 +204,7 @@ export default function CalendarioClient() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo cancelar.");
       setBookings((prev) => prev.filter((b) => b.id !== booking.id));
+      if (editingId === booking.id) cancelEdit();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo cancelar.");
     }
@@ -261,9 +286,9 @@ export default function CalendarioClient() {
                       <button
                         key={b.id}
                         type="button"
-                        onClick={() => removeBooking(b)}
-                        title="Click para cancelar la reserva"
-                        className={`block w-full truncate border px-1 py-0.5 text-left text-[9px] font-bold ${assetColor.get(b.asset_id) ?? "border-white/15 text-white/50"}`}
+                        onClick={() => editBooking(b)}
+                        title="Click para editar la reserva"
+                        className={`block w-full truncate border px-1 py-0.5 text-left text-[9px] font-bold ${editingId === b.id ? "ring-1 ring-white/60" : ""} ${assetColor.get(b.asset_id) ?? "border-white/15 text-white/50"}`}
                       >
                         {b.client_name}
                       </button>
@@ -277,9 +302,12 @@ export default function CalendarioClient() {
           {loading && <p className="mt-2 text-[11px] text-white/25">Cargando reservas…</p>}
         </section>
 
-        {/* NUEVA RESERVA */}
+        {/* NUEVA RESERVA / EDITAR */}
         <section className="mt-8 border border-white/[0.08] bg-white/[0.02] p-5">
-          <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Nueva reserva</p>
+          <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">
+            {editingId ? "Editar reserva" : "Nueva reserva"}
+            {editingId && <span className="ml-2 normal-case tracking-normal text-white/30">(click en otra reserva del calendario para editarla, o cancelá para cargar una nueva)</span>}
+          </p>
           <form onSubmit={addBooking}>
             <div className="grid gap-x-4 sm:grid-cols-2">
               <label className="mt-3 block">
@@ -310,9 +338,28 @@ export default function CalendarioClient() {
               <span className={LABEL}>Notas</span>
               <input value={bookingDraft.notes} onChange={(e) => setBookingDraft((d) => ({ ...d, notes: e.target.value }))} className={INPUT} />
             </label>
-            <button type="submit" disabled={savingBooking} className="mt-4 h-12 w-full bg-[#ff2a1a] text-[10px] font-black uppercase tracking-[0.16em] text-white transition hover:bg-[#ff4a2d] disabled:opacity-40 sm:w-auto sm:px-8">
-              {savingBooking ? "Guardando…" : "+ Reservar"}
-            </button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button type="submit" disabled={savingBooking} className="h-12 flex-1 bg-[#ff2a1a] px-8 text-[10px] font-black uppercase tracking-[0.16em] text-white transition hover:bg-[#ff4a2d] disabled:opacity-40 sm:flex-none">
+                {savingBooking ? "Guardando…" : editingId ? "Guardar cambios" : "+ Reservar"}
+              </button>
+              {editingId && (
+                <>
+                  <button type="button" onClick={cancelEdit} className="h-12 border border-white/15 px-6 text-[10px] font-black uppercase tracking-wide text-white/60 hover:text-white">
+                    Cancelar edición
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const booking = bookings.find((b) => b.id === editingId);
+                      if (booking) removeBooking(booking);
+                    }}
+                    className="h-12 border border-red-400/25 px-6 text-[10px] font-black uppercase tracking-wide text-red-300/80 hover:text-red-300"
+                  >
+                    Cancelar reserva
+                  </button>
+                </>
+              )}
+            </div>
           </form>
         </section>
       </section>

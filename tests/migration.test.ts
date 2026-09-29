@@ -1,4 +1,4 @@
-﻿import { test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
@@ -87,6 +87,8 @@ const arreglaDuplicadosSalesAgentMigration = readFileSync(new URL("../supabase/m
 const arreglaColectivosGeneralMigration = readFileSync(new URL("../supabase/migrations/20260993_arregla_colectivos_general_y_carreras.sql", import.meta.url), "utf8");
 const arreglaFinanzasComisionesMigration = readFileSync(new URL("../supabase/migrations/20260994_arregla_finanzas_y_comisiones_rrpp.sql", import.meta.url), "utf8");
 const arreglaIdempotenciaCompraOnlineMigration = readFileSync(new URL("../supabase/migrations/20260995_arregla_idempotencia_compra_online_y_reapertura_tanda.sql", import.meta.url), "utf8");
+const arreglaCarreraRentalMigration = readFileSync(new URL("../supabase/migrations/20260996_arregla_carrera_y_edicion_reservas_rental.sql", import.meta.url), "utf8");
+const arreglaCarreraStockTotalMigration = readFileSync(new URL("../supabase/migrations/20260997_arregla_carrera_stock_total.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -222,6 +224,8 @@ async function database() {
   await db.exec(arreglaColectivosGeneralMigration);
   await db.exec(arreglaFinanzasComisionesMigration);
   await db.exec(arreglaIdempotenciaCompraOnlineMigration);
+  await db.exec(arreglaCarreraRentalMigration);
+  await db.exec(arreglaCarreraStockTotalMigration);
   return db;
 }
 
@@ -600,6 +604,31 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
     () => db.query(`select assign_stock_to_bar('${eventProduct}','${bar}',5)`),
     /No hay suficiente stock general/, "no debe permitir asignar mas stock del que existe"
   );
+
+  // cp_upsert_event_product: no deja bajar total_stock por debajo de lo ya
+  // repartido en barras (8), en la misma operacion que guarda el resto de
+  // los campos -- antes eran dos consultas separadas sin ningun lock.
+  await assert.rejects(
+    () => db.query(`select cp_upsert_event_product('${event}','${productId}',10000,2000,50,5,3)`),
+    /No podés bajar el stock total.*8/,
+    "no puede bajar total_stock a menos de lo repartido (8) en barras"
+  );
+  assert.equal(await scalar(`select total_stock from event_products where id='${eventProduct}'`), 10, "el rechazo no toco nada");
+
+  // Bajarlo justo al limite (8, igual a lo repartido) si se permite, y
+  // actualiza el resto de los campos (mismo costo/precio que ya tenia, para
+  // no alterar los totales que el resto de este test calcula mas abajo).
+  await db.query(`select cp_upsert_event_product('${event}','${productId}',10000,2000,50,8,4)`);
+  const afterLower = await db.query<{ total_stock: number; cost_price_minor: string; low_stock_threshold: number }>(
+    `select total_stock, cost_price_minor, low_stock_threshold from event_products where id='${eventProduct}'`
+  );
+  assert.equal(afterLower.rows[0].total_stock, 8);
+  assert.equal(Number(afterLower.rows[0].cost_price_minor), 10000);
+  assert.equal(afterLower.rows[0].low_stock_threshold, 4);
+
+  // Lo vuelve a subir a 10 (como estaba al principio): el resto de este
+  // test asume ese total_stock para sus propios chequeos de cupo.
+  await db.query(`select cp_upsert_event_product('${event}','${productId}',10000,2000,50,10,3)`);
 
   // Vender una mesa: la puede vender el organizador.
   const tableSale = await scalar(
@@ -2959,6 +2988,53 @@ test("calendario de rental: rental_bookings valida que ends_on no sea anterior a
   // Si se borra el equipo, sus reservas se van con el.
   await db.exec(`delete from rental_assets where id='${assetId}'`);
   assert.equal(await scalar(`select count(*)::int from rental_bookings where asset_id='${assetId}'`), 0);
+
+  await db.close();
+});
+
+test("calendario de rental: rental_create_booking/rental_update_booking rechazan solapamientos y mueven una reserva de forma atomica", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const assetId = await scalar(`insert into rental_assets(name) values ('Terminal Nº1') returning id::text`);
+  const otherAssetId = await scalar(`insert into rental_assets(name) values ('Terminal Nº2') returning id::text`);
+
+  const created = await db.query<{ id: string; starts_on: string; ends_on: string }>(
+    `select id, starts_on::text, ends_on::text from rental_create_booking('${assetId}','Bar Los Alamos','2026-04-10','2026-04-15')`
+  );
+  const bookingId = created.rows[0].id;
+  assert.equal(created.rows[0].starts_on, "2026-04-10");
+
+  // Fechas invalidas y cliente vacio los rechaza la funcion, no solo el constraint de la tabla.
+  await assert.rejects(() => db.query(`select * from rental_create_booking('${assetId}','Otro','2026-04-20','2026-04-18')`), /no puede ser anterior/);
+  await assert.rejects(() => db.query(`select * from rental_create_booking('${assetId}','   ','2026-05-01','2026-05-02')`), /Ingresá el cliente/);
+  await assert.rejects(() => db.query(`select * from rental_create_booking('00000000-0000-4000-8000-000000000000','X','2026-05-01','2026-05-02')`), /no existe/);
+
+  // Se solapa con la reserva ya creada -> rechazado, con el nombre del choque en el mensaje.
+  await assert.rejects(
+    () => db.query(`select * from rental_create_booking('${assetId}','Otro cliente','2026-04-14','2026-04-20')`),
+    /Bar Los Alamos/,
+    "el mensaje de error dice con quien choca"
+  );
+  // El mismo rango en OTRO equipo no tiene problema.
+  await db.query(`select * from rental_create_booking('${otherAssetId}','Otro cliente','2026-04-14','2026-04-20')`);
+
+  // Mover la reserva a fechas libres: una sola llamada atomica, no cancelar + crear.
+  const moved = await db.query<{ starts_on: string; ends_on: string; client_name: string }>(
+    `select starts_on::text, ends_on::text, client_name from rental_update_booking('${bookingId}','Bar Los Alamos (renombrado)','2026-05-01','2026-05-05')`
+  );
+  assert.equal(moved.rows[0].starts_on, "2026-05-01");
+  assert.equal(moved.rows[0].client_name, "Bar Los Alamos (renombrado)");
+  assert.equal(Number(await scalar(`select count(*)::int from rental_bookings where asset_id='${assetId}'`)), 1, "se actualizo la misma fila, no se creo una nueva");
+
+  // Mover una reserva a fechas que chocan con OTRA reserva existente del mismo equipo: se rechaza y NO se pierde la original.
+  const second = await scalar(`select id::text from rental_create_booking('${assetId}','Segunda reserva','2026-06-01','2026-06-05')`);
+  await assert.rejects(
+    () => db.query(`select * from rental_update_booking('${bookingId}','Bar Los Alamos','2026-06-03','2026-06-10')`),
+    /Segunda reserva/
+  );
+  assert.equal(await scalar(`select starts_on::text from rental_bookings where id='${bookingId}'`), "2026-05-01", "la reserva original no se toco al fallar el movimiento");
+  assert.equal(await scalar(`select count(*)::int from rental_bookings where id='${second}'`), 1);
 
   await db.close();
 });
