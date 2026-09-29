@@ -12,7 +12,7 @@ type Pending = {
   total: number;
   cobrado: number;
   pendiente: number;
-  updatedAt: string;
+  statusChangedAt: string;
 };
 
 function daysSince(value: string) {
@@ -80,7 +80,7 @@ export default function CobrosClient() {
           )}
 
           {pending?.map((row) => {
-            const days = daysSince(row.updatedAt);
+            const days = daysSince(row.statusChangedAt);
             return (
               <Link
                 key={row.id}

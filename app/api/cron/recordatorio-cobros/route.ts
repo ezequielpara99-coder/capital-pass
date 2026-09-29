@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
     if ("error" in pending) return NextResponse.json({ ok: true, sent: false, reason: "missing_table" });
 
     const now = Date.now();
-    const overdue = pending.filter((row) => (now - new Date(row.updatedAt).getTime()) / (1000 * 60 * 60 * 24) > OVERDUE_DAYS);
+    const overdue = pending.filter((row) => (now - new Date(row.statusChangedAt).getTime()) / (1000 * 60 * 60 * 24) > OVERDUE_DAYS);
 
     if (overdue.length === 0) {
       return NextResponse.json({ ok: true, sent: false, overdue: 0 });

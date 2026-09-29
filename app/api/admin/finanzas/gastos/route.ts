@@ -101,6 +101,7 @@ export async function POST(request: NextRequest) {
         .from("expenses")
         .select("id, kind, category, description, amount_minor, expense_date, payment_method, is_recurring, notes, created_at")
         .eq("idempotency_key", idempotencyKey)
+        .is("deleted_at", null)
         .maybeSingle();
       if (existing) return NextResponse.json({ ok: true, expense: { ...existing, amount_minor: Number(existing.amount_minor) } });
     }

@@ -95,7 +95,7 @@ export async function POST(request: NextRequest, context: Context) {
       .single();
 
     if (error?.code === "23505" && idempotencyKey) {
-      const { data: existing } = await admin.from("quote_payments").select("id, amount_minor, paid_at, method, notes, created_at").eq("idempotency_key", idempotencyKey).maybeSingle();
+      const { data: existing } = await admin.from("quote_payments").select("id, amount_minor, paid_at, method, notes, created_at").eq("idempotency_key", idempotencyKey).is("deleted_at", null).maybeSingle();
       if (existing) return NextResponse.json({ ok: true, payment: { ...existing, amount_minor: Number(existing.amount_minor) } });
     }
 

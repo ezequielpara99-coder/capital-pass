@@ -13,7 +13,7 @@ export type PendingCollection = {
   total: number;
   cobrado: number;
   pendiente: number;
-  updatedAt: string;
+  statusChangedAt: string;
 };
 
 // Centro de cobros: cada presupuesto facturado (a_pagar/aceptado) que
@@ -23,7 +23,7 @@ export async function computePendingCollections(admin: Admin): Promise<PendingCo
   const { data: quotesData, error: quotesError } = await fetchAllRows((rangeFrom, rangeTo) =>
     admin
       .from("quotes")
-      .select("id, number, kind, client_name, items, price_mode, package_price_minor, discount_type, discount_value, updated_at")
+      .select("id, number, kind, client_name, items, price_mode, package_price_minor, discount_type, discount_value, status_changed_at, updated_at")
       .in("status", ["a_pagar", "aceptado"])
       .is("deleted_at", null)
       .order("id", { ascending: true })
@@ -45,6 +45,7 @@ export async function computePendingCollections(admin: Admin): Promise<PendingCo
     package_price_minor: number | string;
     discount_type: DiscountType;
     discount_value: number | string;
+    status_changed_at: string | null;
     updated_at: string;
   }[];
 
@@ -90,9 +91,12 @@ export async function computePendingCollections(admin: Admin): Promise<PendingCo
         total,
         cobrado,
         pendiente: Math.max(0, total - cobrado),
-        updatedAt: quote.updated_at,
+        // Desde cuando esta en este status (a_pagar/aceptado), no la ultima
+        // edicion cualquiera -- corregir el telefono de un presupuesto
+        // vencido no lo tiene que "resetear" a recien facturado.
+        statusChangedAt: quote.status_changed_at ?? quote.updated_at,
       };
     })
     .filter((row) => row.pendiente > 0)
-    .sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
+    .sort((a, b) => new Date(a.statusChangedAt).getTime() - new Date(b.statusChangedAt).getTime());
 }

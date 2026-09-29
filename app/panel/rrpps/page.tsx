@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { pickSelectedEvent } from "../../../lib/panel/selected-event";
+import { fetchAllRows } from "../../../lib/supabase/fetch-all";
 
 import RRPPsClient from "./rrpps-client";
 
@@ -409,11 +410,13 @@ export default async function RRPPsPage({
   if (
     assignedMemberIds.length > 0
   ) {
-    const {
-      data: salesData,
-    } = await admin
-      .from("sales")
-      .select(`
+    // fetchAllRows: PostgREST corta en 1000 filas por consulta -- un evento
+    // grande con mas de 1000 ventas de RRPP calculaba la comision sobre un
+    // subconjunto arbitrario, sin ningun aviso.
+    const { data: salesData } = await fetchAllRows<(typeof sales)[number]>((from, to) =>
+      admin
+        .from("sales")
+        .select(`
         id,
         seller_member_id,
         total_minor,
@@ -421,26 +424,15 @@ export default async function RRPPsPage({
         channel,
         commission_percentage_snapshot
       `)
-      .eq(
-        "event_id",
-        event.id
-      )
-      .eq(
-        "status",
-        "confirmed"
-      )
-      .eq(
-        "channel",
-        "rrpp"
-      )
-      .in(
-        "seller_member_id",
-        assignedMemberIds
-      );
+        .eq("event_id", event.id)
+        .eq("status", "confirmed")
+        .eq("channel", "rrpp")
+        .in("seller_member_id", assignedMemberIds)
+        .order("id")
+        .range(from, to)
+    );
 
-    sales =
-      (salesData ??
-        []) as typeof sales;
+    sales = salesData;
   }
 
   const saleIds =
@@ -462,27 +454,56 @@ export default async function RRPPsPage({
   if (
     saleIds.length > 0
   ) {
-    const {
-      data: ticketRows,
-    } = await admin
-      .from("tickets")
-      .select(`
+    const { data: ticketRows } = await fetchAllRows<(typeof tickets)[number]>((from, to) =>
+      admin
+        .from("tickets")
+        .select(`
         id,
         sale_id,
         status
       `)
-      .eq(
-        "event_id",
-        event.id
-      )
-      .in(
-        "sale_id",
-        saleIds
-      );
+        .eq("event_id", event.id)
+        .in("sale_id", saleIds)
+        .order("id")
+        .range(from, to)
+    );
 
-    tickets =
-      (ticketRows ??
-        []) as typeof tickets;
+    tickets = ticketRows;
+  }
+
+  // ==========================================================
+  // DEVOLUCIONES (para descontar de la comision -- una entrada devuelta
+  // despues de pagada la comision no le puede seguir generando plata al RRPP)
+  // ==========================================================
+
+  let returns: {
+    sale_id: string;
+    refund_amount_minor: number | string | null;
+  }[] = [];
+
+  if (
+    saleIds.length > 0
+  ) {
+    const { data: returnRows } = await fetchAllRows<(typeof returns)[number]>((from, to) =>
+      admin
+        .from("ticket_returns")
+        .select(`
+        sale_id,
+        refund_amount_minor
+      `)
+        .eq("refund_status", "refunded")
+        .in("sale_id", saleIds)
+        .order("id")
+        .range(from, to)
+    );
+
+    returns = returnRows;
+  }
+
+  const returnsBySale = new Map<string, number>();
+  for (const item of returns) {
+    const current = returnsBySale.get(item.sale_id) ?? 0;
+    returnsBySale.set(item.sale_id, current + Number(item.refund_amount_minor ?? 0));
   }
 
   // ==========================================================
@@ -500,28 +521,20 @@ export default async function RRPPsPage({
   if (
     assignedMemberIds.length > 0
   ) {
-    const {
-      data: paymentRows,
-    } = await admin
-      .from(
-        "rrpp_commission_payments"
-      )
-      .select(`
+    const { data: paymentRows } = await fetchAllRows<(typeof payments)[number]>((from, to) =>
+      admin
+        .from("rrpp_commission_payments")
+        .select(`
         organization_member_id,
         amount_minor
       `)
-      .eq(
-        "event_id",
-        event.id
-      )
-      .in(
-        "organization_member_id",
-        assignedMemberIds
-      );
+        .eq("event_id", event.id)
+        .in("organization_member_id", assignedMemberIds)
+        .order("id")
+        .range(from, to)
+    );
 
-    payments =
-      (paymentRows ??
-        []) as typeof payments;
+    payments = paymentRows;
   }
 
   // ==========================================================
@@ -613,8 +626,16 @@ export default async function RRPPsPage({
         ? Number(sale.commission_percentage_snapshot)
         : commissionPctByMember.get(sale.seller_member_id) ?? 0;
 
+    // Si se devolvio (parte de) esta venta, la comision se calcula sobre lo
+    // que efectivamente quedo cobrado -- antes esto no se descontaba nunca
+    // aca, y un RRPP se quedaba cobrando comision de entradas devueltas.
+    const netSaleTotal = Math.max(
+      0,
+      saleTotal - (returnsBySale.get(sale.id) ?? 0)
+    );
+
     current.commissionGenerated += Math.round(
-      saleTotal * (saleCommissionPct / 100)
+      netSaleTotal * (saleCommissionPct / 100)
     );
 
     salesByMember.set(
@@ -700,11 +721,23 @@ export default async function RRPPsPage({
             member.id
           ) ?? 0;
 
+        const commissionBalance =
+          commissionGenerated -
+          commissionPaid;
+
         const commissionPending =
           Math.max(
             0,
-            commissionGenerated -
-              commissionPaid
+            commissionBalance
+          );
+
+        // Si se le pago de mas (por una devolucion posterior al pago, o un
+        // pago duplicado) el numero quedaba clampeado a 0 y el exceso
+        // desaparecia de cualquier reporte -- ahora se puede mostrar aparte.
+        const commissionOverpaid =
+          Math.max(
+            0,
+            -commissionBalance
           );
 
         const lat =
@@ -801,6 +834,8 @@ export default async function RRPPsPage({
           commissionPaid,
 
           commissionPending,
+
+          commissionOverpaid,
         };
       })
       .filter(

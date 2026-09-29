@@ -1228,6 +1228,13 @@ export async function PATCH(
         );
       }
 
+      // Un reintento de red (timeout, doble tap) no tiene que registrar el
+      // mismo pago dos veces -- mismo patron que quote_payments/expenses.
+      const idempotencyKey =
+        typeof body.idempotencyKey === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.idempotencyKey)
+          ? body.idempotencyKey
+          : null;
+
       const {
         data: payment,
         error: paymentError,
@@ -1260,6 +1267,9 @@ export async function PATCH(
 
           created_by:
             user.id,
+
+          idempotency_key:
+            idempotencyKey,
         })
         .select(`
           id,
@@ -1269,6 +1279,15 @@ export async function PATCH(
           note
         `)
         .single();
+
+      if (paymentError?.code === "23505" && idempotencyKey) {
+        const { data: existing } = await admin
+          .from("rrpp_commission_payments")
+          .select("id, amount_minor, currency, paid_at, note")
+          .eq("idempotency_key", idempotencyKey)
+          .maybeSingle();
+        if (existing) return NextResponse.json({ ok: true, payment: existing });
+      }
 
       if (
         paymentError ||

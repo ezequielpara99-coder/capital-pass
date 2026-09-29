@@ -430,13 +430,20 @@ export default function ControlPage() {
         }
 
         if (realResult !== scan.localResult) {
+          // El caso mas grave es que la persona haya entrado DOS VECES de
+          // verdad (la validamos "valid" offline y el servidor dice que ya
+          // estaba usada -- alguien mas la habia escaneado mientras
+          // estabamos sin señal): eso tiene que resaltar mas que cualquier
+          // otro desajuste, mas todavia que una entrada invalidada despues.
+          const isDoubleEntry =
+            scan.localResult === "valid" && realResult === "already_used";
           const isInvalidatedWhileOffline =
             scan.localResult === "valid" && realResult === "cancelled";
 
           newConflicts.push({
             ...scan,
             realResult,
-            severity: isInvalidatedWhileOffline ? "alta" : "normal",
+            severity: isDoubleEntry || isInvalidatedWhileOffline ? "alta" : "normal",
           });
         }
 
@@ -714,6 +721,13 @@ export default function ControlPage() {
       }
 
       let response: Response;
+      // Con mala señal (paquetes que se pierden) el navegador puede seguir
+      // reportando "online" mientras el fetch queda colgado sin resolver ni
+      // rechazar nunca -- el controlador se quedaba sin saber si la entrada
+      // entro. Un timeout corto fuerza siempre una respuesta: si tarda
+      // demasiado, se trata igual que una falla de red real.
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
       try {
         response = await fetch(
           "/api/control/validar-qr",
@@ -729,13 +743,16 @@ export default function ControlPage() {
               eventId: event.id,
               qrPayload,
             }),
+            signal: controller.signal,
           }
         );
       } catch {
-        // Fetch fallido de red (no hubo respuesta del servidor) --
+        // Fetch fallido de red o timeout (no hubo respuesta del servidor) --
         // validamos contra el cache local en vez de mostrar error.
         await runOfflineValidation({ type: "qr", raw: qrPayload });
         return;
+      } finally {
+        clearTimeout(timeout);
       }
 
       const data =
@@ -986,32 +1003,37 @@ export default function ControlPage() {
         return;
       }
 
-      const {
-        data,
-        error: rpcError,
-      } = await supabase.rpc(
-        "validate_ticket_manual",
-        {
-          p_event_id:
-            event.id,
-
-          p_manual_code:
-            normalized,
-
-          p_method:
-            "manual",
-        }
-      );
+      // Mismo motivo que en el escaneo por QR: con mala señal el navegador
+      // puede seguir "online" mientras la request queda colgada sin
+      // resolver. Un timeout corto garantiza que el controlador siempre
+      // tenga una respuesta.
+      const rpcController = new AbortController();
+      const rpcTimeout = setTimeout(() => rpcController.abort(), 10_000);
+      let data: unknown;
+      let rpcError: { message?: string; name?: string } | null;
+      try {
+        const result = await supabase
+          .rpc("validate_ticket_manual", {
+            p_event_id: event.id,
+            p_manual_code: normalized,
+            p_method: "manual",
+          })
+          .abortSignal(rpcController.signal);
+        data = result.data;
+        rpcError = result.error;
+      } finally {
+        clearTimeout(rpcTimeout);
+      }
 
       if (rpcError) {
-        // Falla de red real (sin respuesta del servidor) -- validamos
-        // contra el cache local en vez de mostrar error. Un error de
-        // negocio real (ej. permiso) también cae acá porque
-        // supabase-js no distingue el motivo en el objeto error, pero
-        // la validación offline solo puede devolver lo que ya está en
-        // el cache, así que en la práctica el resultado sigue siendo
-        // correcto para el controlador.
-        if (!navigator.onLine) {
+        // Falla de red real, timeout, o error de negocio (ej. permiso) --
+        // supabase-js no distingue el motivo en el objeto error, pero la
+        // validación offline solo puede devolver lo que ya está en el
+        // cache, así que en la práctica el resultado sigue siendo correcto
+        // para el controlador. Antes esto solo pasaba a offline si
+        // navigator.onLine ya estaba en false, dejando al controlador
+        // esperando para siempre con una conexión mala pero "online".
+        if (!navigator.onLine || rpcController.signal.aborted) {
           await runOfflineValidation({ type: "manual", raw: normalized });
           return;
         }

@@ -456,13 +456,22 @@ export default async function InformesPage() {
   // PAGOS DE COMISIONES RRPP
   // =====================================================
 
-  const {
-    data: commissionPaymentsData,
-  } = await admin
-    .from(
-      "rrpp_commission_payments"
-    )
-    .select(`
+  const commissionPaymentsData = await fetchAllRows<{
+    id: string;
+    organization_id: string;
+    event_id: string;
+    event_staff_id: string;
+    organization_member_id: string;
+    amount_minor: number | string;
+    currency: string;
+    paid_at: string;
+    note: string | null;
+    created_by: string | null;
+    created_at: string;
+  }>((from, to) =>
+    admin
+      .from("rrpp_commission_payments")
+      .select(`
       id,
       organization_id,
       event_id,
@@ -475,14 +484,11 @@ export default async function InformesPage() {
       created_by,
       created_at
     `)
-    .eq(
-      "organization_id",
-      membership.organization_id
-    )
-    .in(
-      "event_id",
-      eventIds
-    );
+      .eq("organization_id", membership.organization_id)
+      .in("event_id", eventIds)
+      .order("id")
+      .range(from, to)
+  );
 
   const commissionPayments =
     (commissionPaymentsData ??

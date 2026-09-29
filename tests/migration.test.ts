@@ -84,6 +84,8 @@ const mesasOnlineMigration = readFileSync(new URL("../supabase/migrations/202609
 const salesAgentMigration = readFileSync(new URL("../supabase/migrations/20260990_sales_agent.sql", import.meta.url), "utf8");
 const arreglaStockYExpiracionMigration = readFileSync(new URL("../supabase/migrations/20260991_arregla_stock_y_expiracion_pedidos_socio.sql", import.meta.url), "utf8");
 const arreglaDuplicadosSalesAgentMigration = readFileSync(new URL("../supabase/migrations/20260992_arregla_duplicados_y_conversion_sales_agent.sql", import.meta.url), "utf8");
+const arreglaColectivosGeneralMigration = readFileSync(new URL("../supabase/migrations/20260993_arregla_colectivos_general_y_carreras.sql", import.meta.url), "utf8");
+const arreglaFinanzasComisionesMigration = readFileSync(new URL("../supabase/migrations/20260994_arregla_finanzas_y_comisiones_rrpp.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -113,7 +115,7 @@ async function database() {
   await db.exec(`create table events(id uuid primary key, organization_id uuid, name text, status public.event_status,
       rrpp_sales_enabled boolean default true, rrpp_sales_cutoff_at timestamptz,
       door_sales_enabled boolean default true, door_sales_start_at timestamptz, door_sales_end_at timestamptz);
-    create table event_staff(event_id uuid, organization_member_id uuid, staff_role public.event_staff_role, active boolean, commission_percentage numeric);
+    create table event_staff(id uuid primary key default gen_random_uuid(), event_id uuid, organization_member_id uuid, staff_role public.event_staff_role, active boolean, commission_percentage numeric);
     create table sales(id uuid primary key default gen_random_uuid(), organization_id uuid, event_id uuid, buyer_id uuid,
       seller_member_id uuid, status public.sale_status default 'confirmed', total_minor bigint default 0, currency text default 'ARS',
       channel public.sale_channel default 'organizer', confirmed_at timestamptz, created_at timestamptz default now(), updated_at timestamptz default now());
@@ -216,6 +218,8 @@ async function database() {
   await db.exec(salesAgentMigration);
   await db.exec(arreglaStockYExpiracionMigration);
   await db.exec(arreglaDuplicadosSalesAgentMigration);
+  await db.exec(arreglaColectivosGeneralMigration);
+  await db.exec(arreglaFinanzasComisionesMigration);
   return db;
 }
 
@@ -1358,6 +1362,61 @@ test("presupuestos: numera en orden y valida tipo, estado y descuento", async ()
   await db.close();
 });
 
+test("presupuestos: status_changed_at solo cambia cuando cambia el status (no con cualquier edicion)", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const id = await scalar(`insert into quotes(client_name, kind, status) values ('Cliente Reloj', 'diseno', 'a_pagar') returning id::text`);
+  const firstChangedAt = await scalar(`select status_changed_at from quotes where id='${id}'`);
+  assert.notEqual(firstChangedAt, null, "se rellena solo al crear (backfill/default)");
+
+  // Pasa un poco el tiempo para que un timestamp distinto sea detectable.
+  await db.exec(`update quotes set status_changed_at = status_changed_at - interval '20 days' where id='${id}'`);
+  const backdated = String(await scalar(`select status_changed_at from quotes where id='${id}'`));
+
+  // Editar algo que NO es el status (ej. corregir las notas) no lo toca.
+  await db.exec(`update quotes set notes = 'corrijo un typo' where id='${id}'`);
+  assert.equal(String(await scalar(`select status_changed_at from quotes where id='${id}'`)), backdated, "una edicion cualquiera no resetea el reloj del vencimiento");
+
+  // Cambiar el status SI lo actualiza a ahora.
+  await db.exec(`update quotes set status = 'aceptado' where id='${id}'`);
+  const afterStatusChange = String(await scalar(`select status_changed_at from quotes where id='${id}'`));
+  assert.notEqual(afterStatusChange, backdated, "cambiar el status si actualiza el reloj");
+
+  await db.close();
+});
+
+test("comisiones de RRPP: la tabla recuperada existe, con idempotencia contra pagos duplicados", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "e1e1e1e1-1111-4111-8111-111111111111";
+  const event = "e1e1e1e1-2222-4222-8222-222222222222";
+  const user = "e1e1e1e1-3333-4333-8333-333333333333";
+
+  await db.exec(`insert into auth.users values ('${user}','rrpp-pago@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club Comision','club-comision');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${user}','rrpp','active');`);
+  const member = await scalar(`select id::text from organization_members where user_id='${user}'`);
+  const staff = await scalar(`insert into event_staff(event_id,organization_member_id,staff_role,commission_percentage) values ('${event}','${member}','rrpp',10) returning id::text`);
+
+  const key = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const insertPayment = () =>
+    db.exec(`insert into rrpp_commission_payments(organization_id, event_id, event_staff_id, organization_member_id, amount_minor, idempotency_key)
+      values ('${org}','${event}','${staff}','${member}', 5000, '${key}')`);
+  await insertPayment();
+  await assert.rejects(insertPayment(), /duplicate key|unique/i, "la misma clave de idempotencia no puede insertar dos pagos");
+
+  assert.equal(Number(await scalar(`select count(*)::int from rrpp_commission_payments`)), 1);
+  await assert.rejects(
+    () => db.exec(`insert into rrpp_commission_payments(organization_id, event_id, event_staff_id, organization_member_id, amount_minor) values ('${org}','${event}','${staff}','${member}', -100)`),
+    /check constraint/,
+    "el monto tiene que ser positivo"
+  );
+
+  await db.close();
+});
+
 test("presupuestos: directorio de clientes reutilizable", async () => {
   const db = await database();
   const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
@@ -1733,6 +1792,45 @@ test("sistema de traslados: cupo, permisos y validacion de embarque", async () =
   // Codigo que no existe.
   const invalid = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','ZZZZZZ')`);
   assert.equal(invalid.rows[0].result, "invalid");
+
+  await db.close();
+});
+
+test("colectivo general: cualquier RRPP del evento lo puede usar (antes solo el organizador podia)", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "aaaaaaaa-5555-4555-8555-555555555555";
+  const event = "aaaaaaaa-6666-4666-8666-666666666666";
+  const rrppUser = "aaaaaaaa-7777-4777-8777-777777777777";
+  const outsiderUser = "aaaaaaaa-8888-4888-8888-888888888888";
+
+  await db.exec(`insert into auth.users values ('${rrppUser}','rrpp-general@example.test',now(),'{}'), ('${outsiderUser}','outsider-general@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club General','club-general');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${rrppUser}','rrpp','active');`);
+  // outsiderUser NO es miembro de esta organizacion.
+
+  // organization_member_id null = colectivo "general", sin RRPP dueño.
+  const route = await scalar(`insert into transfer_routes(event_id, organization_member_id, name, capacity) values ('${event}', null, 'Colectivo General', 2) returning id::text`);
+  const stop = await scalar(`insert into transfer_route_stops(route_id, position, name) values ('${route}', 1, 'Terminal') returning id::text`);
+
+  await db.exec(`select set_config('request.jwt.claim.sub','${rrppUser}',false)`);
+  const assign = await db.query<{ manual_code: string }>(`select * from assign_transfer_ticket('${route}','Pasajero General',null,null,'${stop}')`);
+  assert.equal(assign.rows.length, 1, "un RRPP cualquiera del evento puede sumar un pasajero a un colectivo general");
+
+  const validate = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','${assign.rows[0].manual_code}')`);
+  assert.equal(validate.rows[0].result, "valid", "y tambien puede validar el embarque");
+
+  const mark = await db.query<{ current_stop_id: string }>(`select * from transfer_mark_stop('${route}', '${stop}')`);
+  assert.equal(mark.rows[0].current_stop_id, stop, "y marcar la parada a mano");
+
+  // Alguien que NO es miembro de la organizacion sigue sin poder tocarlo.
+  await db.exec(`select set_config('request.jwt.claim.sub','${outsiderUser}',false)`);
+  await assert.rejects(
+    () => db.query(`select * from assign_transfer_ticket('${route}','Intruso')`),
+    /permiso/,
+    "alguien ajeno a la organizacion sigue sin poder usar el colectivo general"
+  );
 
   await db.close();
 });

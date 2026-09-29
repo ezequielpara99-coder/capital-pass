@@ -9,6 +9,7 @@ import {
   ReactNode,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -79,6 +80,7 @@ type RRPP = {
   commissionGenerated: number;
   commissionPaid: number;
   commissionPending: number;
+  commissionOverpaid: number;
 };
 
 type Props = {
@@ -162,6 +164,11 @@ export default function RRPPsClient({
 
   const [paymentData, setPaymentData] =
     useState<PaymentData | null>(null);
+
+  // Evita registrar el mismo pago dos veces si el fetch se reintenta (mismo
+  // patron que finanzas-client.tsx). Se renueva cada vez que se abre el
+  // modal para un RRPP nuevo.
+  const paymentKeyRef = useRef<string>(crypto.randomUUID());
 
   const [loading, setLoading] =
     useState(false);
@@ -682,6 +689,9 @@ export default function RRPPsClient({
 
               note:
                 paymentNote,
+
+              idempotencyKey:
+                paymentKeyRef.current,
             }),
           }
         );
@@ -727,6 +737,8 @@ export default function RRPPsClient({
     );
 
     setPaymentNote("");
+
+    paymentKeyRef.current = crypto.randomUUID();
 
     setPaymentData({
       memberId:
@@ -1270,6 +1282,12 @@ export default function RRPPsClient({
                             )}
 
                           </div>
+
+                          {rrpp.commissionOverpaid > 0 && (
+                            <div className="border border-red-400/20 bg-red-400/[0.05] p-3 text-xs text-red-300">
+                              Se le pagó {formatMoney(rrpp.commissionOverpaid)} de más (por una devolución posterior al pago, o un pago duplicado) — descontalo del próximo pago.
+                            </div>
+                          )}
 
                         </div>
 

@@ -186,6 +186,7 @@ export default function NuevaVentaRRPPPage() {
   const [transferRouteId, setTransferRouteId] = useState("");
   const [transferStopId, setTransferStopId] = useState("");
   const [transferResult, setTransferResult] = useState<TransferInfo>(null);
+  const [transferWarning, setTransferWarning] = useState("");
 
   const [quantity, setQuantity] =
     useState(1);
@@ -791,6 +792,12 @@ export default function NuevaVentaRRPPPage() {
           }
         } catch (transferErr) {
           console.error("ERROR ASIGNANDO TRASLADO:", transferErr);
+          // La venta ya se registró -- si no avisamos, el RRPP cree que el
+          // pasaje del colectivo se generó (y ya le cobró el traslado al
+          // comprador) cuando en realidad no quedó ningún código.
+          setTransferWarning(
+            "La venta se registró, pero no pudimos generar el pasaje del colectivo. Avisale al organizador para que lo cargue a mano."
+          );
         }
       }
 
@@ -970,6 +977,7 @@ export default function NuevaVentaRRPPPage() {
     setTransferRouteId("");
     setTransferStopId("");
     setTransferResult(null);
+    setTransferWarning("");
 
     setSaleResult(null);
     setEntriesResult(null);
@@ -1082,6 +1090,12 @@ export default function NuevaVentaRRPPPage() {
             <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.035] px-5 py-4 text-sm text-white/70">
               🚌 Traslado: <b>{transferResult.routeName}</b> · Código <span className="font-mono">{transferResult.manualCode}</span>
               {transferResult.isPaid && <span className="text-[#ff9b82]"> · Cobrale {money(transferResult.priceMinor)} aparte.</span>}
+            </div>
+          )}
+
+          {transferWarning && (
+            <div className="mb-5 rounded-2xl border border-orange-400/25 bg-orange-500/10 px-5 py-4 text-sm text-orange-200">
+              {transferWarning}
             </div>
           )}
 
