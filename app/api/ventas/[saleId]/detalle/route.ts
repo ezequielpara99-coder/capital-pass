@@ -485,6 +485,26 @@ export async function GET(
       );
 
     // ========================================================
+    // COMBO YA CANJEADO (para no ofrecer reintegrar mas de lo que
+    // process_ticket_return realmente va a permitir)
+    // ========================================================
+
+    let consumedComboByTicket = new Map<string, number>();
+    if (ticketIds.length > 0) {
+      const { data: comboRows } = await admin
+        .from("bar_sales")
+        .select("ticket_id, total_minor")
+        .in("ticket_id", ticketIds)
+        .eq("payment_method", "combo")
+        .is("cancelled_at", null);
+      consumedComboByTicket = new Map();
+      for (const row of comboRows ?? []) {
+        const current = consumedComboByTicket.get(row.ticket_id as string) ?? 0;
+        consumedComboByTicket.set(row.ticket_id as string, current + Number(row.total_minor));
+      }
+    }
+
+    // ========================================================
     // VENDEDOR
     // ========================================================
 
@@ -592,6 +612,17 @@ export async function GET(
               ticket.sale_item_id
                 ? Number(saleItem?.unit_price_minor ?? 0)
                 : Number(sale.total_minor ?? 0),
+
+            // Lo maximo que process_ticket_return va a aceptar reintegrar:
+            // el precio original menos el combo ya canjeado en la barra --
+            // sin esto, la pantalla ofrecia por default/maximo el precio
+            // lleno y el RPC lo rechazaba con un numero distinto al que se
+            // le mostro al organizador.
+            maxRefundMinor: Math.max(
+              0,
+              (ticket.sale_item_id ? Number(saleItem?.unit_price_minor ?? 0) : Number(sale.total_minor ?? 0)) -
+                (consumedComboByTicket.get(ticket.id) ?? 0)
+            ),
 
             issuedAt:
               ticket.issued_at,

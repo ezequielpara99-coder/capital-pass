@@ -144,7 +144,7 @@ export default async function MiPortalPage({
           <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Mis entradas</p>
           {sortedTickets.length === 0 ? (
             <div className="mt-3 border border-dashed border-white/[0.10] p-8 text-center text-sm text-white/35">
-              Todavía no tenés entradas activas con este email.
+              No encontramos entradas asociadas a este email. Si compraste en la puerta o con un RRPP sin cargar tu email, esta pantalla no va a mostrarlas — presentá tu DNI en la puerta, o pedile al organizador que te reenvíe la entrada.
             </div>
           ) : (
             <div className="mt-3 space-y-2">

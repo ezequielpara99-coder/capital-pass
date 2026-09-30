@@ -46,6 +46,7 @@ type TicketDetail = {
   ticketType: string;
 
   unitPriceMinor: number;
+  maxRefundMinor: number;
 
   issuedAt:
     | string
@@ -502,7 +503,7 @@ export default function SaleDetailModal({
 
     setRefundAmount(
       String(
-        ticket.unitPriceMinor
+        ticket.maxRefundMinor
       )
     );
   }
@@ -1228,7 +1229,7 @@ export default function SaleDetailModal({
                         setRefundAmount(
                           String(
                             selectedTicket
-                              .unitPriceMinor
+                              .maxRefundMinor
                           )
                         );
                       }
@@ -1259,6 +1260,10 @@ export default function SaleDetailModal({
 
                   </select>
 
+                  <p className="mt-2 text-[11px] leading-4 text-white/35">
+                    Marcá &quot;Dinero reintegrado&quot; solo si vos ya le devolviste la plata (Mercado Pago, transferencia, efectivo) — Capital Pass no hace ningún reintegro automático.
+                  </p>
+
                 </label>
 
                 {refundStatus !==
@@ -1275,7 +1280,7 @@ export default function SaleDetailModal({
                       min="0"
                       max={
                         selectedTicket
-                          .unitPriceMinor
+                          .maxRefundMinor
                       }
                       step="1"
                       value={
@@ -1297,7 +1302,10 @@ export default function SaleDetailModal({
                       Máximo:{" "}
                       {formatMoney(
                         selectedTicket
-                          .unitPriceMinor
+                          .maxRefundMinor
+                      )}
+                      {selectedTicket.maxRefundMinor < selectedTicket.unitPriceMinor && (
+                        <> (ya se canjearon {formatMoney(selectedTicket.unitPriceMinor - selectedTicket.maxRefundMinor)} de combo en la barra)</>
                       )}
                     </p>
 

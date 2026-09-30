@@ -95,6 +95,8 @@ const protegePresenciaMigration = readFileSync(new URL("../supabase/migrations/2
 const arreglaCarreraCreateSaleMigration = readFileSync(new URL("../supabase/migrations/20260999_arregla_carrera_idempotencia_create_sale.sql", import.meta.url), "utf8");
 const qrDeMesaMigration = readFileSync(new URL("../supabase/migrations/20261002_qr_de_mesa.sql", import.meta.url), "utf8");
 const arreglaGateBarraCupoMigration = readFileSync(new URL("../supabase/migrations/20261003_arregla_gate_barra_y_cupo_tanda.sql", import.meta.url), "utf8");
+const arreglaPagoRechazadoTardioMigration = readFileSync(new URL("../supabase/migrations/20261005_arregla_pago_rechazado_tardio_y_permiso.sql", import.meta.url), "utf8");
+const normalizaEmailCompradorMigration = readFileSync(new URL("../supabase/migrations/20261006_normaliza_email_comprador.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -238,6 +240,8 @@ async function database() {
   await db.exec(protegePresenciaMigration);
   await db.exec(qrDeMesaMigration);
   await db.exec(arreglaGateBarraCupoMigration);
+  await db.exec(arreglaPagoRechazadoTardioMigration);
+  await db.exec(normalizaEmailCompradorMigration);
   return db;
 }
 
@@ -446,6 +450,27 @@ test("ventas online: carrito, confirmacion, cupo y limpieza de pendientes", asyn
     () => db.query(`select * from create_online_sale('${event}', ${packCart}, ${buyer("888888")})`),
     /pack no existe o no esta disponible/
   );
+
+  // Un pago RECHAZADO que llega DESPUES de que otro intento (misma venta,
+  // otro payment_id de Mercado Pago) ya la confirmo NO debe anular las
+  // entradas ya emitidas/enviadas -- es un intento de pago distinto que
+  // perdio la carrera, no un reembolso del pago que si se acredito. Antes
+  // cualquier estado que no fuera "todavia pendiente" disparaba el mismo
+  // camino que un reembolso real.
+  const lateRejectTicketType = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  await db.exec(`insert into ticket_types(id,event_id,name,price_minor,capacity,active,status)
+    values ('${lateRejectTicketType}','${event}','Pago tardio test',5000,5,true,'available');`);
+  const lateRejectCart = `'[{"ticket_type_id":"${lateRejectTicketType}","quantity":1}]'::jsonb`;
+  const lateRejectSale = await scalar(`select sale_id::text from create_online_sale('${event}', ${lateRejectCart}, ${buyer("999912")})`);
+  await db.query("select confirm_online_sale($1,'approved')", [lateRejectSale]);
+  assert.equal(await scalar(`select status from sales where id='${lateRejectSale}'`), "confirmed");
+  const lateRejectTicketId = await scalar(`select id::text from tickets where sale_id='${lateRejectSale}'`);
+
+  for (const laterStatus of ["rejected", "cancelled", "pending", "in_process"]) {
+    await db.query("select confirm_online_sale($1,$2)", [lateRejectSale, laterStatus]);
+    assert.equal(await scalar(`select status from sales where id='${lateRejectSale}'`), "confirmed", `un aviso '${laterStatus}' tardio sobre una venta ya confirmada no debe tocarla`);
+    assert.equal(await scalar(`select status from tickets where id='${lateRejectTicketId}'`), "issued", `la entrada ya emitida sigue valida tras un aviso '${laterStatus}' tardio`);
+  }
 
   // Un reembolso/contracargo sobre una venta YA confirmada anula las
   // entradas emitidas (no deben poder usarse en la puerta) y libera el
@@ -1385,9 +1410,19 @@ test("combos (entrada + consumicion) y packs de entradas", async () => {
   // combo. vipTicketId termino con los 2 Fernet incluidos canjeados de
   // nuevo tras la cancelacion de arriba (2 x $2000 = $4000 activos; el
   // canje original de $2000 quedo cancelado y no cuenta).
-  // organizerUser ya quedo como el rol activo (set_config de arriba).
+  //
+  // Esta primera llamada corre EXPLICITAMENTE como rol "authenticated" (no
+  // solo con request.jwt.claim.sub, que el resto de este archivo suele usar
+  // sin cambiar de rol) -- la ruta real del panel (app/api/entradas/devolver)
+  // llama a este RPC con la sesion del organizador, que en Postgres es
+  // literalmente el rol "authenticated". Sin esto, un "revoke" del grant a
+  // "authenticated" en una migracion futura (ya paso una vez: 20261002 lo
+  // piso sin querer) rompe todas las devoluciones en produccion sin que
+  // ningun test lo note, porque el resto de las llamadas de este bloque
+  // corren como superusuario y no respetan GRANT/REVOKE.
   // ==========================================================
 
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false); set role authenticated;`);
   const vipReturn = await db.query<{
     return_id: string;
     refund_status: string;
@@ -1396,6 +1431,7 @@ test("combos (entrada + consumicion) y packs de entradas", async () => {
   }>(
     `select * from process_ticket_return('${vipTicketId}','Compro de mas','refunded',null)`
   );
+  await db.exec("reset role;");
   assert.equal(Number(vipReturn.rows[0].refund_amount_minor), 11000, "15000 originales - 4000 activos consumidos del combo = 11000");
   assert.equal(vipReturn.rows[0].ticket_status, "cancelled");
   assert.equal(await scalar(`select status from tickets where id='${vipTicketId}'`), "cancelled");
@@ -2506,6 +2542,32 @@ test("ticket_types: el precio no puede quedar negativo (0 si se permite, gratis)
 
   // Entrada gratis (0) sigue permitida a proposito.
   await db.exec(`insert into ticket_types(event_id,name,price_minor,capacity) values ('${event}','Gratis',0,10)`);
+
+  await db.close();
+});
+
+test("buyers: el email se normaliza a minusculas siempre (para que /mi lo encuentre sin importar como se tipeo al comprar)", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "c3c3c3c3-1111-4111-8111-111111111111";
+
+  await db.exec(`insert into organizations(id,name,slug) values ('${org}','Club Email','club-email')`);
+
+  // Nuevo comprador con email mezclado/con espacios: el trigger lo normaliza al guardar.
+  const buyerId = await scalar(
+    `insert into buyers(organization_id,first_name,last_name,dni,email) values ('${org}','Juan','Perez','30111222',' Juan.Perez@Gmail.com ') returning id::text`
+  );
+  assert.equal(await scalar(`select email from buyers where id='${buyerId}'`), "juan.perez@gmail.com");
+
+  // Tambien al editar.
+  await db.query(`update buyers set email = 'OTRO@Ejemplo.COM' where id='${buyerId}'`);
+  assert.equal(await scalar(`select email from buyers where id='${buyerId}'`), "otro@ejemplo.com");
+
+  // Sin email: sigue null, no revienta con lower(null).
+  const noEmailBuyer = await scalar(
+    `insert into buyers(organization_id,first_name,last_name,dni) values ('${org}','Sin','Email','30333444') returning id::text`
+  );
+  assert.equal(await scalar(`select email from buyers where id='${noEmailBuyer}'`), null);
 
   await db.close();
 });
