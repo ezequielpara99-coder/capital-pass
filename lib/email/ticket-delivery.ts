@@ -104,11 +104,16 @@ export async function sendTicketDelivery(
   // Pensado para imprimirse: fondo claro y texto oscuro en la tarjeta de
   // cada entrada (un fondo oscuro gasta mucha tinta y algunos clientes de
   // mail directamente ignoran el color de fondo al imprimir, dejando texto
-  // claro sobre blanco = ilegible). El QR va embebido como data URI directo
-  // en el <img> -- se ve en el cuerpo del mail sin depender de que el
-  // destinatario abra ningún adjunto.
+  // claro sobre blanco = ilegible). El QR va referenciado por cid (imagen
+  // incluida como adjunto con content_id, no como data URI en el <img>) --
+  // es el metodo estandar de los mails transaccionales para que la imagen
+  // se vea embebida en el cuerpo del mail sin que el destinatario tenga que
+  // abrir nada aparte, y evita el riesgo de que un data URI grande dispare
+  // filtros de spam (poco comun en mail transaccional legitimo, mas comun
+  // en phishing).
   const ticketsHtml = input.tickets
-    .map((ticket) => {
+    .map((ticket, index) => {
+      const cid = `qr-${index}`;
       const safeType = escapeHtml(ticket.ticketType);
       const safeCode = ticket.manualCode ? escapeHtml(ticket.manualCode) : null;
       return `
@@ -122,7 +127,7 @@ export async function sendTicketDelivery(
           </tr>
           <tr>
             <td style="background:#ffffff;padding:26px 22px;text-align:center;">
-              <img src="data:image/png;base64,${ticket.qrPngBase64}" width="220" height="220" alt="Código QR de la entrada" style="display:block;margin:0 auto;width:220px;height:220px;border:1px solid #e7e1d5;border-radius:10px;" />
+              <img src="cid:${cid}" width="220" height="220" alt="Código QR de la entrada" style="display:block;margin:0 auto;width:220px;height:220px;border:1px solid #e7e1d5;border-radius:10px;" />
               ${safeCode ? `<p style="margin:16px 0 0;font-family:'Courier New',Courier,monospace;font-weight:700;font-size:21px;letter-spacing:.14em;color:#17120c;">${safeCode}</p>` : ""}
             </td>
           </tr>
@@ -187,6 +192,13 @@ export async function sendTicketDelivery(
     </div>
   `;
 
+  const attachments = input.tickets.map((ticket, index) => ({
+    filename: `entrada-${ticket.manualCode ?? index + 1}.png`,
+    content: ticket.qrPngBase64,
+    content_type: "image/png",
+    content_id: `qr-${index}`,
+  }));
+
   let response: Response;
   try {
     response = await fetch("https://api.resend.com/emails", {
@@ -201,6 +213,7 @@ export async function sendTicketDelivery(
         subject,
         text,
         html,
+        attachments,
       }),
     });
   } catch (error) {
