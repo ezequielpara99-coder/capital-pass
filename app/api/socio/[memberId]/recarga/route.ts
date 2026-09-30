@@ -56,10 +56,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     const { data: org } = await admin.from("organizations").select("name").eq("id", member.organization_id).maybeSingle();
+    const { data: mpAccount } = await admin
+      .from("organization_mercadopago_accounts")
+      .select("mp_user_id")
+      .eq("organization_id", member.organization_id)
+      .maybeSingle();
 
     const { data: topup, error: insertError } = await admin
       .from("wallet_topups")
-      .insert({ organization_id: member.organization_id, member_id: member.id, amount_minor: amount })
+      // Snapshot de que cuenta MP se uso para ESTA preference puntual -- si
+      // el organizador reconecta Mercado Pago despues de esto (cambia de
+      // cuenta), la confirmacion del pago tiene que seguir comparando
+      // contra la cuenta con la que el socio realmente pago, no contra la
+      // que este vigente en ese momento (mismo bug ya arreglado para
+      // ventas de entradas, ver 20261011).
+      .insert({ organization_id: member.organization_id, member_id: member.id, amount_minor: amount, mercadopago_collector_id: mpAccount?.mp_user_id ?? null })
       .select("id")
       .single();
     if (insertError || !topup) {

@@ -104,6 +104,7 @@ const arreglaComboStockRateLimitMigration = readFileSync(new URL("../supabase/mi
 const snapshotCuentaMpVentaOnlineMigration = readFileSync(new URL("../supabase/migrations/20261011_snapshot_cuenta_mp_venta_online.sql", import.meta.url), "utf8");
 const mesaGeneraEntradaMigration = readFileSync(new URL("../supabase/migrations/20261012_mesa_genera_entrada_y_endurece_venta.sql", import.meta.url), "utf8");
 const arreglaPermisoUpdateSalesMigration = readFileSync(new URL("../supabase/migrations/20261013_arregla_permiso_update_sales.sql", import.meta.url), "utf8");
+const snapshotCuentaMpRecargaMigration = readFileSync(new URL("../supabase/migrations/20261014_snapshot_cuenta_mp_recarga_socio.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -257,6 +258,7 @@ async function database() {
   await db.exec(snapshotCuentaMpVentaOnlineMigration);
   await db.exec(mesaGeneraEntradaMigration);
   await db.exec(arreglaPermisoUpdateSalesMigration);
+  await db.exec(snapshotCuentaMpRecargaMigration);
   return db;
 }
 
@@ -3549,6 +3551,15 @@ test("recarga de saldo: acredita una sola vez por pago, permite reintento tras r
   const newTopup = (amount: number) => scalar(`insert into wallet_topups(organization_id, member_id, amount_minor) values ('${org}','${member}',${amount}) returning id::text`) as Promise<string>;
   const apply = (topup: string, payment: string, status: string) =>
     db.query<{ applied: boolean; new_status: string }>(`select * from member_wallet_topup_apply('${topup}', '${payment}', '${status}')`);
+
+  // Snapshot de la cuenta MP usada para la preference de esta recarga --
+  // mismo bug ya arreglado para ventas de entradas (20261011): sin esto,
+  // reconectar Mercado Pago mientras una recarga esta pendiente dejaba la
+  // verificacion comparando contra la cuenta equivocada para siempre.
+  const snapshotTopup = await scalar(
+    `insert into wallet_topups(organization_id, member_id, amount_minor, mercadopago_collector_id) values ('${org}','${member}',3000,999) returning id::text`
+  );
+  assert.equal(await scalar(`select mercadopago_collector_id::int from wallet_topups where id='${snapshotTopup}'`), 999);
 
   // Pendiente / en proceso no acredita nada.
   const first = await newTopup(5000);

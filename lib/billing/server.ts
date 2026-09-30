@@ -376,14 +376,27 @@ export async function reconcileOnlineSale(saleId: string) {
 export async function applyTopupPayment(payment: ProviderPayment, topupId: string) {
   const admin = createAdminClient();
   const { data: topup, error } = await admin.from("wallet_topups")
-    .select("id, organization_id, member_id, amount_minor").eq("id", topupId).maybeSingle();
+    .select("id, organization_id, member_id, amount_minor, mercadopago_collector_id").eq("id", topupId).maybeSingle();
   if (error) throw new Error("No se pudo consultar la recarga.");
   if (!topup) return false;
-  const { data: account } = await admin.from("organization_mercadopago_accounts")
-    .select("mp_user_id").eq("organization_id", topup.organization_id).maybeSingle();
-  if (!account) return false;
+
+  // Cuenta MP snapshoteada al crear la preference de ESTA recarga, no la
+  // vigente ahora -- si el organizador reconecta/cambia de cuenta mientras
+  // la recarga esta pendiente, el pago real quedo acreditado en la cuenta
+  // vieja, y comparar contra la nueva hacia fallar la verificacion para
+  // siempre. Fallback a la cuenta vigente solo para recargas de antes de
+  // este fix (sin snapshot guardado).
+  let collectorId = topup.mercadopago_collector_id as number | null;
+  if (collectorId == null) {
+    const { data: account } = await admin.from("organization_mercadopago_accounts")
+      .select("mp_user_id").eq("organization_id", topup.organization_id).maybeSingle();
+    if (!account) return false;
+    collectorId = account.mp_user_id;
+  }
+  if (collectorId == null) return false;
+
   const verified = verifiedPayment(payment, {
-    amount: Number(topup.amount_minor), currency: "ARS", collectorId: account.mp_user_id,
+    amount: Number(topup.amount_minor), currency: "ARS", collectorId,
     live: process.env.MERCADOPAGO_ENV !== "sandbox",
   });
   const result = await admin.rpc("member_wallet_topup_apply", {
