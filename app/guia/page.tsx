@@ -65,6 +65,7 @@ const GUIDE: Record<Role, RoleGuide> = {
         steps: [
           "Cargá las mesas del evento con su capacidad y precio.",
           "Podés vender una mesa vos mismo, dejar que la compren online desde la página pública del evento, o que un socio premium la reserve desde su carnet.",
+          "Toda mesa vendida (en persona u online) genera su propia entrada con QR y código — el control de ingreso la valida igual que cualquier otra entrada.",
         ],
       },
       {
