@@ -42,6 +42,7 @@ type EventData = {
   design_service_items: string[];
   design_service_notes: string | null;
   design_service_requested_at: string | null;
+  updated_at: string;
 };
 
 type AssetField =
@@ -63,6 +64,7 @@ type TicketType = {
   combo_event_product_id: string | null;
   combo_quantity: number | null;
   combo_credit_minor: number | null;
+  updated_at: string;
 };
 
 type EventProductOption = { eventProductId: string; name: string };
@@ -212,7 +214,8 @@ function ManageEventContent() {
       design_service_status,
       design_service_items,
       design_service_notes,
-      design_service_requested_at
+      design_service_requested_at,
+      updated_at
     `;
 
     const eventQuery = () =>
@@ -323,7 +326,8 @@ function ManageEventContent() {
           combo_type,
           combo_event_product_id,
           combo_quantity,
-          combo_credit_minor
+          combo_credit_minor,
+          updated_at
         `)
         .eq("event_id", selectedEvent.id)
         .order("created_at", { ascending: true });
@@ -853,7 +857,14 @@ function ManageEventContent() {
     setSavingEvent(true);
     setMessage("");
 
-    const { error } = await supabase
+    // "eq updated_at" + chequear si realmente afecto una fila: si otra
+    // pestaña (o otra persona de la organizacion) guardo cambios en el
+    // medio, este update no encuentra ninguna fila que matchee el
+    // updated_at que se cargo al abrir la pantalla -- sin esto, un
+    // guardado pisaba en silencio TODOS los campos (incluidos los que
+    // otra pestaña acababa de cambiar con urgencia, como frenar la venta
+    // de RRPP) con los valores viejos que esta pestaña tenia en memoria.
+    const { data: updatedRows, error } = await supabase
       .from("events")
       .update({
         status: event.status,
@@ -886,10 +897,18 @@ function ManageEventContent() {
 
         updated_at: new Date().toISOString(),
       })
-      .eq("id", event.id);
+      .eq("id", event.id)
+      .eq("updated_at", event.updated_at)
+      .select("id");
 
     if (error) {
       showError("No se pudieron guardar los cambios del evento.");
+      setSavingEvent(false);
+      return;
+    }
+
+    if (!updatedRows || updatedRows.length === 0) {
+      showError("Alguien más guardó cambios en este evento mientras lo tenías abierto. Recargá la página para ver la versión actual antes de volver a guardar.");
       setSavingEvent(false);
       return;
     }
@@ -948,7 +967,10 @@ function ManageEventContent() {
 
     setSavingTicketId(ticket.id);
 
-    const { error } = await supabase
+    // Mismo motivo que saveEventSettings: sin comparar updated_at, un
+    // guardado pisaba en silencio los cambios que otra pestaña/persona
+    // haya hecho sobre esta misma tanda en el medio (ej. el cupo).
+    const { data: updatedRows, error } = await supabase
       .from("ticket_types")
       .update({
         name: ticket.name.trim(),
@@ -963,7 +985,9 @@ function ManageEventContent() {
         combo_credit_minor: ticket.combo_type === "credito" ? Number(ticket.combo_credit_minor) : null,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", ticket.id);
+      .eq("id", ticket.id)
+      .eq("updated_at", ticket.updated_at)
+      .select("id");
 
     if (error) {
       showError(
@@ -973,6 +997,12 @@ function ManageEventContent() {
         )
       );
 
+      setSavingTicketId(null);
+      return;
+    }
+
+    if (!updatedRows || updatedRows.length === 0) {
+      showError(`Alguien más guardó cambios en la tanda "${ticket.name}" mientras la tenías abierta. Recargá la página para ver la versión actual.`);
       setSavingTicketId(null);
       return;
     }
