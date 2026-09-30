@@ -9,7 +9,10 @@ export type TicketForDelivery = {
 export type TicketDeliveryInput = {
   to: string;
   buyerName: string;
+  buyerDni?: string | null;
   eventName: string;
+  eventStartsAt?: string | null;
+  eventVenue?: string | null;
   tickets: TicketForDelivery[];
 };
 
@@ -24,6 +27,20 @@ function escapeHtml(value: string) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+// Fecha del evento en el mail, mismo criterio de zona horaria que el resto
+// de los emails transaccionales (lib/email/subscription-receipt.ts).
+function formatEventDate(value: string) {
+  return new Intl.DateTimeFormat("es-AR", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Argentina/Buenos_Aires",
+  }).format(new Date(value));
 }
 
 // Mismo remitente/API key que el resto de los emails transaccionales
@@ -55,7 +72,11 @@ export async function sendTicketDelivery(
 
   const buyerName = input.buyerName || "Comprador";
   const safeBuyerName = escapeHtml(buyerName);
+  const safeBuyerDni = input.buyerDni ? escapeHtml(input.buyerDni) : null;
   const safeEventName = escapeHtml(input.eventName);
+  const safeEventDate = input.eventStartsAt ? escapeHtml(formatEventDate(input.eventStartsAt)) : null;
+  const safeEventVenue = input.eventVenue ? escapeHtml(input.eventVenue) : null;
+  const eventMeta = [safeEventDate, safeEventVenue].filter(Boolean).join(" · ");
   const plural = input.tickets.length > 1;
 
   const subject = `Tu ${plural ? "entradas" : "entrada"} para ${input.eventName}`;
@@ -64,56 +85,107 @@ export async function sendTicketDelivery(
     `Hola ${buyerName},`,
     "",
     `Acá tenés tu ${plural ? "entradas" : "entrada"} para ${input.eventName}.`,
+    safeEventDate ? `Fecha: ${formatEventDate(input.eventStartsAt as string)}` : "",
+    input.eventVenue ? `Lugar: ${input.eventVenue}` : "",
+    input.buyerDni ? `Titular: ${buyerName} (DNI ${input.buyerDni})` : `Titular: ${buyerName}`,
     "",
     ...input.tickets.map(
       (ticket) =>
         `${ticket.ticketType}${ticket.manualCode ? ` (código ${ticket.manualCode})` : ""}: ${ticket.publicUrl}`
     ),
     "",
-    "El QR de cada entrada va adjunto en este mismo email.",
+    "El QR de cada entrada está en este mismo email -- podés imprimirlo o mostrarlo desde el celular.",
     "",
     "Gracias por usar Capital Pass.",
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
+  // Pensado para imprimirse: fondo claro y texto oscuro en la tarjeta de
+  // cada entrada (un fondo oscuro gasta mucha tinta y algunos clientes de
+  // mail directamente ignoran el color de fondo al imprimir, dejando texto
+  // claro sobre blanco = ilegible). El QR va embebido como data URI directo
+  // en el <img> -- se ve en el cuerpo del mail sin depender de que el
+  // destinatario abra ningún adjunto.
   const ticketsHtml = input.tickets
     .map((ticket) => {
       const safeType = escapeHtml(ticket.ticketType);
       const safeCode = ticket.manualCode ? escapeHtml(ticket.manualCode) : null;
       return `
-        <div style="padding:16px;border-bottom:1px solid rgba(255,255,255,.08);">
-          <p style="margin:0;color:rgba(247,243,237,.38);font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;">${safeType}</p>
-          ${safeCode ? `<p style="margin:7px 0 0;color:#fff4ee;font-size:15px;">Código: ${safeCode}</p>` : ""}
-          <p style="margin:7px 0 0;"><a href="${ticket.publicUrl}" style="color:#ffc0ad;font-size:13px;">Ver entrada</a></p>
-        </div>`;
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;border:2px solid #17120c;border-radius:16px;overflow:hidden;">
+          <tr>
+            <td style="background:#17120c;padding:16px 22px;">
+              <p style="margin:0;color:#ff9b82;font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;font-family:Arial,Helvetica,sans-serif;">${safeType}</p>
+              <p style="margin:6px 0 0;color:#fff4ee;font-size:19px;font-weight:900;letter-spacing:.01em;text-transform:uppercase;font-family:Arial,Helvetica,sans-serif;">${safeEventName}</p>
+              ${eventMeta ? `<p style="margin:5px 0 0;color:rgba(247,243,237,.62);font-size:12px;font-family:Arial,Helvetica,sans-serif;">${eventMeta}</p>` : ""}
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#ffffff;padding:26px 22px;text-align:center;">
+              <img src="data:image/png;base64,${ticket.qrPngBase64}" width="220" height="220" alt="Código QR de la entrada" style="display:block;margin:0 auto;width:220px;height:220px;border:1px solid #e7e1d5;border-radius:10px;" />
+              ${safeCode ? `<p style="margin:16px 0 0;font-family:'Courier New',Courier,monospace;font-weight:700;font-size:21px;letter-spacing:.14em;color:#17120c;">${safeCode}</p>` : ""}
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#ffffff;padding:0 22px 22px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:2px dashed #ddd6c7;padding-top:16px;">
+                <tr>
+                  <td style="color:#8a8474;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;font-family:Arial,Helvetica,sans-serif;padding-top:16px;">Titular</td>
+                  <td align="right" style="color:#17120c;font-size:13px;font-weight:700;font-family:Arial,Helvetica,sans-serif;padding-top:16px;">${safeBuyerName}</td>
+                </tr>
+                ${
+                  safeBuyerDni
+                    ? `<tr>
+                  <td style="color:#8a8474;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;font-family:Arial,Helvetica,sans-serif;padding-top:8px;">DNI</td>
+                  <td align="right" style="color:#17120c;font-size:13px;font-weight:700;font-family:Arial,Helvetica,sans-serif;padding-top:8px;">${safeBuyerDni}</td>
+                </tr>`
+                    : ""
+                }
+              </table>
+              <p style="margin:14px 0 0;text-align:center;"><a href="${ticket.publicUrl}" style="color:#c2410c;font-size:11px;font-family:Arial,Helvetica,sans-serif;">Ver esta entrada online →</a></p>
+            </td>
+          </tr>
+        </table>`;
     })
     .join("");
 
   const html = `
-    <div style="margin:0;padding:0;background:#050505;color:#f7f3ed;font-family:Arial,Helvetica,sans-serif;">
-      <div style="max-width:640px;margin:0 auto;padding:34px 22px;">
-        <div style="border:1px solid rgba(255,90,42,.24);background:#0a0807;padding:28px;">
-          <p style="margin:0 0 18px;color:#ff7354;font-size:11px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;">
-            Capital Pass
-          </p>
-          <h1 style="margin:0;color:#fff4ee;font-size:30px;line-height:1.05;text-transform:uppercase;">
-            Tu ${plural ? "entradas" : "entrada"}
-          </h1>
-          <p style="margin:22px 0 0;color:rgba(247,243,237,.66);font-size:15px;line-height:1.65;">
-            Hola ${safeBuyerName}, acá tenés ${plural ? "tus entradas" : "tu entrada"} para <strong>${safeEventName}</strong>. El QR de cada una va adjunto en este email.
-          </p>
-
-          <div style="margin-top:26px;border:1px solid rgba(255,255,255,.10);">
-            ${ticketsHtml}
-          </div>
-        </div>
-      </div>
+    <div style="margin:0;padding:0;background:#f2efe8;font-family:Arial,Helvetica,sans-serif;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2efe8;">
+        <tr>
+          <td align="center" style="padding:28px 16px;">
+            <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+              <tr>
+                <td style="background:#0a0807;padding:24px 26px;border-radius:16px 16px 0 0;">
+                  <p style="margin:0;color:#ff7354;font-size:11px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;">Capital Pass</p>
+                  <h1 style="margin:8px 0 0;color:#fff4ee;font-size:26px;line-height:1.1;text-transform:uppercase;">
+                    Tu ${plural ? "entradas" : "entrada"}
+                  </h1>
+                </td>
+              </tr>
+              <tr>
+                <td style="background:#fffdf9;padding:22px 26px 6px;">
+                  <p style="margin:0;color:#3a342c;font-size:14px;line-height:1.65;">
+                    Hola ${safeBuyerName}, acá tenés ${plural ? "tus entradas" : "tu entrada"} para <strong>${safeEventName}</strong>. Podés imprimir este mail o mostrarlo desde el celular al ingresar.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td style="background:#fffdf9;padding:20px 26px 26px;">
+                  ${ticketsHtml}
+                </td>
+              </tr>
+              <tr>
+                <td style="background:#0a0807;padding:16px 26px;border-radius:0 0 16px 16px;text-align:center;">
+                  <p style="margin:0;color:rgba(247,243,237,.4);font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;">Capital Pass · Gestión de eventos</p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
     </div>
   `;
-
-  const attachments = input.tickets.map((ticket, index) => ({
-    filename: `entrada-${ticket.manualCode ?? index + 1}.png`,
-    content: ticket.qrPngBase64,
-  }));
 
   let response: Response;
   try {
@@ -129,7 +201,6 @@ export async function sendTicketDelivery(
         subject,
         text,
         html,
-        attachments,
       }),
     });
   } catch (error) {

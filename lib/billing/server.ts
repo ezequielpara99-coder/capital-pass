@@ -240,11 +240,11 @@ async function sendOnlineSaleTicketEmail(saleId: string, opts?: { organizationId
       });
     }
 
-    const { data: buyer } = await admin.from("buyers").select("first_name, last_name, email").eq("id", sale.buyer_id).maybeSingle();
+    const { data: buyer } = await admin.from("buyers").select("first_name, last_name, email, dni").eq("id", sale.buyer_id).maybeSingle();
     const email = buyer?.email?.trim();
     if (!email) return;
 
-    const { data: event } = await admin.from("events").select("name").eq("id", sale.event_id).maybeSingle();
+    const { data: event } = await admin.from("events").select("name, starts_at, venue_name, city").eq("id", sale.event_id).maybeSingle();
 
     const { data: tickets } = await admin
       .from("tickets")
@@ -278,7 +278,10 @@ async function sendOnlineSaleTicketEmail(saleId: string, opts?: { organizationId
     const result = await sendTicketDelivery({
       to: email,
       buyerName: `${buyer?.first_name ?? ""} ${buyer?.last_name ?? ""}`.trim(),
+      buyerDni: buyer?.dni ?? null,
       eventName: event?.name ?? "tu evento",
+      eventStartsAt: event?.starts_at ?? null,
+      eventVenue: [event?.venue_name, event?.city].filter(Boolean).join(", ") || null,
       tickets: ticketsForEmail,
     });
     if (!result.ok) {

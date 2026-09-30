@@ -68,7 +68,7 @@ export async function POST(
 
     const { data: buyer } = await admin
       .from("buyers")
-      .select("first_name, last_name, email")
+      .select("first_name, last_name, email, dni")
       .eq("id", sale.buyer_id)
       .maybeSingle();
 
@@ -100,7 +100,7 @@ export async function POST(
     try {
       const { data: event } = await admin
         .from("events")
-        .select("name")
+        .select("name, starts_at, venue_name, city")
         .eq("id", sale.event_id)
         .maybeSingle();
 
@@ -141,7 +141,10 @@ export async function POST(
       const result = await sendTicketDelivery({
         to: email,
         buyerName: `${buyer?.first_name ?? ""} ${buyer?.last_name ?? ""}`.trim(),
+        buyerDni: buyer?.dni ?? null,
         eventName: event?.name ?? "tu evento",
+        eventStartsAt: event?.starts_at ?? null,
+        eventVenue: [event?.venue_name, event?.city].filter(Boolean).join(", ") || null,
         tickets: ticketsForEmail,
       });
 
