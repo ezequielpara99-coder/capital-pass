@@ -94,6 +94,7 @@ const endurecePresenciaPerfilMigration = readFileSync(new URL("../supabase/migra
 const protegePresenciaMigration = readFileSync(new URL("../supabase/migrations/20261001_protege_presencia_de_organizadores.sql", import.meta.url), "utf8");
 const arreglaCarreraCreateSaleMigration = readFileSync(new URL("../supabase/migrations/20260999_arregla_carrera_idempotencia_create_sale.sql", import.meta.url), "utf8");
 const qrDeMesaMigration = readFileSync(new URL("../supabase/migrations/20261002_qr_de_mesa.sql", import.meta.url), "utf8");
+const arreglaGateBarraCupoMigration = readFileSync(new URL("../supabase/migrations/20261003_arregla_gate_barra_y_cupo_tanda.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -236,6 +237,7 @@ async function database() {
   await db.exec(endurecePresenciaPerfilMigration);
   await db.exec(protegePresenciaMigration);
   await db.exec(qrDeMesaMigration);
+  await db.exec(arreglaGateBarraCupoMigration);
   return db;
 }
 
@@ -515,6 +517,22 @@ test("tandas: no se puede bajar el cupo por debajo de lo ya vendido (bloqueado e
   // FK (igual que otros tests de este archivo que la agregan a mano cuando
   // la necesitan), asi que no se reproduce aca para no duplicar cobertura
   // de algo ya verificado contra la base real.
+
+  // capacity NULL/0/negativo: sin este constraint, "x > NULL" en PL/pgSQL
+  // es NULL (no dispara el "if"), asi que una tanda con capacity NULL
+  // colaba cupo infinito en confirm_online_sale/create_sale sin que nadie
+  // lo notara -- mismo patron ya arreglado para price_minor.
+  await assert.rejects(
+    () => db.exec(`insert into ticket_types(event_id,name,price_minor,capacity) values ('${event}','Sin cupo',5000,null)`),
+    /ticket_types_capacity_positive|violates check constraint|null value/,
+    "capacity NULL debe rechazarse a nivel de base"
+  );
+  await assert.rejects(
+    () => db.exec(`insert into ticket_types(event_id,name,price_minor,capacity) values ('${event}','Cupo cero',5000,0)`),
+    /ticket_types_capacity_positive|violates check constraint/,
+    "capacity 0 debe rechazarse a nivel de base"
+  );
+  await db.exec(`insert into ticket_types(event_id,name,price_minor,capacity) values ('${event}','Con cupo',5000,5)`);
 
   await db.close();
 });
@@ -831,6 +849,24 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
     "la venta sin mesa debe guardar table_id null"
   );
   assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 7, "vender un trago no toca el stock");
+
+  // create_bartender_sale valida cp_org_has_stock_access (mismo gate que ya
+  // usan assign_stock_to_bar/adjust_bar_stock/redeem_combo_ticket), no solo
+  // cp_org_has_service -- antes, bloquear el modulo de stock de una
+  // organizacion (organizations.stock_access_blocked) dejaba el panel de
+  // administracion sin acceso pero el bartender seguia pudiendo vender
+  // tragos sin limite.
+  await db.exec(`update organizations set stock_access_blocked = true where id = '${org}'`);
+  await assert.rejects(
+    () => db.query(`select create_bartender_sale('${bar}','${table}','${eventProduct}',1,'efectivo')`),
+    /no tiene acceso al modulo de stock/,
+    "bloquear el modulo de stock tiene que frenar tambien la venta en /bartender, no solo el panel del organizador"
+  );
+  await db.exec(`update organizations set stock_access_blocked = false where id = '${org}'`);
+  const barSaleAfterUnblock = await db.query<{ bar_sale_id: string; total_minor: string }>(
+    `select bar_sale_id, total_minor from create_bartender_sale('${bar}','${table}','${eventProduct}',1,'efectivo')`
+  );
+  assert.equal(Number(barSaleAfterUnblock.rows[0].total_minor), 2000, "vuelve a funcionar al desbloquear");
 
   // Un bartender no puede cancelar ventas (solo el organizador).
   await assert.rejects(

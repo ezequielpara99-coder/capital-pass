@@ -50,12 +50,6 @@ type AssetField =
   | "banner_vertical_path"
   | "ticket_background_path";
 
-type AssetKind =
-  | "banner-horizontal"
-  | "banner-square"
-  | "banner-vertical"
-  | "ticket-background";
-
 type TicketType = {
   id: string;
   name: string;
@@ -496,33 +490,13 @@ function ManageEventContent() {
       .data.publicUrl;
   }
 
-  function fileExtension(
-    file: File
-  ) {
-    if (
-      file.type === "image/png"
-    ) {
-      return "png";
-    }
-
-    if (
-      file.type === "image/webp"
-    ) {
-      return "webp";
-    }
-
-    return "jpg";
-  }
-
   async function uploadEventAsset({
     file,
     field,
-    kind,
     label,
   }: {
     file: File;
     field: AssetField;
-    kind: AssetKind;
     label: string;
   }) {
     if (!event) {
@@ -558,95 +532,33 @@ function ManageEventContent() {
       return;
     }
 
-    const supabase =
-      createClient();
-
     setUploadingAsset(field);
     setMessage("");
 
-    const oldPath =
-      event[field];
+    // Se sube por una API propia (no directo a Storage con la clave anon)
+    // para poder chequear el tipo real del archivo por sus primeros bytes
+    // en el servidor -- el file.type que declara el navegador no es
+    // confiable, mismo motivo que ya tiene la foto de perfil.
+    const form = new FormData();
+    form.append("file", file);
+    form.append("eventId", event.id);
+    form.append("field", field);
 
-    const extension =
-      fileExtension(file);
-
-    const objectPath =
-      `${event.organization_id}/${event.id}/${kind}/${crypto.randomUUID()}.${extension}`;
-
-    const {
-      error: uploadError,
-    } = await supabase.storage
-      .from("event-assets")
-      .upload(
-        objectPath,
-        file,
-        {
-          cacheControl:
-            "3600",
-
-          upsert:
-            false,
-
-          contentType:
-            file.type,
-        }
-      );
-
-    if (uploadError) {
-      showError(
-        `No se pudo subir ${label.toLowerCase()}.`
-      );
-
+    let result: { ok?: boolean; path?: string; error?: string };
+    try {
+      const response = await fetch("/api/panel/evento/assets", { method: "POST", body: form });
+      result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error ?? `No se pudo subir ${label.toLowerCase()}.`);
+    } catch (err) {
+      showError(err instanceof Error ? err.message : `No se pudo subir ${label.toLowerCase()}.`);
       setUploadingAsset(null);
       return;
-    }
-
-    const {
-      error: updateError,
-    } = await supabase
-      .from("events")
-      .update({
-        [field]:
-          objectPath,
-
-        updated_at:
-          new Date().toISOString(),
-      })
-      .eq(
-        "id",
-        event.id
-      );
-
-    if (updateError) {
-      await supabase.storage
-        .from("event-assets")
-        .remove([
-          objectPath,
-        ]);
-
-      showError(
-        `La imagen se subió, pero no pudimos vincular ${label.toLowerCase()} al evento.`
-      );
-
-      setUploadingAsset(null);
-      return;
-    }
-
-    if (
-      oldPath &&
-      oldPath !== objectPath
-    ) {
-      await supabase.storage
-        .from("event-assets")
-        .remove([
-          oldPath,
-        ]);
     }
 
     setEvent({
       ...event,
       [field]:
-        objectPath,
+        result.path ?? null,
     });
 
     showSuccess(
@@ -913,6 +825,20 @@ function ManageEventContent() {
   async function saveEventSettings() {
     if (!event) return;
 
+    // event.door_sales_start_at/end_at ya son ISO validos (DateField los
+    // convierte al tocarlos) -- lo unico que falta es que no queden
+    // invertidos, algo que antes se guardaba sin avisar y dejaba la
+    // ventana de venta en puerta vacia para siempre (bloqueada) sin
+    // ningun error explicando por que.
+    if (
+      event.door_sales_start_at &&
+      event.door_sales_end_at &&
+      new Date(event.door_sales_end_at).getTime() <= new Date(event.door_sales_start_at).getTime()
+    ) {
+      showError("La venta en puerta tiene que terminar después de que empieza.");
+      return;
+    }
+
     const supabase = createClient();
 
     setSavingEvent(true);
@@ -925,19 +851,13 @@ function ManageEventContent() {
 
         rrpp_sales_enabled: event.rrpp_sales_enabled,
 
-        rrpp_sales_cutoff_at: event.rrpp_sales_cutoff_at
-          ? new Date(event.rrpp_sales_cutoff_at).toISOString()
-          : null,
+        rrpp_sales_cutoff_at: event.rrpp_sales_cutoff_at,
 
         door_sales_enabled: event.door_sales_enabled,
 
-        door_sales_start_at: event.door_sales_start_at
-          ? new Date(event.door_sales_start_at).toISOString()
-          : null,
+        door_sales_start_at: event.door_sales_start_at,
 
-        door_sales_end_at: event.door_sales_end_at
-          ? new Date(event.door_sales_end_at).toISOString()
-          : null,
+        door_sales_end_at: event.door_sales_end_at,
 
         ticket_design_mode:
           event.ticket_design_mode,
@@ -1349,8 +1269,6 @@ function ManageEventContent() {
                   file,
                   field:
                     "banner_horizontal_path",
-                  kind:
-                    "banner-horizontal",
                   label:
                     "Banner horizontal",
                 })
@@ -1380,8 +1298,6 @@ function ManageEventContent() {
                   file,
                   field:
                     "banner_square_path",
-                  kind:
-                    "banner-square",
                   label:
                     "Portada cuadrada",
                 })
@@ -1411,8 +1327,6 @@ function ManageEventContent() {
                   file,
                   field:
                     "banner_vertical_path",
-                  kind:
-                    "banner-vertical",
                   label:
                     "Portada vertical",
                 })
@@ -1529,8 +1443,6 @@ function ManageEventContent() {
                         file,
                         field:
                           "ticket_background_path",
-                        kind:
-                          "ticket-background",
                         label:
                           "Diseño de entrada",
                       })
@@ -1791,12 +1703,25 @@ function ManageEventContent() {
             <StatusButton
               label="Cancelado"
               selected={event.status === "cancelled"}
-              onClick={() =>
+              onClick={() => {
+                // Un click de mas al lado de "Activo"/"Finalizado" no debe
+                // poder cancelar el evento sin querer -- cancelar no
+                // reembolsa ni avisa a nadie solo, asi que un click
+                // accidental seguido de "Guardar cambios" quedaba sin
+                // ningun freno.
+                if (
+                  event.status !== "cancelled" &&
+                  !window.confirm(
+                    "¿Cancelar este evento? Las entradas ya vendidas van a dejar de poder escanearse en la puerta. No se reembolsa ni se avisa a nadie automáticamente."
+                  )
+                ) {
+                  return;
+                }
                 setEvent({
                   ...event,
                   status: "cancelled",
-                })
-              }
+                });
+              }}
             />
 
           </div>
@@ -1838,7 +1763,7 @@ function ManageEventContent() {
                 onChange={(e) =>
                   setEvent({
                     ...event,
-                    rrpp_sales_cutoff_at: e.target.value || null,
+                    rrpp_sales_cutoff_at: argentinaLocalToIso(e.target.value || null),
                   })
                 }
                 className="mt-4 h-12 w-full border border-white/[0.09] bg-black/25 px-4 text-sm text-white outline-none focus:border-[#ff5a2a]/45"
@@ -2875,8 +2800,7 @@ function DateField({
         }
         onChange={(e) =>
           onChange(
-            e.target.value ||
-            null
+            argentinaLocalToIso(e.target.value || null)
           )
         }
         className="h-12 w-full border border-white/[0.09] bg-black/25 px-4 text-sm text-white outline-none focus:border-[#ff5a2a]/45"
@@ -3303,14 +3227,34 @@ function formatDateTime(
   );
 }
 
+// Convierte el ISO guardado a un valor de <input type="datetime-local"> EN
+// HORARIO DE ARGENTINA -- la version anterior usaba el offset del
+// NAVEGADOR (getTimezoneOffset), asi que un organizador con el reloj de su
+// dispositivo en otro huso horario (viajando, mal configurado) veia y
+// guardaba una hora distinta a la real de Buenos Aires.
 function toDateTimeLocal(value: string | null) {
   if (!value) return "";
-
   const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
+  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+}
 
-  const offset = date.getTimezoneOffset() * 60000;
-
-  return new Date(date.getTime() - offset)
-    .toISOString()
-    .slice(0, 16);
+// Interpreta un valor de <input type="datetime-local"> como horario de
+// Argentina fijo (-03:00), sin importar en que huso horario este el
+// navegador del organizador.
+function argentinaLocalToIso(value: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(`${value}:00-03:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
 }
