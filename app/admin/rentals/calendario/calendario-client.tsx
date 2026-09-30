@@ -312,12 +312,26 @@ export default function CalendarioClient() {
             <div className="grid gap-x-4 sm:grid-cols-2">
               <label className="mt-3 block">
                 <span className={LABEL}>Equipo *</span>
-                <select value={bookingDraft.assetId} onChange={(e) => setBookingDraft((d) => ({ ...d, assetId: e.target.value }))} className={INPUT}>
+                {/* Deshabilitado al editar: rental_update_booking no acepta
+                    cambiar de equipo (el "Equipo" que se ve acá al editar es
+                    solo informativo) -- antes se podia elegir otro equipo en
+                    este select, la API lo ignoraba en silencio (nunca lo
+                    leia del body), y la reserva se quedaba en el equipo
+                    original sin ningun aviso, dando una falsa sensacion de
+                    que se movio el alquiler. Para cambiar de equipo hay que
+                    cancelar esta reserva y cargar una nueva. */}
+                <select
+                  value={bookingDraft.assetId}
+                  onChange={(e) => setBookingDraft((d) => ({ ...d, assetId: e.target.value }))}
+                  disabled={Boolean(editingId)}
+                  className={`${INPUT} ${editingId ? "opacity-50" : ""}`}
+                >
                   <option value="" className="bg-[#0a0908]">Elegí un equipo…</option>
                   {assets.filter((a) => a.active).map((a) => (
                     <option key={a.id} value={a.id} className="bg-[#0a0908]">{a.name}</option>
                   ))}
                 </select>
+                {editingId && <p className="mt-1 text-[10px] text-white/30">Para cambiar el equipo, cancelá esta reserva y cargá una nueva.</p>}
               </label>
               <label className="mt-3 block">
                 <span className={LABEL}>Cliente *</span>
