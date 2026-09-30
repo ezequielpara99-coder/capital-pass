@@ -1,4 +1,6 @@
-import type { CSSProperties, ReactNode } from "react";
+"use client";
+
+import { useState, type CSSProperties, type ReactNode } from "react";
 
 import {
   TICKET_H,
@@ -68,15 +70,28 @@ export default function TicketPoster({
 
   const stampText = status === "used" ? "Utilizada" : status === "cancelled" ? "Anulada" : null;
 
+  // Si el organizador subio un fondo personalizado y despues el archivo
+  // desaparecio del bucket (lo borro, o nunca termino de subirse), antes
+  // quedaba una imagen rota en vez de caer al diseño de Capital Pass. El QR
+  // en si nunca dependio del fondo, pero visualmente la entrada quedaba
+  // arruinada.
+  const [backgroundFailed, setBackgroundFailed] = useState(false);
+  const showCustomBackground = Boolean(backgroundUrl) && !backgroundFailed;
+
   return (
     <div
       className="relative w-full select-none overflow-hidden bg-[#050505]"
       style={{ aspectRatio: `${TICKET_W} / ${TICKET_H}`, containerType: "inline-size" }}
     >
       {/* FONDO: arte del organizador o el de Capital Pass */}
-      {backgroundUrl ? (
+      {showCustomBackground ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={backgroundUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+        <img
+          src={backgroundUrl ?? undefined}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={() => setBackgroundFailed(true)}
+        />
       ) : (
         <>
           <div

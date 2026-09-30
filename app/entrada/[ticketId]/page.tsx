@@ -90,6 +90,14 @@ export default async function EntradaPage({
   // 2. BUSCAR TICKET
   // =====================================================
 
+  // A partir de aca la firma ya es valida -- esta entrada SI es una entrada
+  // real de Capital Pass. Un error transitorio de Supabase, o una fila
+  // relacionada que faltara por algun problema de datos (evento borrado,
+  // etc.), no significa "entrada trucha": usar notFound() ahi confundiria
+  // al comprador (y a soporte) haciendole creer que el QR es invalido,
+  // cuando en realidad es un problema del lado del servidor. Se tira un
+  // error real (pantalla de error de Next, reintentable) en vez de un 404
+  // enganioso.
   const {
     data: ticket,
     error: ticketError,
@@ -111,7 +119,10 @@ export default async function EntradaPage({
     .eq("id", ticketId)
     .maybeSingle();
 
-  if (ticketError || !ticket) {
+  if (ticketError) {
+    throw new Error("No se pudo consultar la entrada.");
+  }
+  if (!ticket) {
     notFound();
   }
 
@@ -129,7 +140,7 @@ export default async function EntradaPage({
     .maybeSingle();
 
   if (saleError || !sale) {
-    notFound();
+    throw new Error("No se pudo consultar la venta de esta entrada.");
   }
 
   const {
@@ -144,7 +155,7 @@ export default async function EntradaPage({
     .maybeSingle();
 
   if (buyerError || !buyer) {
-    notFound();
+    throw new Error("No se pudo consultar el comprador de esta entrada.");
   }
 
   // =====================================================
@@ -170,7 +181,7 @@ export default async function EntradaPage({
     .maybeSingle();
 
   if (eventError || !event) {
-    notFound();
+    throw new Error("No se pudo consultar el evento de esta entrada.");
   }
 
   // El color se pide aparte: si todavia no existe la columna en la base, la
@@ -201,32 +212,26 @@ export default async function EntradaPage({
   //    tanda)
   // =====================================================
 
-  let ticketTypeName: string;
+  // Si la tanda o la mesa ya no existe (borrada, limpieza de datos), la
+  // entrada sigue siendo real y su QR sigue siendo valido -- se degrada a
+  // una etiqueta generica en vez de bloquear toda la pagina, mismo criterio
+  // que ya usa el email de la entrada (`?? "Entrada"`).
+  let ticketTypeName = "Entrada";
 
   if (ticket.ticket_type_id) {
-    const { data: ticketType, error: ticketTypeError } = await admin
+    const { data: ticketType } = await admin
       .from("ticket_types")
       .select("name")
       .eq("id", ticket.ticket_type_id)
       .maybeSingle();
-
-    if (ticketTypeError || !ticketType) {
-      notFound();
-    }
-    ticketTypeName = ticketType.name;
+    if (ticketType) ticketTypeName = ticketType.name;
   } else if (sale.table_id) {
-    const { data: table, error: tableError } = await admin
+    const { data: table } = await admin
       .from("bar_tables")
       .select("name")
       .eq("id", sale.table_id)
       .maybeSingle();
-
-    if (tableError || !table) {
-      notFound();
-    }
-    ticketTypeName = `Mesa: ${table.name}`;
-  } else {
-    notFound();
+    ticketTypeName = table ? `Mesa: ${table.name}` : "Mesa";
   }
 
   // =====================================================
