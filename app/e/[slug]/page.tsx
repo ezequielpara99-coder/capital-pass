@@ -31,7 +31,11 @@ export async function generateMetadata({
   }
 
   // Un borrador (todavia no publicado) no tiene que aparecer en Google.
+  // Un evento cancelado se puede seguir compartiendo si alguien reenvia un
+  // link viejo -- antes la preview de WhatsApp/redes no daba ninguna pista
+  // de que ya no vale, quedaba identica a la de un evento vigente.
   const robots = event.status === "draft" ? { index: false, follow: false } : undefined;
+  const cancelled = event.status === "cancelled";
 
   const dateLabel = new Intl.DateTimeFormat("es-AR", {
     day: "2-digit",
@@ -41,21 +45,24 @@ export async function generateMetadata({
   }).format(new Date(event.starts_at));
 
   const place = [event.venue_name, event.city].filter(Boolean).join(", ");
-  const description =
-    event.description?.trim() ||
-    `${dateLabel}${place ? ` · ${place}` : ""}. Comprá tu entrada online con Capital Pass.`;
+  const description = cancelled
+    ? `Este evento fue cancelado.${place ? ` Iba a ser en ${place}.` : ""}`
+    : event.description?.trim() ||
+      `${dateLabel}${place ? ` · ${place}` : ""}. Comprá tu entrada online con Capital Pass.`;
+
+  const displayName = cancelled ? `${event.name} (CANCELADO)` : event.name;
 
   const imagePath = event.banner_horizontal_path || event.banner_square_path;
   const imageUrl = imagePath ? admin.storage.from("event-assets").getPublicUrl(imagePath).data.publicUrl : null;
   const pageUrl = `${getAppBaseUrl()}/e/${slug}`;
 
   return {
-    title: `${event.name} · Capital Pass`,
+    title: `${displayName} · Capital Pass`,
     description,
     robots,
     alternates: { canonical: pageUrl },
     openGraph: {
-      title: event.name,
+      title: displayName,
       description,
       url: pageUrl,
       siteName: "Capital Pass",
@@ -65,7 +72,7 @@ export async function generateMetadata({
     },
     twitter: {
       card: imageUrl ? "summary_large_image" : "summary",
-      title: event.name,
+      title: displayName,
       description,
       images: imageUrl ? [imageUrl] : undefined,
     },
@@ -222,7 +229,19 @@ export default async function PublicEventPage({
     .eq("organization_id", event.organization_id)
     .maybeSingle();
 
-  const canBuyOnline = Boolean(mpAccount);
+  // Antes solo dependia de si el organizador conecto Mercado Pago -- un
+  // evento "draft" (todavia no publicado) o "cancelled" con MP conectado
+  // mostraba la seccion de entradas 100% comprable (selector de cantidad,
+  // formulario, boton de pago) si alguien tenia el link, y recien
+  // create_online_sale lo rechazaba al final, despues de que el comprador
+  // ya habia cargado DNI/WhatsApp. Mismo criterio que ya usaba EventTables.
+  //
+  // El chequeo de "el evento ya termino" (contra la hora actual) se hace
+  // del lado del cliente en EventCheckout, no aca -- un Server Component no
+  // puede llamar Date.now()/comparar contra la hora actual durante el
+  // render (la regla de pureza de React lo bloquea), mismo motivo por el
+  // que salesStartAt/salesEndAt de cada tanda tambien se evaluan ahi.
+  const canBuyOnline = Boolean(mpAccount) && (event.status === "upcoming" || event.status === "active");
   // processing_fee_percent es numeric: PostgREST lo devuelve como string.
   // El comprador tiene que ver el cargo por servicio ANTES de pagar --
   // /api/e/[slug]/checkout ya lo suma al total real que cobra Mercado
@@ -355,7 +374,7 @@ export default async function PublicEventPage({
     })),
   };
 
-  const isOpenForSales = canBuyOnline && (event.status === "upcoming" || event.status === "active") && mappedTicketTypes.length > 0;
+  const isOpenForSales = canBuyOnline && mappedTicketTypes.length > 0;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black pb-24 text-white md:pb-0">
@@ -677,6 +696,8 @@ export default async function PublicEventPage({
               feePercent={feePercent}
               ticketTypes={mappedTicketTypes}
               packs={mappedPacks}
+              eventStartsAt={event.starts_at}
+              eventEndsAt={event.ends_at ?? null}
             />
 
           </section>
@@ -685,7 +706,7 @@ export default async function PublicEventPage({
               MESAS
           ================================================== */}
 
-          {canBuyOnline && (event.status === "upcoming" || event.status === "active") && (
+          {canBuyOnline && (
             <EventTables slug={slug} tables={onlineTables} feePercent={feePercent} />
           )}
 

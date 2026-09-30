@@ -470,6 +470,15 @@ function ManageEventContent() {
     );
   }
 
+  // Un pack apunta a una tanda con una FK sin "on delete" -- borrar la
+  // tanda choca contra esa referencia aunque el pack nunca se haya
+  // vendido, y el error de foreign key no lo reconocia readableDatabaseError,
+  // asi que el organizador solo veia "No se pudo eliminar la tanda" sin
+  // ninguna pista de por que.
+  function packsForTicketType(ticketTypeId: string) {
+    return packs.filter((pack) => pack.ticket_type_id === ticketTypeId);
+  }
+
   // =======================================================
   // IDENTIDAD VISUAL
   // =======================================================
@@ -928,6 +937,10 @@ function ManageEventContent() {
       showError("Elegí qué producto incluye el combo.");
       return;
     }
+    if (ticket.combo_type === "producto" && !(Number(ticket.combo_quantity) > 0)) {
+      showError("Ingresá cuántas unidades incluye el combo.");
+      return;
+    }
     if (ticket.combo_type === "credito" && !(Number(ticket.combo_credit_minor) > 0)) {
       showError("Ingresá el crédito que incluye el combo.");
       return;
@@ -983,6 +996,14 @@ function ManageEventContent() {
     if (hasSales(ticket.id)) {
       showError(
         `No se puede eliminar "${ticket.name}" porque ya tiene ventas. Podés ponerla en estado Pausada.`
+      );
+      return;
+    }
+
+    const linkedPacks = packsForTicketType(ticket.id);
+    if (linkedPacks.length > 0) {
+      showError(
+        `No se puede eliminar "${ticket.name}" porque tiene ${linkedPacks.length === 1 ? "un pack apuntándole" : "packs apuntándole"} (${linkedPacks.map((p) => p.name).join(", ")}). Eliminá esos packs primero, en la sección Packs de abajo.`
       );
       return;
     }
@@ -1061,6 +1082,10 @@ function ManageEventContent() {
 
     if (newTicket.comboEnabled && newTicket.comboType === "producto" && !newTicket.comboEventProductId) {
       showError("Elegí qué producto incluye el combo.");
+      return;
+    }
+    if (newTicket.comboEnabled && newTicket.comboType === "producto" && !(Number(newTicket.comboQuantity) > 0)) {
+      showError("Ingresá cuántas unidades incluye el combo.");
       return;
     }
     if (newTicket.comboEnabled && newTicket.comboType === "credito" && (!newTicket.comboCredit || Number(newTicket.comboCredit) <= 0)) {
@@ -2619,6 +2644,7 @@ function PacksSection({
   }
 
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function togglePack(packId: string, active: boolean) {
     if (togglingId) return;
@@ -2637,6 +2663,23 @@ function PacksSection({
     }
   }
 
+  async function deletePack(pack: { id: string; name: string }) {
+    if (deletingId) return;
+    if (!window.confirm(`¿Eliminar el pack "${pack.name}"? Esto no se puede deshacer.`)) return;
+    setDeletingId(pack.id);
+    try {
+      const response = await fetch(`/api/stock/packs?eventId=${eventId}&packId=${pack.id}`, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      showSuccess(`Pack "${pack.name}" eliminado.`);
+      await onSaved();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : "No se pudo eliminar el pack.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   const ticketTypeName = (id: string) => ticketTypes.find((t) => t.id === id)?.name ?? "Tanda";
 
   return (
@@ -2649,14 +2692,24 @@ function PacksSection({
                 <p className="text-sm font-bold text-white/80">{pack.name}</p>
                 <p className="text-xs text-white/35">{pack.quantity_per_pack} × {ticketTypeName(pack.ticket_type_id)} · {money(pack.price_minor)}</p>
               </div>
-              <button
-                type="button"
-                disabled={togglingId === pack.id}
-                onClick={() => togglePack(pack.id, !pack.active)}
-                className={`h-9 rounded-full border px-3 text-[10px] font-black uppercase tracking-wide disabled:opacity-40 ${pack.active ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300" : "border-white/15 bg-white/[0.03] text-white/40"}`}
-              >
-                {togglingId === pack.id ? "..." : pack.active ? "Activo" : "Oculto"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={togglingId === pack.id}
+                  onClick={() => togglePack(pack.id, !pack.active)}
+                  className={`h-9 rounded-full border px-3 text-[10px] font-black uppercase tracking-wide disabled:opacity-40 ${pack.active ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300" : "border-white/15 bg-white/[0.03] text-white/40"}`}
+                >
+                  {togglingId === pack.id ? "..." : pack.active ? "Activo" : "Oculto"}
+                </button>
+                <button
+                  type="button"
+                  disabled={deletingId === pack.id}
+                  onClick={() => deletePack(pack)}
+                  className="h-9 rounded-full border border-red-400/25 bg-red-500/10 px-3 text-[10px] font-black uppercase tracking-wide text-red-300 disabled:opacity-40"
+                >
+                  {deletingId === pack.id ? "..." : "Eliminar"}
+                </button>
+              </div>
             </div>
           ))}
         </div>

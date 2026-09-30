@@ -97,6 +97,8 @@ const qrDeMesaMigration = readFileSync(new URL("../supabase/migrations/20261002_
 const arreglaGateBarraCupoMigration = readFileSync(new URL("../supabase/migrations/20261003_arregla_gate_barra_y_cupo_tanda.sql", import.meta.url), "utf8");
 const arreglaPagoRechazadoTardioMigration = readFileSync(new URL("../supabase/migrations/20261005_arregla_pago_rechazado_tardio_y_permiso.sql", import.meta.url), "utf8");
 const normalizaEmailCompradorMigration = readFileSync(new URL("../supabase/migrations/20261006_normaliza_email_comprador.sql", import.meta.url), "utf8");
+const seguimientoEnvioWhatsappMigration = readFileSync(new URL("../supabase/migrations/20261007_seguimiento_envio_whatsapp.sql", import.meta.url), "utf8");
+const bloqueaVentaEventoTerminadoMigration = readFileSync(new URL("../supabase/migrations/20261008_bloquea_venta_online_evento_terminado.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -124,6 +126,7 @@ async function database() {
     await db.exec(`alter table public.${q(c.table)} add constraint ${q(c.nombre)} ${c.definicion}`);
   }
   await db.exec(`create table events(id uuid primary key, organization_id uuid, name text, status public.event_status,
+      starts_at timestamptz, ends_at timestamptz,
       rrpp_sales_enabled boolean default true, rrpp_sales_cutoff_at timestamptz,
       door_sales_enabled boolean default true, door_sales_start_at timestamptz, door_sales_end_at timestamptz);
     create table event_staff(id uuid primary key default gen_random_uuid(), event_id uuid, organization_member_id uuid, staff_role public.event_staff_role, active boolean, commission_percentage numeric);
@@ -242,6 +245,8 @@ async function database() {
   await db.exec(arreglaGateBarraCupoMigration);
   await db.exec(arreglaPagoRechazadoTardioMigration);
   await db.exec(normalizaEmailCompradorMigration);
+  await db.exec(seguimientoEnvioWhatsappMigration);
+  await db.exec(bloqueaVentaEventoTerminadoMigration);
   return db;
 }
 
@@ -2568,6 +2573,51 @@ test("buyers: el email se normaliza a minusculas siempre (para que /mi lo encuen
     `insert into buyers(organization_id,first_name,last_name,dni) values ('${org}','Sin','Email','30333444') returning id::text`
   );
   assert.equal(await scalar(`select email from buyers where id='${noEmailBuyer}'`), null);
+
+  await db.close();
+});
+
+test("create_online_sale/create_online_table_sale: rechazan un evento que ya termino aunque el organizador nunca lo paso a finished", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const admin = "c4c4c4c4-0000-4000-8000-000000000000";
+  const org = "c4c4c4c4-1111-4111-8111-111111111111";
+  const eventEnded = "c4c4c4c4-2222-4222-8222-222222222222";
+  const eventOpen = "c4c4c4c4-3333-4333-8333-333333333333";
+  const ticketType = "c4c4c4c4-4444-4444-8444-444444444444";
+  const ticketType2 = "c4c4c4c4-5555-4555-8555-555555555555";
+  const cart = (typeId: string) => `'[{"ticket_type_id":"${typeId}","quantity":1}]'::jsonb`;
+  const buyer = (n: string) => `'Comprador','${n}','30${n}','3462${n}',null`;
+
+  await db.exec(`insert into auth.users values ('${admin}','admin-terminado@example.test',now(),'{}');
+    insert into platform_admins(user_id) values ('${admin}');
+    select set_config('request.jwt.claim.sub','${admin}',false);
+    insert into organizations(id,name,slug,active) values ('${org}','Club Terminado','club-terminado',true);
+    insert into organization_mercadopago_accounts(organization_id,mp_user_id,access_token,refresh_token,expires_at)
+      values ('${org}', 777, 'tok', 'ref', now() + interval '1 day');
+    -- "active" y sin ends_at, pero starts_at de hace 10 horas -- termino hace 4hs (6hs de margen por defecto).
+    insert into events(id,organization_id,status,starts_at) values ('${eventEnded}','${org}','active', now() - interval '10 hours');
+    insert into events(id,organization_id,status,starts_at) values ('${eventOpen}','${org}','active', now() + interval '2 hours');
+    insert into ticket_types(id,event_id,name,price_minor,capacity,active,status) values ('${ticketType}','${eventEnded}','General',5000,10,true,'available');
+    insert into ticket_types(id,event_id,name,price_minor,capacity,active,status) values ('${ticketType2}','${eventOpen}','General',5000,10,true,'available');`);
+
+  const table = "c4c4c4c4-6666-4666-8666-666666666666";
+  await db.exec(`insert into bar_tables(id,event_id,name,capacity,price_minor) values ('${table}','${eventEnded}','Mesa 1',6,10000);`);
+
+  await assert.rejects(
+    () => db.query(`select * from create_online_sale('${eventEnded}', ${cart(ticketType)}, ${buyer("111111")})`),
+    /ya finalizo/,
+    "no debe dejar comprar entradas de un evento que ya termino aunque el status siga en active"
+  );
+  await assert.rejects(
+    () => db.query(`select * from create_online_table_sale('${eventEnded}','${table}', ${buyer("222222")})`),
+    /ya finalizo/,
+    "misma proteccion para reservar una mesa"
+  );
+
+  // El evento que todavia no termino sigue funcionando normal.
+  const okSale = await scalar(`select sale_id::text from create_online_sale('${eventOpen}', ${cart(ticketType2)}, ${buyer("333333")})`);
+  assert.ok(okSale, "un evento que todavia no termino sigue permitiendo comprar");
 
   await db.close();
 });

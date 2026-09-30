@@ -83,7 +83,9 @@ export async function GET(request: NextRequest) {
     console.error("STOCK PACKS GET:", error);
     return NextResponse.json({ error: "No se pudieron cargar los packs." }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, packs: packs ?? [] });
+  // price_minor es bigint: PostgREST lo devuelve como string, no number.
+  const normalized = (packs ?? []).map((p) => ({ ...p, price_minor: Number(p.price_minor) }));
+  return NextResponse.json({ ok: true, packs: normalized });
 }
 
 export async function POST(request: NextRequest) {
@@ -128,6 +130,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No se pudo crear el pack." }, { status: 500 });
     }
     return NextResponse.json({ ok: true, pack });
+  } catch {
+    return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
+  }
+}
+
+// Sin esto, un pack sin ninguna venta quedaba imposible de sacar de en
+// medio: no habia forma de borrarlo, y mientras existiera bloqueaba (via su
+// FK a ticket_types) borrar la tanda a la que apunta, aunque el organizador
+// la desactivara con PATCH (desactivar no rompe la referencia).
+export async function DELETE(request: NextRequest) {
+  try {
+    const eventId = request.nextUrl.searchParams.get("eventId") ?? "";
+    const packId = request.nextUrl.searchParams.get("packId") ?? "";
+    if (!eventId || !packId) return NextResponse.json({ error: "Faltan datos." }, { status: 400 });
+
+    const verification = await verifyOrganizer(eventId);
+    if (!verification.ok) return NextResponse.json({ error: verification.error }, { status: verification.status });
+
+    const admin = createAdminClient();
+
+    const { count } = await admin
+      .from("sale_items")
+      .select("id", { count: "exact", head: true })
+      .eq("pack_id", packId);
+    if ((count ?? 0) > 0) {
+      return NextResponse.json({ error: "No se puede eliminar: este pack ya tiene ventas. Podés desactivarlo en su lugar." }, { status: 409 });
+    }
+
+    const { error } = await admin.from("ticket_packs").delete().eq("id", packId).eq("event_id", eventId);
+    if (error) {
+      console.error("STOCK PACKS DELETE:", error);
+      return NextResponse.json({ error: "No se pudo eliminar el pack." }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });
   }

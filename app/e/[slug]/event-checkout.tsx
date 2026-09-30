@@ -48,7 +48,20 @@ type Props = {
   ticketTypes: TicketType[];
   packs: Pack[];
   feePercent: number;
+  eventStartsAt: string;
+  eventEndsAt: string | null;
 };
+
+// El pase de un evento a "finished" es manual (no hay ningun cron que lo
+// haga solo) -- sin este chequeo, un evento que ya paso pero el organizador
+// todavia no lo marco como finalizado seguia vendiendo online sin ningun
+// control. Mismo limite que ya usa el cartel de "Sucediendo ahora"
+// (Countdown, event-extras.tsx): sin fecha de fin explicita, se asume
+// terminado 6hs despues del inicio.
+function eventHasEnded(startsAt: string, endsAt: string | null) {
+  const end = endsAt ? new Date(endsAt).getTime() : new Date(startsAt).getTime() + 6 * 60 * 60 * 1000;
+  return Date.now() >= end;
+}
 
 // Clave de carrito: distingue una tanda suelta de un pack (viven en
 // espacios de id separados, pero por las dudas no se pisan nunca).
@@ -73,9 +86,19 @@ function formatTicketStatus(ticket: TicketType) {
   return ticket.status;
 }
 
-export default function EventCheckout({ slug, canBuyOnline, ticketTypes, packs, feePercent }: Props) {
+export default function EventCheckout({
+  slug,
+  canBuyOnline: canBuyOnlineProp,
+  ticketTypes,
+  packs,
+  feePercent,
+  eventStartsAt,
+  eventEndsAt,
+}: Props) {
   const searchParams = useSearchParams();
   const returningSaleId = searchParams.get("venta");
+
+  const canBuyOnline = canBuyOnlineProp && !eventHasEnded(eventStartsAt, eventEndsAt);
 
   const [quantities, setQuantities] = useState<Record<string, number>>({});
 
