@@ -701,6 +701,10 @@ $function$;
 --    0 se deja permitido (entradas gratis, uso real).
 -- =============================================================
 
+-- "drop ... if exists" antes: un primer intento de correr esta migracion ya
+-- habia llegado a crear esta constraint antes de fallar mas abajo por otro
+-- motivo, y un "add constraint" sin este guard no se puede reintentar.
+alter table public.ticket_types drop constraint if exists ticket_types_price_non_negative;
 alter table public.ticket_types add constraint ticket_types_price_non_negative check (price_minor >= 0) not valid;
 alter table public.ticket_types validate constraint ticket_types_price_non_negative;
 
