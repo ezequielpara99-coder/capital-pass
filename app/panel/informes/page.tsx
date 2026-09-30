@@ -378,21 +378,23 @@ export default async function InformesPage() {
   // MIEMBROS DE LA ORGANIZACIÓN
   // =====================================================
 
-  const { data: membersData } = await supabase
-    .from("organization_members")
-    .select(`
-      id,
-      user_id,
-      role,
-      status
-    `)
-    .eq(
-      "organization_id",
-      membership.organization_id
-    );
-
-  const members =
-    (membersData ?? []) as MemberRow[];
+  // fetchAllRows: sin esto, PostgREST corta en 1000 filas -- una
+  // organizacion con historial largo (cada alta de RRPP/puerta/controlador
+  // crea SIEMPRE un organization_members nuevo, nunca reutiliza uno) podia
+  // superar el corte y perder miembros silenciosamente.
+  const members = await fetchAllRows<MemberRow>((from, to) =>
+    supabase
+      .from("organization_members")
+      .select(`
+        id,
+        user_id,
+        role,
+        status
+      `)
+      .eq("organization_id", membership.organization_id)
+      .order("id", { ascending: true })
+      .range(from, to)
+  );
 
   const memberUserIds =
     members
@@ -437,20 +439,26 @@ export default async function InformesPage() {
   // PERSONAL ASIGNADO A EVENTOS
   // =====================================================
 
-  const { data: staffData } = await supabase
-    .from("event_staff")
-    .select(`
-      id,
-      event_id,
-      organization_member_id,
-      staff_role,
-      active,
-      commission_percentage
-    `)
-    .in("event_id", eventIds);
-
-  const staff =
-    (staffData ?? []) as StaffRow[];
+  // fetchAllRows: trae el staff de TODOS los eventos de la organizacion en
+  // una sola consulta -- sin paginar, una organizacion con muchos eventos
+  // (cada uno con varios RRPP/puerta/controladores/bartenders) podia superar
+  // el corte de 1000 de PostgREST, y los eventos cuyas filas quedaban afuera
+  // mostraban $0 de comision generada/pendiente sin ningun aviso.
+  const staff = await fetchAllRows<StaffRow>((from, to) =>
+    supabase
+      .from("event_staff")
+      .select(`
+        id,
+        event_id,
+        organization_member_id,
+        staff_role,
+        active,
+        commission_percentage
+      `)
+      .in("event_id", eventIds)
+      .order("id", { ascending: true })
+      .range(from, to)
+  );
 
   // =====================================================
   // PAGOS DE COMISIONES RRPP
@@ -1273,6 +1281,17 @@ export default async function InformesPage() {
             memberId:
               sellerId,
 
+            // Si es RRPP de este evento de verdad (asignacion en
+            // event_staff), no si su PRIMERA venta cronologica dio la
+            // casualidad de ser por canal "rrpp" -- un RRPP cuya primera
+            // operacion de la noche fue vender una mesa (channel="mesa")
+            // desaparecia entero de la seccion "Comisiones RRPP", con
+            // comision ya generada, porque quedaba afuera del filtro de
+            // abajo aunque el calculo de arriba (commissionGenerated) SI
+            // lo tenia bien.
+            isRrpp:
+              Boolean(rrppStaff),
+
             name:
               profile
                 ? `${profile.first_name} ${profile.last_name}`.trim()
@@ -1329,7 +1348,7 @@ export default async function InformesPage() {
     const rrppSellerReports =
       sellerReports.filter(
         (seller) =>
-          seller.channel === "rrpp"
+          seller.isRrpp
       );
 
     const rrppCommissionGenerated =

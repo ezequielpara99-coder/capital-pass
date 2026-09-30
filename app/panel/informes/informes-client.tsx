@@ -93,6 +93,7 @@ type Report = {
     name: string;
     role: string;
     channel: string;
+    isRrpp: boolean;
     sales: number;
     tickets: number;
     returnedTickets: number;
@@ -1330,7 +1331,7 @@ function EventReport({
   const rrppSellers =
     sellers.filter(
       (seller) =>
-        seller.channel === "rrpp"
+        seller.isRrpp
     );
 
   return (
@@ -1778,7 +1779,16 @@ function EventReport({
 
                             <span className="border border-amber-400/15 bg-amber-400/[0.06] px-2.5 py-1 text-[10px] font-black text-amber-200">
                               {formatPercentage(
-                                seller.commissionPercentage
+                                // % efectivo (lo que realmente se calculo sobre
+                                // la base comisionable), no el % vigente ahora
+                                // mismo en event_staff -- si el organizador le
+                                // cambio el % a mitad del evento, cada venta ya
+                                // quedo con el suyo propio (snapshot) y mostrar
+                                // el vigente actual podia inducir a pagar de mas
+                                // o de menos calculando a ojo.
+                                seller.commissionBase > 0
+                                  ? (seller.commissionGenerated / seller.commissionBase) * 100
+                                  : seller.commissionPercentage
                               )} comisión
                             </span>
 
