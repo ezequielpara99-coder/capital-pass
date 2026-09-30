@@ -65,11 +65,29 @@ export async function trackingForIdentity(admin: SupabaseClient, identity: Ident
     }
   }
 
-  // 2) Por telefono cargado en el pasaje.
+  // 2) Por telefono cargado en el pasaje -- a diferencia de la busqueda por
+  // comprador (arriba), esta no tenia NINGUN filtro por organizacion: un
+  // telefono coincidente con el de un pasajero de OTRA organizacion (dato
+  // cargado por cualquier organizador, ej. el telefono de un socio premium)
+  // exponia el codigo de embarque y el recorrido de un colectivo totalmente
+  // ajeno. Se resuelve la organizacion real de cada pasaje encontrado (via
+  // su ruta -> evento) y se descarta lo que no sea de identity.organizationId.
   const phones = [...new Set([phoneRaw, phoneDigits].filter(Boolean))];
   if (phones.length > 0) {
     const { data } = await admin.from("transfer_tickets").select(select).in("passenger_phone", phones).in("status", ["issued", "used"]).limit(100);
-    for (const row of data ?? []) ticketRows.set(row.id as string, row as never);
+    let phoneRows = (data ?? []) as { id: string; route_id: string; stop_id: string | null; manual_code: string; status: string; passenger_name: string }[];
+    if (identity.organizationId && phoneRows.length > 0) {
+      const candidateRouteIds = [...new Set(phoneRows.map((r) => r.route_id))];
+      const { data: candidateRoutes } = await admin.from("transfer_routes").select("id, event_id").in("id", candidateRouteIds);
+      const eventIdsForRoutes = [...new Set((candidateRoutes ?? []).map((r) => r.event_id as string))];
+      const { data: eventsForRoutes } = eventIdsForRoutes.length
+        ? await admin.from("events").select("id, organization_id").in("id", eventIdsForRoutes)
+        : { data: [] as { id: string; organization_id: string }[] };
+      const orgByEvent = new Map((eventsForRoutes ?? []).map((e) => [e.id as string, e.organization_id as string]));
+      const orgByRoute = new Map((candidateRoutes ?? []).map((r) => [r.id as string, orgByEvent.get(r.event_id as string) ?? null]));
+      phoneRows = phoneRows.filter((r) => orgByRoute.get(r.route_id) === identity.organizationId);
+    }
+    for (const row of phoneRows) ticketRows.set(row.id, row as never);
   }
 
   const tickets = [...ticketRows.values()];

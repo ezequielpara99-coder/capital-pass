@@ -99,6 +99,7 @@ const arreglaPagoRechazadoTardioMigration = readFileSync(new URL("../supabase/mi
 const normalizaEmailCompradorMigration = readFileSync(new URL("../supabase/migrations/20261006_normaliza_email_comprador.sql", import.meta.url), "utf8");
 const seguimientoEnvioWhatsappMigration = readFileSync(new URL("../supabase/migrations/20261007_seguimiento_envio_whatsapp.sql", import.meta.url), "utf8");
 const bloqueaVentaEventoTerminadoMigration = readFileSync(new URL("../supabase/migrations/20261008_bloquea_venta_online_evento_terminado.sql", import.meta.url), "utf8");
+const arreglaColectivoFugaCancelacionMigration = readFileSync(new URL("../supabase/migrations/20261009_arregla_colectivo_fuga_y_cancelacion.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -247,6 +248,7 @@ async function database() {
   await db.exec(normalizaEmailCompradorMigration);
   await db.exec(seguimientoEnvioWhatsappMigration);
   await db.exec(bloqueaVentaEventoTerminadoMigration);
+  await db.exec(arreglaColectivoFugaCancelacionMigration);
   return db;
 }
 
@@ -2071,6 +2073,93 @@ test("sistema de traslados: cupo, permisos y validacion de embarque", async () =
   // Codigo que no existe.
   const invalid = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','ZZZZZZ')`);
   assert.equal(invalid.rows[0].result, "invalid");
+
+  await db.close();
+});
+
+test("colectivos: cancelar libera el cupo e invalida el codigo, y el escaneo se frena con rate limit", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "aaaaaaaa-9999-4999-8999-999999999998";
+  const event = "aaaaaaaa-9999-4999-8999-999999999997";
+  const rrppUser = "aaaaaaaa-9999-4999-8999-999999999996";
+  const otherRrppUser = "aaaaaaaa-9999-4999-8999-999999999995";
+
+  await db.exec(`insert into auth.users values ('${rrppUser}','rrpp-cancela@example.test',now(),'{}'), ('${otherRrppUser}','otro-cancela@example.test',now(),'{}');
+    insert into organizations(id,name,slug) values ('${org}','Club Cancela','club-cancela');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${rrppUser}','rrpp','active'), ('${org}','${otherRrppUser}','rrpp','active');`);
+
+  const rrppMember = await scalar(`select id::text from organization_members where user_id='${rrppUser}'`);
+  const otherMember = await scalar(`select id::text from organization_members where user_id='${otherRrppUser}'`);
+  await db.exec(`insert into event_staff(event_id,organization_member_id,staff_role,active) values
+    ('${event}','${rrppMember}','rrpp',true), ('${event}','${otherMember}','rrpp',true)`);
+
+  const route = await scalar(
+    `insert into transfer_routes(event_id, organization_member_id, name, capacity) values ('${event}','${rrppMember}','Colectivo Cancela',1) returning id::text`
+  );
+
+  await db.exec(`select set_config('request.jwt.claim.sub','${rrppUser}',false)`);
+  const assign = await db.query<{ transfer_ticket_id: string; manual_code: string }>(
+    `select * from assign_transfer_ticket('${route}','Se Baja','3460000009')`
+  );
+  const ticketId = assign.rows[0].transfer_ticket_id;
+  const code = assign.rows[0].manual_code;
+
+  // El colectivo esta al cupo: no deja sumar otro pasajero mas.
+  await assert.rejects(
+    () => db.query(`select * from assign_transfer_ticket('${route}','No Entra')`),
+    /completo/
+  );
+
+  // Un RRPP que no es dueño del colectivo no puede cancelar un pasaje ajeno.
+  await db.exec(`select set_config('request.jwt.claim.sub','${otherRrppUser}',false)`);
+  await assert.rejects(
+    () => db.query(`select * from cancel_transfer_ticket('${ticketId}', 'no va')`),
+    /permiso/
+  );
+
+  // El dueño del colectivo SI puede cancelar.
+  await db.exec(`select set_config('request.jwt.claim.sub','${rrppUser}',false)`);
+  await db.query(`select * from cancel_transfer_ticket('${ticketId}', 'avisó que no va')`);
+  assert.equal(await scalar(`select status from transfer_tickets where id='${ticketId}'`), "cancelled");
+
+  // Cancelar de nuevo el mismo pasaje no es posible.
+  await assert.rejects(
+    () => db.query(`select * from cancel_transfer_ticket('${ticketId}', 'de nuevo')`),
+    /ya esta cancelado/
+  );
+
+  // El cupo quedo libre: ahora si se puede sumar a otro pasajero.
+  const secondAssign = await db.query<{ manual_code: string }>(
+    `select * from assign_transfer_ticket('${route}','Si Entra','3460000010')`
+  );
+  assert.equal(secondAssign.rows.length, 1, "cancelar libera el cupo para un nuevo pasajero");
+
+  // El codigo cancelado quedo invalido para siempre (no solo "no encontrado").
+  const scanCancelled = await db.query<{ result: string }>(`select * from validate_transfer_ticket('${route}','${code}')`);
+  assert.equal(scanCancelled.rows[0].result, "cancelled");
+
+  // Un pasaje ya embarcado ("used") no se puede cancelar.
+  const newCode = secondAssign.rows[0].manual_code;
+  await db.query(`select * from validate_transfer_ticket('${route}','${newCode}')`);
+  const newTicketId = await scalar(`select id::text from transfer_tickets where manual_code='${newCode}'`);
+  await assert.rejects(
+    () => db.query(`select * from cancel_transfer_ticket('${newTicketId}', 'ya subio')`),
+    /ya embarco/
+  );
+
+  // Rate limit del escaneo: se precarga el balde ya en el limite (120 en
+  // la ventana) para no tener que escanear 121 veces de verdad en el test.
+  await db.exec(
+    `insert into rate_limit_buckets(key, window_start, count) values ('transfer-validate:${rrppUser}', now(), 120)
+     on conflict (key) do update set window_start = now(), count = 120`
+  );
+  await assert.rejects(
+    () => db.query(`select * from validate_transfer_ticket('${route}','ZZZZZZ')`),
+    /Demasiados intentos/,
+    "el escaneo de codigos se frena con rate limit igual que las demas validaciones sensibles"
+  );
 
   await db.close();
 });

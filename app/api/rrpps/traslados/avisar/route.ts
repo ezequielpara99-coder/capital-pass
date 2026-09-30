@@ -46,9 +46,17 @@ export async function POST(request: NextRequest) {
       .eq("organization_id", event.organization_id)
       .eq("status", "active");
 
+    // Un colectivo "general" (organization_member_id null) lo puede operar
+    // cualquier miembro activo de la organizacion, no solo su dueño -- mismo
+    // criterio que ya usan assign_transfer_ticket/validate_transfer_ticket
+    // (20260993). Esta ruta se habia quedado con el chequeo viejo: un RRPP
+    // operando un colectivo general recibia 403 en silencio (el frontend
+    // ignora el error de este aviso) y los pasajeros nunca recibian el push
+    // de "el colectivo esta cerca", aunque el tracking igual se actualizaba.
     const isOrganizer = (memberships ?? []).some((m) => m.role === "organizer");
     const isOwner = (memberships ?? []).some((m) => m.role === "rrpp" && m.id === route.organization_member_id);
-    if (!isOrganizer && !isOwner) return NextResponse.json({ error: "No tenés acceso a este colectivo." }, { status: 403 });
+    const isGeneralRouteMember = route.organization_member_id === null && (memberships ?? []).length > 0;
+    if (!isOrganizer && !isOwner && !isGeneralRouteMember) return NextResponse.json({ error: "No tenés acceso a este colectivo." }, { status: 403 });
 
     // El envio corre despues de responder: el RRPP no espera a los avisos.
     after(async () => {
