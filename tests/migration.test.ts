@@ -103,6 +103,7 @@ const arreglaColectivoFugaCancelacionMigration = readFileSync(new URL("../supaba
 const arreglaComboStockRateLimitMigration = readFileSync(new URL("../supabase/migrations/20261010_arregla_combo_idempotente_stock_y_rate_limit_control.sql", import.meta.url), "utf8");
 const snapshotCuentaMpVentaOnlineMigration = readFileSync(new URL("../supabase/migrations/20261011_snapshot_cuenta_mp_venta_online.sql", import.meta.url), "utf8");
 const mesaGeneraEntradaMigration = readFileSync(new URL("../supabase/migrations/20261012_mesa_genera_entrada_y_endurece_venta.sql", import.meta.url), "utf8");
+const arreglaPermisoUpdateSalesMigration = readFileSync(new URL("../supabase/migrations/20261013_arregla_permiso_update_sales.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -255,6 +256,7 @@ async function database() {
   await db.exec(arreglaComboStockRateLimitMigration);
   await db.exec(snapshotCuentaMpVentaOnlineMigration);
   await db.exec(mesaGeneraEntradaMigration);
+  await db.exec(arreglaPermisoUpdateSalesMigration);
   return db;
 }
 
@@ -1019,6 +1021,66 @@ test("venta en persona: tickets.manual_code no admite duplicados en el mismo eve
     /Demasiados intentos/,
     "sell_table se frena con el mismo rate limit (misma clave, la cuota se comparte entre ambas formas de vender)"
   );
+
+  await db.close();
+});
+
+test("claim_ticket_email_sent/release_ticket_email_sent/claim_whatsapp_sent/set_sale_last_reconciled: reclaman una sola vez", async () => {
+  // Bug real encontrado probando en vivo: service_role NO tiene permiso de
+  // UPDATE directo sobre sales en produccion (solo funciones security
+  // definer pueden mutarla) -- el codigo de la app hacia
+  // admin.from("sales").update(...) directo en 4 lugares, que siempre
+  // fallaba con "permission denied" sin que nada lo chequeara, asi que el
+  // envio automatico de entradas por mail NUNCA se intentaba. Este harness
+  // de tests NO reproduce esa restriccion (mas abajo se ve por que:
+  // service_role tiene GRANT ALL de fabrica), asi que estos tests no
+  // hubieran detectado el bug original -- lo que si prueban es que las
+  // funciones nuevas (el reemplazo correcto) reclaman/liberan bien.
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const org = "d1111111-1111-4111-8111-111111111111";
+  const event = "d2222222-2222-4222-8222-222222222222";
+  const buyer = "d3333333-3333-4333-8333-333333333333";
+  const sale = "d4444444-4444-4444-8444-444444444444";
+
+  await db.exec(`insert into organizations(id,name,slug) values ('${org}','Club Claim','club-claim');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into buyers(id,organization_id,first_name,last_name) values ('${buyer}','${org}','Cliente','Claim');
+    insert into sales(id,organization_id,event_id,buyer_id,status,total_minor,channel) values ('${sale}','${org}','${event}','${buyer}','pending_approval',5000,'online');`);
+
+  // claim_ticket_email_sent: la primera vez reclama y devuelve la fila.
+  const firstClaim = await db.query<{ id: string; event_id: string; buyer_id: string }>(
+    `select * from claim_ticket_email_sent('${sale}')`
+  );
+  assert.equal(firstClaim.rows.length, 1, "la primera vez reclama");
+  assert.equal(firstClaim.rows[0].buyer_id, buyer);
+  assert.ok(await scalar(`select ticket_email_sent_at from sales where id='${sale}'`), "queda guardada la marca");
+
+  // Reclamar de nuevo sin force: no hay fila (ya estaba reclamado).
+  const secondClaim = await db.query(`select * from claim_ticket_email_sent('${sale}')`);
+  assert.equal(secondClaim.rows.length, 0, "un segundo reclamo sin force no encuentra nada para reclamar");
+
+  // release_ticket_email_sent: libera el reclamo (ej. el envio real fallo).
+  await db.query(`select release_ticket_email_sent('${sale}')`);
+  assert.equal(await scalar(`select ticket_email_sent_at from sales where id='${sale}'`), null);
+
+  // Ahora si se puede reclamar de nuevo.
+  const thirdClaim = await db.query(`select * from claim_ticket_email_sent('${sale}')`);
+  assert.equal(thirdClaim.rows.length, 1, "liberado el reclamo, se puede reclamar de nuevo");
+
+  // force=true reclama SIEMPRE, aunque ya este reclamado (reenvio manual).
+  const forcedClaim = await db.query(`select * from claim_ticket_email_sent('${sale}', true)`);
+  assert.equal(forcedClaim.rows.length, 1, "force reclama sin importar el estado previo");
+
+  // claim_whatsapp_sent: mismo patron, devuelve boolean en vez de fila.
+  assert.equal(await scalar(`select claim_whatsapp_sent('${sale}')`), true, "primera vez: reclama");
+  assert.equal(await scalar(`select claim_whatsapp_sent('${sale}')`), false, "segunda vez: ya estaba reclamado");
+
+  // set_sale_last_reconciled: guarda la marca (usada para el cooldown de "Verificar mi pago").
+  assert.equal(await scalar(`select last_reconciled_at from sales where id='${sale}'`), null);
+  await db.query(`select set_sale_last_reconciled('${sale}')`);
+  assert.ok(await scalar(`select last_reconciled_at from sales where id='${sale}'`), "queda guardada la marca de reconciliacion");
 
   await db.close();
 });

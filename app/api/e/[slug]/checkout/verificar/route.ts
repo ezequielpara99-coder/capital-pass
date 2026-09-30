@@ -57,7 +57,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     const withinCooldown = Date.now() - lastReconciledMs < RECONCILE_COOLDOWN_MS;
 
     if (sale.status === "pending_approval" && !withinCooldown) {
-      await admin.from("sales").update({ last_reconciled_at: new Date().toISOString() }).eq("id", saleId);
+      // service_role no tiene permiso de UPDATE directo sobre sales (todas
+      // las mutaciones pasan por funciones security definer) -- un
+      // admin.from("sales").update(...) aca fallaba siempre con "permission
+      // denied" sin que el codigo lo chequeara: last_reconciled_at nunca se
+      // guardaba de verdad, asi que el cooldown de arriba nunca frenaba nada.
+      await admin.rpc("set_sale_last_reconciled", { p_sale_id: saleId });
       try {
         await reconcileOnlineSale(saleId);
       } catch (err) {

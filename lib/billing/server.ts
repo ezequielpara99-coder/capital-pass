@@ -208,13 +208,14 @@ async function sendOnlineSaleTicketEmail(saleId: string, opts?: { organizationId
   // mesa, tambien el aviso al organizador -- van juntos en el mismo
   // reclamo para no mandar el aviso dos veces si esta funcion se llama
   // otra vez en simultaneo).
-  const claimed = await admin.from("sales")
-    .update({ ticket_email_sent_at: new Date().toISOString() })
-    .eq("id", saleId)
-    .is("ticket_email_sent_at", null)
-    .select("id, event_id, buyer_id");
-  if (!claimed.data || claimed.data.length === 0) return;
-  const sale = claimed.data[0];
+  // service_role no tiene permiso de UPDATE directo sobre sales (todas las
+  // mutaciones pasan por funciones security definer) -- un admin.from("sales").update(...)
+  // aca fallaba siempre con "permission denied", sin que el codigo lo
+  // chequeara: se interpretaba como "ya reclamado" y el mail real nunca
+  // llegaba a intentarse mandar, para ninguna compra online.
+  const { data: claimedRows } = await admin.rpc("claim_ticket_email_sent", { p_sale_id: saleId });
+  if (!claimedRows || claimedRows.length === 0) return;
+  const sale = claimedRows[0];
 
   // El reclamo de arriba marca "enviado" ANTES de saber si el mail
   // realmente salio -- si Resend esta caido, falta la API key, o cualquier
@@ -289,7 +290,7 @@ async function sendOnlineSaleTicketEmail(saleId: string, opts?: { organizationId
     console.error("BILLING: fallo inesperado mandando la entrada por email.", error);
   } finally {
     if (shouldRetryLater) {
-      await admin.from("sales").update({ ticket_email_sent_at: null }).eq("id", saleId);
+      await admin.rpc("release_ticket_email_sent", { p_sale_id: saleId });
     }
   }
 }

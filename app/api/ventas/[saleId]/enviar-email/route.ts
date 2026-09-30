@@ -86,19 +86,14 @@ export async function POST(
     // una y otra vez al comprador. Con force=true (reenvio explicito pedido
     // por el vendedor/organizador) no hace falta ganar el reclamo, pero
     // igual se actualiza el timestamp para que quede el registro del ultimo
-    // intento.
-    if (force) {
-      await admin.from("sales").update({ ticket_email_sent_at: new Date().toISOString() }).eq("id", saleId);
-    } else {
-      const claimed = await admin
-        .from("sales")
-        .update({ ticket_email_sent_at: new Date().toISOString() })
-        .eq("id", saleId)
-        .is("ticket_email_sent_at", null)
-        .select("id");
-      if (!claimed.data || claimed.data.length === 0) {
-        return NextResponse.json({ ok: true, skipped: true });
-      }
+    // intento. service_role no tiene permiso de UPDATE directo sobre sales
+    // (todas las mutaciones pasan por funciones security definer) -- un
+    // admin.from("sales").update(...) aca fallaba siempre con "permission
+    // denied" sin que el codigo lo chequeara, asi que el envio automatico
+    // NUNCA llegaba a intentarse (se interpretaba como "ya reclamado").
+    const { data: claimedRows } = await admin.rpc("claim_ticket_email_sent", { p_sale_id: saleId, p_force: force });
+    if (!claimedRows || claimedRows.length === 0) {
+      return NextResponse.json({ ok: true, skipped: true });
     }
 
     let shouldRetryLater = false;
@@ -159,7 +154,7 @@ export async function POST(
       return NextResponse.json({ ok: true });
     } finally {
       if (shouldRetryLater && !force) {
-        await admin.from("sales").update({ ticket_email_sent_at: null }).eq("id", saleId);
+        await admin.rpc("release_ticket_email_sent", { p_sale_id: saleId });
       }
     }
   } catch (error) {

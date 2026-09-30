@@ -55,12 +55,13 @@ export async function POST(
 
     // Solo se guarda la PRIMERA vez -- si el vendedor manda de nuevo (ej.
     // reenvío porque no le llegó), la fecha del primer envío es la que
-    // importa para saber si "nadie la mandó nunca".
-    await admin
-      .from("sales")
-      .update({ whatsapp_sent_at: new Date().toISOString() })
-      .eq("id", saleId)
-      .is("whatsapp_sent_at", null);
+    // importa para saber si "nadie la mandó nunca". service_role no tiene
+    // permiso de UPDATE directo sobre sales (todas las mutaciones pasan
+    // por funciones security definer) -- un admin.from("sales").update(...)
+    // aca fallaba siempre con "permission denied" sin que el codigo lo
+    // chequeara: la marca nunca se guardaba de verdad, dejando rota la
+    // seccion "Entradas sin enviar" de Notificaciones.
+    await admin.rpc("claim_whatsapp_sent", { p_sale_id: saleId });
 
     return NextResponse.json({ ok: true });
   } catch (error) {
