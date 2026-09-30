@@ -11,13 +11,20 @@ import { getAppBaseUrl } from "../../../../../lib/mercadopago/server";
 // mesa vendida por el organizador). Es un agregado best-effort al envío
 // por WhatsApp que ya existe -- si el comprador no cargó email, o Resend
 // no está configurado, o algo falla, se responde ok igual (nunca debe
-// poder revertir ni bloquear una venta ya hecha).
+// poder revertir ni bloquear una venta ya hecha). Si el envío real falla
+// (Resend caído, credenciales mal cargadas, etc.) el reclamo se libera
+// para poder reintentar -- antes quedaba marcado como "enviado" para
+// siempre aunque nunca hubiera salido nada, sin ninguna forma de reenviar.
+// body.force=true (vendedor/organizador pidiendo reenviar a mano porque el
+// comprador dice que no le llegó) salta el chequeo de "ya se mandó".
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ saleId: string }> }
 ) {
   try {
     const { saleId } = await context.params;
+    const body = await request.json().catch(() => ({}));
+    const force = body?.force === true;
 
     const supabase = await createClient();
     const {
@@ -76,69 +83,85 @@ export async function POST(
     // este endpoint se dispara solo, en automatico, despues de cada venta
     // (puerta/RRPP/organizador) -- sin esto, un reintento de red o una
     // llamada repetida al mismo saleId reenviaba el mismo mail con el QR
-    // una y otra vez al comprador.
-    const claimed = await admin
-      .from("sales")
-      .update({ ticket_email_sent_at: new Date().toISOString() })
-      .eq("id", saleId)
-      .is("ticket_email_sent_at", null)
-      .select("id");
-    if (!claimed.data || claimed.data.length === 0) {
-      return NextResponse.json({ ok: true, skipped: true });
+    // una y otra vez al comprador. Con force=true (reenvio explicito pedido
+    // por el vendedor/organizador) no hace falta ganar el reclamo, pero
+    // igual se actualiza el timestamp para que quede el registro del ultimo
+    // intento.
+    if (force) {
+      await admin.from("sales").update({ ticket_email_sent_at: new Date().toISOString() }).eq("id", saleId);
+    } else {
+      const claimed = await admin
+        .from("sales")
+        .update({ ticket_email_sent_at: new Date().toISOString() })
+        .eq("id", saleId)
+        .is("ticket_email_sent_at", null)
+        .select("id");
+      if (!claimed.data || claimed.data.length === 0) {
+        return NextResponse.json({ ok: true, skipped: true });
+      }
     }
 
-    const { data: event } = await admin
-      .from("events")
-      .select("name")
-      .eq("id", sale.event_id)
-      .maybeSingle();
+    let shouldRetryLater = false;
+    try {
+      const { data: event } = await admin
+        .from("events")
+        .select("name")
+        .eq("id", sale.event_id)
+        .maybeSingle();
 
-    const { data: tickets } = await admin
-      .from("tickets")
-      .select("id, manual_code, ticket_type_id, status")
-      .eq("sale_id", sale.id)
-      .eq("status", "issued")
-      .order("display_number", { ascending: true });
+      const { data: tickets } = await admin
+        .from("tickets")
+        .select("id, manual_code, ticket_type_id, status")
+        .eq("sale_id", sale.id)
+        .eq("status", "issued")
+        .order("display_number", { ascending: true });
 
-    if (!tickets || tickets.length === 0) {
-      return NextResponse.json({ ok: true, skipped: true });
+      if (!tickets || tickets.length === 0) {
+        return NextResponse.json({ ok: true, skipped: true });
+      }
+
+      const typeIds = [...new Set(tickets.map((t) => t.ticket_type_id).filter(Boolean))];
+      let typeNames = new Map<string, string>();
+      if (typeIds.length > 0) {
+        const { data: types } = await admin.from("ticket_types").select("id, name").in("id", typeIds);
+        typeNames = new Map((types ?? []).map((t) => [t.id, t.name]));
+      }
+      // Ticket de mesa: sin ticket_type_id, se etiqueta con el nombre de la mesa.
+      const tableName = sale.table_id
+        ? (await admin.from("bar_tables").select("name").eq("id", sale.table_id).maybeSingle()).data?.name ?? null
+        : null;
+
+      const baseUrl = getAppBaseUrl();
+
+      const ticketsForEmail = await Promise.all(
+        tickets.map(async (ticket) => ({
+          ticketId: ticket.id,
+          ticketType: ticket.ticket_type_id ? typeNames.get(ticket.ticket_type_id) ?? "Entrada" : tableName ? `Mesa: ${tableName}` : "Mesa",
+          manualCode: ticket.manual_code,
+          qrPngBase64: (await ticketQrPngBuffer(ticket.id)).toString("base64"),
+          publicUrl: `${baseUrl}${createTicketPublicPath(ticket.id)}`,
+        }))
+      );
+
+      const result = await sendTicketDelivery({
+        to: email,
+        buyerName: `${buyer?.first_name ?? ""} ${buyer?.last_name ?? ""}`.trim(),
+        eventName: event?.name ?? "tu evento",
+        tickets: ticketsForEmail,
+      });
+
+      if (!result.ok) {
+        shouldRetryLater = true;
+        console.error("ENVIAR ENTRADA POR EMAIL:", result.error);
+        return NextResponse.json({ error: result.error ?? "No se pudo mandar el mail." }, { status: 502 });
+      }
+
+      return NextResponse.json({ ok: true });
+    } finally {
+      if (shouldRetryLater && !force) {
+        await admin.from("sales").update({ ticket_email_sent_at: null }).eq("id", saleId);
+      }
     }
-
-    const typeIds = [...new Set(tickets.map((t) => t.ticket_type_id).filter(Boolean))];
-    let typeNames = new Map<string, string>();
-    if (typeIds.length > 0) {
-      const { data: types } = await admin.from("ticket_types").select("id, name").in("id", typeIds);
-      typeNames = new Map((types ?? []).map((t) => [t.id, t.name]));
-    }
-    // Ticket de mesa: sin ticket_type_id, se etiqueta con el nombre de la mesa.
-    const tableName = sale.table_id
-      ? (await admin.from("bar_tables").select("name").eq("id", sale.table_id).maybeSingle()).data?.name ?? null
-      : null;
-
-    const baseUrl = getAppBaseUrl();
-
-    const ticketsForEmail = await Promise.all(
-      tickets.map(async (ticket) => ({
-        ticketId: ticket.id,
-        ticketType: ticket.ticket_type_id ? typeNames.get(ticket.ticket_type_id) ?? "Entrada" : tableName ? `Mesa: ${tableName}` : "Mesa",
-        manualCode: ticket.manual_code,
-        qrPngBase64: (await ticketQrPngBuffer(ticket.id)).toString("base64"),
-        publicUrl: `${baseUrl}${createTicketPublicPath(ticket.id)}`,
-      }))
-    );
-
-    const result = await sendTicketDelivery({
-      to: email,
-      buyerName: `${buyer?.first_name ?? ""} ${buyer?.last_name ?? ""}`.trim(),
-      eventName: event?.name ?? "tu evento",
-      tickets: ticketsForEmail,
-    });
-
-    if (!result.ok && !result.skipped) {
-      console.error("ENVIAR ENTRADA POR EMAIL:", result.error);
-    }
-
-    return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("ERROR API ENVIAR EMAIL:", error);
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });

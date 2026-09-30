@@ -199,24 +199,35 @@ async function applyUpgradeCharge(payment: ProviderPayment, chargeId: string) {
 // -- se etiqueta con el nombre de la mesa en vez de una tanda) y de paso
 // avisa al organizador por push cuando es una venta de mesa.
 async function sendOnlineSaleTicketEmail(saleId: string, opts?: { organizationId: string; tableId: string }) {
+  const admin = createAdminClient();
+
+  // Reclamo atomico ANTES de armar/mandar nada: el webhook real de
+  // Mercado Pago y el "Verificar mi pago" del comprador (o un reintento
+  // de cualquiera de los dos) pueden llegar casi al mismo tiempo -- solo
+  // el que gane este UPDATE...WHERE...IS NULL manda el mail (y, si es una
+  // mesa, tambien el aviso al organizador -- van juntos en el mismo
+  // reclamo para no mandar el aviso dos veces si esta funcion se llama
+  // otra vez en simultaneo).
+  const claimed = await admin.from("sales")
+    .update({ ticket_email_sent_at: new Date().toISOString() })
+    .eq("id", saleId)
+    .is("ticket_email_sent_at", null)
+    .select("id, event_id, buyer_id");
+  if (!claimed.data || claimed.data.length === 0) return;
+  const sale = claimed.data[0];
+
+  // El reclamo de arriba marca "enviado" ANTES de saber si el mail
+  // realmente salio -- si Resend esta caido, falta la API key, o cualquier
+  // paso de aca abajo tira una excepcion, antes quedaba marcado como
+  // enviado PARA SIEMPRE (este es el UNICO camino de envio: no hay boton
+  // de reenvio manual en ningun panel) y el comprador se quedaba sin su
+  // entrada por mail sin ningun aviso ni forma de reintentar. Ahora, si el
+  // intento de mandar el mail falla de verdad (no simplemente "no hay
+  // email cargado" o "no hay entradas todavia", que son estados legitimos,
+  // no fallas), se libera el reclamo para que el proximo pago/verificacion
+  // lo pueda reintentar.
+  let shouldRetryLater = false;
   try {
-    const admin = createAdminClient();
-
-    // Reclamo atomico ANTES de armar/mandar nada: el webhook real de
-    // Mercado Pago y el "Verificar mi pago" del comprador (o un reintento
-    // de cualquiera de los dos) pueden llegar casi al mismo tiempo -- solo
-    // el que gane este UPDATE...WHERE...IS NULL manda el mail (y, si es una
-    // mesa, tambien el aviso al organizador -- van juntos en el mismo
-    // reclamo para no mandar el aviso dos veces si esta funcion se llama
-    // otra vez en simultaneo).
-    const claimed = await admin.from("sales")
-      .update({ ticket_email_sent_at: new Date().toISOString() })
-      .eq("id", saleId)
-      .is("ticket_email_sent_at", null)
-      .select("id, event_id, buyer_id");
-    if (!claimed.data || claimed.data.length === 0) return;
-    const sale = claimed.data[0];
-
     let tableName: string | null = null;
     if (opts) {
       const { data: table } = await admin.from("bar_tables").select("name").eq("id", opts.tableId).maybeSingle();
@@ -240,7 +251,10 @@ async function sendOnlineSaleTicketEmail(saleId: string, opts?: { organizationId
       .eq("sale_id", sale.id)
       .eq("status", "issued")
       .order("display_number", { ascending: true });
-    if (!tickets || tickets.length === 0) return;
+    if (!tickets || tickets.length === 0) {
+      shouldRetryLater = true; // los tickets pueden no estar creados todavia (carrera con confirm_online_sale)
+      return;
+    }
 
     const typeIds = [...new Set(tickets.map((t) => t.ticket_type_id).filter(Boolean))];
     let typeNames = new Map<string, string>();
@@ -266,11 +280,17 @@ async function sendOnlineSaleTicketEmail(saleId: string, opts?: { organizationId
       eventName: event?.name ?? "tu evento",
       tickets: ticketsForEmail,
     });
-    if (!result.ok && !result.skipped) {
+    if (!result.ok) {
+      shouldRetryLater = true;
       console.error("BILLING: no se pudo mandar la entrada por email.", result.error);
     }
   } catch (error) {
+    shouldRetryLater = true;
     console.error("BILLING: fallo inesperado mandando la entrada por email.", error);
+  } finally {
+    if (shouldRetryLater) {
+      await admin.from("sales").update({ ticket_email_sent_at: null }).eq("id", saleId);
+    }
   }
 }
 

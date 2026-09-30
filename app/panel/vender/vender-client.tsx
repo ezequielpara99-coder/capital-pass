@@ -72,19 +72,27 @@ function formatTicketNumber(value: number | string) {
 }
 
 // Convierte números argentinos cargados de forma local (ej. 03468529047)
-// al formato que espera wa.me (5493468529047).
+// al formato que espera wa.me (5493468529047). Un celular argentino real
+// normalizado siempre queda en 549 + 10 dígitos (13 en total) -- antes, un
+// número que no matcheaba ningún patrón conocido (ej. un dígito de más por
+// error de tipeo) se devolvía TAL CUAL sin el prefijo 549, y esa cadena
+// podía coincidir por casualidad con un WhatsApp real de otra persona (ej.
+// un +34 de España): el link armado con el nombre/entrada del comprador se
+// mandaba a un desconocido. Ahora, si el resultado no tiene exactamente esa
+// forma, se rechaza (string vacío) en vez de adivinar.
 function normalizeWhatsAppNumber(value: string | null) {
   if (!value) return "";
   let digits = value.replace(/\D/g, "");
   if (!digits) return "";
-  if (digits.startsWith("549")) return digits;
   if (digits.startsWith("54")) {
-    const rest = digits.slice(2);
-    return rest.startsWith("9") ? digits : `549${rest}`;
+    let rest = digits.slice(2);
+    if (!rest.startsWith("9")) rest = `9${rest}`;
+    digits = `54${rest}`;
+  } else {
+    if (digits.startsWith("0")) digits = digits.slice(1);
+    digits = `549${digits}`;
   }
-  if (digits.startsWith("0")) digits = digits.slice(1);
-  if (digits.length === 10) return `549${digits}`;
-  return digits;
+  return /^549\d{10}$/.test(digits) ? digits : "";
 }
 
 export default function VenderClient({
@@ -184,7 +192,7 @@ export default function VenderClient({
     if (!lastName.trim()) return setError("Ingresá el apellido del comprador.");
     if (!dni.trim()) return setError("Ingresá el DNI del comprador.");
     if (!phone.trim()) return setError("Ingresá el teléfono o WhatsApp del comprador.");
-    if (normalizeWhatsAppNumber(phone).length < 12) {
+    if (!normalizeWhatsAppNumber(phone)) {
       return setError("Ese número de WhatsApp no parece válido.");
     }
     if (!paymentMethod) return setError("Elegí el método de pago.");

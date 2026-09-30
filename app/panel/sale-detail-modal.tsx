@@ -116,6 +116,10 @@ type SaleDetail = {
     phone:
       | string
       | null;
+
+    email:
+      | string
+      | null;
   };
 
   seller:
@@ -228,6 +232,12 @@ export default function SaleDetailModal({
     useState<string | null>(
       null
     );
+
+  const [
+    resendingEmail,
+    setResendingEmail,
+  ] =
+    useState(false);
 
   // ==========================================================
   // BLOQUEAR SCROLL
@@ -506,6 +516,35 @@ export default function SaleDetailModal({
         ticket.maxRefundMinor
       )
     );
+  }
+
+  // ==========================================================
+  // REENVIAR ENTRADA POR MAIL
+  // ==========================================================
+
+  async function resendEmail() {
+    if (resendingEmail || !saleId) return;
+    setResendingEmail(true);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch(`/api/ventas/${saleId}/enviar-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: true }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error ?? "No se pudo reenviar el mail.");
+      if (data.skipped) {
+        setError("El comprador no tiene un email cargado, no hay a dónde reenviarlo.");
+      } else {
+        setSuccess("Entrada reenviada por mail.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo reenviar el mail.");
+    } finally {
+      setResendingEmail(false);
+    }
   }
 
   // ==========================================================
@@ -843,6 +882,36 @@ export default function SaleDetailModal({
                       "—"
                     }
                   />
+
+                  <InfoLine
+                    label="Email"
+                    value={
+                      detail.buyer
+                        .email ??
+                      "—"
+                    }
+                  />
+
+                  <button
+                    type="button"
+                    disabled={
+                      resendingEmail ||
+                      !detail.buyer.email
+                    }
+                    onClick={
+                      resendEmail
+                    }
+                    title={
+                      !detail.buyer.email
+                        ? "El comprador no tiene un email cargado"
+                        : undefined
+                    }
+                    className="mt-3 inline-flex h-9 items-center justify-center rounded-xl border border-white/[0.10] bg-white/[0.02] px-3 text-[11px] font-semibold text-white/60 transition hover:border-[#ff5a2a]/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {resendingEmail
+                      ? "Enviando..."
+                      : "✉ Reenviar entrada por mail"}
+                  </button>
 
                 </InfoCard>
 

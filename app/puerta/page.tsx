@@ -81,32 +81,26 @@ function formatMoney(value: number) {
   }).format(value);
 }
 
+// Un celular argentino real normalizado siempre queda en 549 + 10 digitos
+// (13 en total) -- antes, un numero que no matcheaba ningun patron conocido
+// se devolvia TAL CUAL sin el prefijo 549, y esa cadena podia coincidir por
+// casualidad con un WhatsApp real de otra persona: el link con el
+// nombre/entrada del comprador se mandaba a un desconocido. Ahora, si el
+// resultado no tiene exactamente esa forma, se rechaza (string vacio).
 function normalizeWhatsApp(value: string) {
   let digits = value.replace(/\D/g, "");
-
-  if (digits.startsWith("549")) {
-    return digits;
-  }
+  if (!digits) return "";
 
   if (digits.startsWith("54")) {
-    const rest = digits.slice(2);
-
-    if (rest.startsWith("9")) {
-      return digits;
-    }
-
-    return `549${rest}`;
+    let rest = digits.slice(2);
+    if (!rest.startsWith("9")) rest = `9${rest}`;
+    digits = `54${rest}`;
+  } else {
+    if (digits.startsWith("0")) digits = digits.slice(1);
+    digits = `549${digits}`;
   }
 
-  if (digits.startsWith("0")) {
-    digits = digits.slice(1);
-  }
-
-  if (digits.length === 10) {
-    return `549${digits}`;
-  }
-
-  return digits;
+  return /^549\d{10}$/.test(digits) ? digits : "";
 }
 
 // Fuera del componente: el linter marca "Date.now()" como impuro si se
@@ -528,7 +522,7 @@ export default function DoorSellerPage() {
     }
 
     if (
-      normalizeWhatsApp(phone).length < 12
+      !normalizeWhatsApp(phone)
     ) {
       setError(
         "Ese número de WhatsApp no parece válido. Revisalo antes de cobrar — es donde le vamos a mandar la entrada."

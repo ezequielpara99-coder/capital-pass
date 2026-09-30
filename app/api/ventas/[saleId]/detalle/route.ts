@@ -199,7 +199,8 @@ export async function GET(
         first_name,
         last_name,
         dni,
-        phone
+        phone,
+        email
       `)
       .eq(
         "id",
@@ -760,6 +761,10 @@ export async function GET(
 
         phone:
           buyer?.phone ??
+          null,
+
+        email:
+          buyer?.email ??
           null,
       },
 
