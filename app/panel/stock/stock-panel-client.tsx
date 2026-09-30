@@ -1148,8 +1148,18 @@ function CierreTab({
     return `${barId}:${eventProductId}`;
   }
 
+  // Una clave de intento por barra, reusada mientras se reintenta el MISMO
+  // cierre (ej. corte de wifi a mitad de la tanda de ajustes) -- sin esto,
+  // si un producto ya se habia guardado con exito y otro fallaba despues,
+  // un reintento normal volvia a calcular el ajuste del que SI habia salido
+  // bien (con el stock ya desactualizado en la prop barStock, que no se
+  // refresca hasta que closeBar termina entero) y lo aplicaba una segunda
+  // vez. Se limpia recien cuando el cierre de esa barra termina con exito.
+  const closeAttemptKeyRef = useRef<Record<string, string>>({});
+
   async function closeBar(barId: string) {
     const rows = barStock.filter((row) => row.bar_id === barId);
+    const attemptKey = closeAttemptKeyRef.current[barId] ?? (closeAttemptKeyRef.current[barId] = crypto.randomUUID());
     const changes = rows
       .map((row) => {
         const counted = counts[key(barId, row.event_product_id)];
@@ -1175,6 +1185,7 @@ function CierreTab({
           body: JSON.stringify({
             barId, eventProductId: change.eventProductId, quantityDelta: change.delta,
             type: "ajuste", reason: `Cierre de noche ${today}`,
+            idempotencyKey: `${attemptKey}:${change.eventProductId}`,
           }),
         });
         const result = await response.json();
@@ -1185,6 +1196,9 @@ function CierreTab({
         for (const row of rows) delete next[key(barId, row.event_product_id)];
         return next;
       });
+      // Cierre completo: la proxima vez que se cierre esta barra es un
+      // intento nuevo, no un reintento -- se renueva la clave.
+      delete closeAttemptKeyRef.current[barId];
       onSaved();
     } catch (err) {
       onError(err instanceof Error ? err.message : "No se pudo guardar el cierre.");

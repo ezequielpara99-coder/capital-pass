@@ -9,6 +9,7 @@ export async function POST(request: NextRequest) {
     const quantityDelta = Number(body.quantityDelta);
     const type = body.type === "ajuste" ? "ajuste" : "perdida";
     const reason = String(body.reason ?? "").trim();
+    const idempotencyKey = String(body.idempotencyKey ?? "").trim() || null;
 
     if (!barId || !eventProductId || !Number.isInteger(quantityDelta) || quantityDelta === 0 || !reason) {
       return NextResponse.json({ error: "Completá la cantidad y el motivo." }, { status: 400 });
@@ -24,6 +25,7 @@ export async function POST(request: NextRequest) {
       p_quantity_delta: quantityDelta,
       p_type: type,
       p_reason: reason,
+      p_idempotency_key: idempotencyKey,
     });
 
     if (error) {

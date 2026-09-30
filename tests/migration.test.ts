@@ -105,6 +105,7 @@ const snapshotCuentaMpVentaOnlineMigration = readFileSync(new URL("../supabase/m
 const mesaGeneraEntradaMigration = readFileSync(new URL("../supabase/migrations/20261012_mesa_genera_entrada_y_endurece_venta.sql", import.meta.url), "utf8");
 const arreglaPermisoUpdateSalesMigration = readFileSync(new URL("../supabase/migrations/20261013_arregla_permiso_update_sales.sql", import.meta.url), "utf8");
 const snapshotCuentaMpRecargaMigration = readFileSync(new URL("../supabase/migrations/20261014_snapshot_cuenta_mp_recarga_socio.sql", import.meta.url), "utf8");
+const verificacionFinalBarraColectivosMigration = readFileSync(new URL("../supabase/migrations/20261015_verificacion_final_barra_y_colectivos.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -259,6 +260,7 @@ async function database() {
   await db.exec(mesaGeneraEntradaMigration);
   await db.exec(arreglaPermisoUpdateSalesMigration);
   await db.exec(snapshotCuentaMpRecargaMigration);
+  await db.exec(verificacionFinalBarraColectivosMigration);
   return db;
 }
 
@@ -973,6 +975,78 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
   assert.ok(resoldTable, "la mesa liberada se puede volver a vender");
 
   void organizerMember;
+  await db.close();
+});
+
+test("verificacion final barra/colectivos: adjust_bar_stock es idempotente, redeem_combo_ticket se frena con rate limit, y un pasaje cancelado no bloquea reasignar", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const org = "e1111111-1111-4111-8111-111111111111";
+  const event = "e2222222-2222-4222-8222-222222222222";
+  const organizerUser = "e3333333-3333-4333-8333-333333333333";
+  const bartenderUser = "e4444444-4444-4444-8444-444444444444";
+  const bar = "e5555555-5555-4555-8555-555555555555";
+  const eventProduct = "e6666666-6666-4666-8666-666666666666";
+  const route = "e7777777-7777-4777-8777-777777777777";
+  const sale = "e8888888-8888-4888-8888-888888888888";
+
+  await db.exec(`insert into auth.users values ('${organizerUser}','org-verif@example.test',now(),'{}'), ('${bartenderUser}','bartender-verif@example.test',now(),'{}');
+    insert into organizations(id,name,slug,complimentary) values ('${org}','Club Verif','club-verif',true);
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${organizerUser}','organizer','active'), ('${org}','${bartenderUser}','bartender','active');`);
+
+  const organizerMember = await scalar(`select id::text from organization_members where user_id='${organizerUser}'`);
+  const bartenderMember = await scalar(`select id::text from organization_members where user_id='${bartenderUser}'`);
+  const productId = await scalar(`select id::text from products where name like 'Fernet Branca%' limit 1`);
+
+  await db.exec(`insert into event_products(id,event_id,product_id,cost_price_minor,sale_price_minor,profit_margin_percent,total_stock,low_stock_threshold)
+      values ('${eventProduct}','${event}','${productId}',10000,2000,50,50,3);
+    insert into bars(id,event_id,name) values ('${bar}','${event}','Barra Verif');
+    insert into event_staff(event_id,organization_member_id,staff_role,active,bar_id) values ('${event}','${bartenderMember}','bartender',true,'${bar}');`);
+
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);`);
+  await db.query(`select assign_stock_to_bar('${eventProduct}','${bar}',20)`);
+
+  // adjust_bar_stock es idempotente: un reintento con la MISMA clave (ej.
+  // el segundo producto de un cierre de noche fallo por wifi y el
+  // organizador reintenta desde cero) no aplica el ajuste dos veces.
+  const closeKey = "close-attempt-1:" + eventProduct;
+  await db.query(`select adjust_bar_stock('${bar}','${eventProduct}',-3,'ajuste','Conteo cierre','${closeKey}')`);
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 17);
+  await db.query(`select adjust_bar_stock('${bar}','${eventProduct}',-3,'ajuste','Conteo cierre','${closeKey}')`);
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProduct}'`), 17, "el reintento con la misma clave no descuenta una segunda vez");
+  assert.equal(await scalar(`select count(*)::int from stock_movements where idempotency_key='${closeKey}'`), 1);
+
+  // redeem_combo_ticket: rate limit (se precarga el balde ya en el limite).
+  await db.exec(`select set_config('request.jwt.claim.sub','${bartenderUser}',false);`);
+  await db.exec(
+    `insert into rate_limit_buckets(key, window_start, count) values ('combo-redeem:${bartenderUser}', now(), 60)`
+  );
+  await assert.rejects(
+    () => db.query(`select redeem_combo_ticket('${bar}','NOEXISTE','${eventProduct}',1)`),
+    /Demasiados intentos/,
+    "el canje de combo tambien se frena con rate limit"
+  );
+
+  // Colectivos: cancelar un pasaje y volver a llamar assign_transfer_ticket
+  // con el MISMO sale_id+route_id tiene que generar un codigo NUEVO, no
+  // devolver el viejo ya cancelado (que quedaria invalido para siempre).
+  await db.exec(`select set_config('request.jwt.claim.sub','${organizerUser}',false);
+    insert into transfer_routes(id,event_id,organization_member_id,name) values ('${route}','${event}','${organizerMember}','Ruta Verif');
+    insert into sales(id,organization_id,event_id,status,total_minor,channel) values ('${sale}','${org}','${event}','confirmed',0,'rrpp');`);
+  const firstAssign = await db.query<{ transfer_ticket_id: string; manual_code: string }>(
+    `select * from assign_transfer_ticket('${route}','Pasajero Verif',null,'${sale}')`
+  );
+  await db.query(`select cancel_transfer_ticket('${firstAssign.rows[0].transfer_ticket_id}','no va')`);
+  const secondAssign = await db.query<{ transfer_ticket_id: string; manual_code: string }>(
+    `select * from assign_transfer_ticket('${route}','Pasajero Verif',null,'${sale}')`
+  );
+  assert.notEqual(secondAssign.rows[0].transfer_ticket_id, firstAssign.rows[0].transfer_ticket_id, "genera un pasaje nuevo, no devuelve el cancelado");
+  assert.notEqual(secondAssign.rows[0].manual_code, firstAssign.rows[0].manual_code);
+  assert.equal(await scalar(`select count(*)::int from transfer_tickets where sale_id='${sale}' and route_id='${route}'`), 2);
+
+  void bartenderMember;
   await db.close();
 });
 
