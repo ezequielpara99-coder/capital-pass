@@ -62,7 +62,7 @@ export async function POST(
     }
 
     const { data: account } = await admin.from("organization_mercadopago_accounts")
-      .select("processing_fee_percent").eq("organization_id", event.organization_id).maybeSingle();
+      .select("processing_fee_percent, mp_user_id").eq("organization_id", event.organization_id).maybeSingle();
 
     const created = await admin.rpc("create_online_sale", {
       p_event_id: event.id,
@@ -130,6 +130,12 @@ export async function POST(
     const chargedSaved = await admin.rpc("set_online_sale_charged_total", {
       p_sale_id: sale.sale_id,
       p_total_charged_minor: totalCharged,
+      // Snapshot de que cuenta MP se uso para generar ESTA preference -- si
+      // el organizador reconecta Mercado Pago despues de esto (cambia de
+      // cuenta), la confirmacion del pago tiene que seguir comparando
+      // contra la cuenta con la que el comprador realmente pago, no contra
+      // la que este vigente en ese momento.
+      p_mercadopago_collector_id: account?.mp_user_id ?? null,
     });
     if (chargedSaved.error) {
       console.error("VENTAS ONLINE: no se pudo guardar total_charged_minor.", chargedSaved.error);

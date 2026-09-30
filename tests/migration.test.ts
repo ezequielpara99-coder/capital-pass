@@ -101,6 +101,7 @@ const seguimientoEnvioWhatsappMigration = readFileSync(new URL("../supabase/migr
 const bloqueaVentaEventoTerminadoMigration = readFileSync(new URL("../supabase/migrations/20261008_bloquea_venta_online_evento_terminado.sql", import.meta.url), "utf8");
 const arreglaColectivoFugaCancelacionMigration = readFileSync(new URL("../supabase/migrations/20261009_arregla_colectivo_fuga_y_cancelacion.sql", import.meta.url), "utf8");
 const arreglaComboStockRateLimitMigration = readFileSync(new URL("../supabase/migrations/20261010_arregla_combo_idempotente_stock_y_rate_limit_control.sql", import.meta.url), "utf8");
+const snapshotCuentaMpVentaOnlineMigration = readFileSync(new URL("../supabase/migrations/20261011_snapshot_cuenta_mp_venta_online.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -251,6 +252,7 @@ async function database() {
   await db.exec(bloqueaVentaEventoTerminadoMigration);
   await db.exec(arreglaColectivoFugaCancelacionMigration);
   await db.exec(arreglaComboStockRateLimitMigration);
+  await db.exec(snapshotCuentaMpVentaOnlineMigration);
   return db;
 }
 
@@ -371,8 +373,17 @@ test("ventas online: carrito, confirmacion, cupo y limpieza de pendientes", asyn
   assert.equal(await scalar(`select status from sales where id='${sale}'`), "pending_approval");
   assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${sale}'`), 0, "no se emiten entradas hasta confirmar el pago");
 
-  await db.query("select set_online_sale_charged_total($1, 5250)", [sale]);
+  await db.query("select set_online_sale_charged_total($1, 5250, 999)", [sale]);
   assert.equal(await scalar(`select total_charged_minor::int from sales where id='${sale}'`), 5250, "guarda subtotal + cargo por servicio para verificar el pago despues");
+  assert.equal(await scalar(`select mercadopago_collector_id::int from sales where id='${sale}'`), 999, "guarda que cuenta MP se uso para esta venta puntual");
+
+  // El organizador reconecta Mercado Pago con OTRA cuenta mientras esta
+  // venta sigue pendiente (organization_id es primary key: pisa la fila).
+  // El snapshot ya guardado en la venta no tiene que cambiar -- es lo que
+  // despues usa applySalePayment (lib/billing/server.ts) para verificar
+  // contra que cuenta se cobro realmente, no contra la vigente ahora.
+  await db.exec(`update organization_mercadopago_accounts set mp_user_id = 111 where organization_id = '${org}'`);
+  assert.equal(await scalar(`select mercadopago_collector_id::int from sales where id='${sale}'`), 999, "reconectar Mercado Pago no pisa el snapshot de una venta ya en curso");
 
   // Un segundo carrito no puede reservar mas del cupo restante mientras el primero sigue pendiente.
   await assert.rejects(

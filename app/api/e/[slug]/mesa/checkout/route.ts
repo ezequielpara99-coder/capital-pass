@@ -51,7 +51,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
 
     const { data: account } = await admin
       .from("organization_mercadopago_accounts")
-      .select("processing_fee_percent")
+      .select("processing_fee_percent, mp_user_id")
       .eq("organization_id", event.organization_id)
       .maybeSingle();
 
@@ -88,7 +88,13 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
       ...(feeAmount > 0 ? [{ id: "cargo-servicio", title: "Cargo por servicio", quantity: 1, unit_price: feeAmount, currency_id: "ARS" }] : []),
     ];
 
-    const charged = await admin.rpc("set_online_sale_charged_total", { p_sale_id: sale.sale_id, p_total_charged_minor: tableTotal + feeAmount });
+    const charged = await admin.rpc("set_online_sale_charged_total", {
+      p_sale_id: sale.sale_id,
+      p_total_charged_minor: tableTotal + feeAmount,
+      // Ver comentario en app/api/e/[slug]/checkout/route.ts: snapshot de
+      // la cuenta MP usada para esta preference puntual.
+      p_mercadopago_collector_id: account?.mp_user_id ?? null,
+    });
     if (charged.error) throw new Error(`No se pudo guardar el total: ${charged.error.message}`);
 
     const base = getAppBaseUrl();

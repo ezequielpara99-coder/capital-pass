@@ -309,15 +309,30 @@ async function sendOnlineSaleTicketEmail(saleId: string, opts?: { organizationId
 export async function applySalePayment(payment: ProviderPayment, saleId: string) {
   const admin = createAdminClient();
   const { data: sale, error } = await admin.from("sales")
-    .select("id, organization_id, total_charged_minor, currency, table_id, status")
+    .select("id, organization_id, total_charged_minor, currency, table_id, status, mercadopago_collector_id")
     .eq("id", saleId).eq("channel", "online").maybeSingle();
   if (error) throw new Error("No se pudo consultar la venta.");
   if (!sale || sale.total_charged_minor == null) return false;
-  const { data: account } = await admin.from("organization_mercadopago_accounts")
-    .select("mp_user_id").eq("organization_id", sale.organization_id).maybeSingle();
-  if (!account) return false;
+
+  // La cuenta MP usada para verificar este pago es la que se snapshoteo al
+  // generar la preference de ESTA venta (guardada en set_online_sale_charged_total),
+  // no la vigente ahora -- si el organizador reconecta/cambia de cuenta de
+  // Mercado Pago mientras esta venta esta pendiente, el pago real quedo
+  // acreditado en la cuenta vieja, y comparar contra la nueva hacia fallar
+  // la verificacion para siempre, dejando al comprador pago y sin entrada.
+  // Fallback a la cuenta vigente solo para ventas de antes de este fix
+  // (sin snapshot guardado).
+  let collectorId = sale.mercadopago_collector_id as number | null;
+  if (collectorId == null) {
+    const { data: account } = await admin.from("organization_mercadopago_accounts")
+      .select("mp_user_id").eq("organization_id", sale.organization_id).maybeSingle();
+    if (!account) return false;
+    collectorId = account.mp_user_id;
+  }
+  if (collectorId == null) return false;
+
   const verified = verifiedPayment(payment, {
-    amount: Number(sale.total_charged_minor), currency: sale.currency, collectorId: account.mp_user_id,
+    amount: Number(sale.total_charged_minor), currency: sale.currency, collectorId,
     live: process.env.MERCADOPAGO_ENV !== "sandbox",
   });
   const result = await admin.rpc("confirm_online_sale", { p_sale_id: saleId, p_status: verified.status });
