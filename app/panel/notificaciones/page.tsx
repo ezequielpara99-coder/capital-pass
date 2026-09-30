@@ -4,10 +4,13 @@ import { redirect } from "next/navigation";
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { pickSelectedEvent } from "../../../lib/panel/selected-event";
+import { createTicketPublicPath } from "../../../lib/tickets/signature";
+import { getAppBaseUrl } from "../../../lib/mercadopago/server";
 
 import EventSwitcher from "../event-switcher";
 import RefundActionButton from "./refund-action-button";
 import DeliveryResolveButton from "./delivery-resolve-button";
+import SendWhatsAppButton from "./send-whatsapp-button";
 
 // ============================================================
 // TYPES
@@ -96,6 +99,25 @@ type ProfileRow = {
     | string
     | null;
 };
+
+// Mismo criterio que ya usan las pantallas de venta (vender-client.tsx,
+// nueva-venta, puerta): un celular argentino real normalizado siempre
+// queda en 549 + 10 dígitos. Si no matchea, se rechaza en vez de adivinar
+// -- evita armar un link de WhatsApp a un número que no es el que corresponde.
+function normalizeWhatsAppNumber(value: string | null) {
+  if (!value) return "";
+  let digits = value.replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("54")) {
+    let rest = digits.slice(2);
+    if (!rest.startsWith("9")) rest = `9${rest}`;
+    digits = `54${rest}`;
+  } else {
+    if (digits.startsWith("0")) digits = digits.slice(1);
+    digits = `549${digits}`;
+  }
+  return /^549\d{10}$/.test(digits) ? digits : "";
+}
 
 // ============================================================
 // PAGE
@@ -874,6 +896,112 @@ export default async function NotificationsPage({
     );
 
   // ==========================================================
+  // POR ENVIAR POR WHATSAPP
+  //
+  // Ventas en persona (puerta/RRPP/organizador -- las online se entregan
+  // por mail automático) confirmadas, a las que todavía nadie le dio al
+  // botón "Enviar por WhatsApp". No hay forma de saber si un envío ya
+  // hecho realmente llegó/se leyó (eso requiere la API paga de WhatsApp
+  // Business), pero esto alcanza para no depender de que el comprador
+  // avise que nunca recibió nada.
+  // ==========================================================
+
+  const { data: pendingWhatsappSalesData } = await admin
+    .from("sales")
+    .select("id, buyer_id, seller_member_id, channel, confirmed_at, created_at")
+    .eq("organization_id", membership.organization_id)
+    .eq("event_id", event.id)
+    .eq("status", "confirmed")
+    .in("channel", ["organizer", "rrpp", "door"])
+    .is("whatsapp_sent_at", null)
+    .order("confirmed_at", { ascending: false });
+
+  const pendingWhatsappSalesRaw = pendingWhatsappSalesData ?? [];
+
+  const pendingWaBuyerIds = [...new Set(pendingWhatsappSalesRaw.map((s) => s.buyer_id).filter(Boolean))];
+  const pendingWaMemberIds = [...new Set(pendingWhatsappSalesRaw.map((s) => s.seller_member_id).filter((v): v is string => Boolean(v)))];
+  const pendingWaSaleIds = pendingWhatsappSalesRaw.map((s) => s.id);
+
+  const [
+    { data: pendingWaBuyersData },
+    { data: pendingWaMembersData },
+    { data: pendingWaTicketsData },
+  ] = await Promise.all([
+    pendingWaBuyerIds.length
+      ? admin.from("buyers").select("id, first_name, last_name, dni, phone").in("id", pendingWaBuyerIds)
+      : Promise.resolve({ data: [] as { id: string; first_name: string; last_name: string; dni: string | null; phone: string | null }[] }),
+    pendingWaMemberIds.length
+      ? admin.from("organization_members").select("id, user_id").in("id", pendingWaMemberIds)
+      : Promise.resolve({ data: [] as { id: string; user_id: string }[] }),
+    pendingWaSaleIds.length
+      ? admin.from("tickets").select("id, sale_id, manual_code, display_number, ticket_type_id").in("sale_id", pendingWaSaleIds).eq("status", "issued")
+      : Promise.resolve({ data: [] as { id: string; sale_id: string; manual_code: string | null; display_number: number | string | null; ticket_type_id: string | null }[] }),
+  ]);
+
+  const pendingWaSellerUserIds = (pendingWaMembersData ?? []).map((m) => m.user_id);
+  const pendingWaTicketTypeIds = [...new Set((pendingWaTicketsData ?? []).map((t) => t.ticket_type_id).filter((v): v is string => Boolean(v)))];
+  const [{ data: pendingWaSellerProfilesData }, { data: pendingWaTicketTypesData }] = await Promise.all([
+    pendingWaSellerUserIds.length
+      ? admin.from("profiles").select("id, first_name, last_name").in("id", pendingWaSellerUserIds)
+      : Promise.resolve({ data: [] as { id: string; first_name: string | null; last_name: string | null }[] }),
+    pendingWaTicketTypeIds.length
+      ? admin.from("ticket_types").select("id, name").in("id", pendingWaTicketTypeIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+  ]);
+
+  const pendingWaBuyerMap = new Map((pendingWaBuyersData ?? []).map((b) => [b.id, b]));
+  const pendingWaMemberMap = new Map((pendingWaMembersData ?? []).map((m) => [m.id, m]));
+  const pendingWaSellerProfileMap = new Map((pendingWaSellerProfilesData ?? []).map((p) => [p.id, p]));
+  const pendingWaTicketTypeNameMap = new Map((pendingWaTicketTypesData ?? []).map((t) => [t.id, t.name]));
+  type PendingWaTicketRow = { id: string; sale_id: string; manual_code: string | null; display_number: number | string | null; ticket_type_id: string | null };
+  const pendingWaTicketsBySale = new Map<string, PendingWaTicketRow[]>();
+  for (const row of pendingWaTicketsData ?? []) {
+    const list = pendingWaTicketsBySale.get(row.sale_id) ?? [];
+    list.push(row);
+    pendingWaTicketsBySale.set(row.sale_id, list);
+  }
+
+  const pendingWaBaseUrl = getAppBaseUrl();
+
+  const pendingWhatsappSales = pendingWhatsappSalesRaw.map((sale) => {
+    const buyer = sale.buyer_id ? pendingWaBuyerMap.get(sale.buyer_id) : undefined;
+    const member = sale.seller_member_id ? pendingWaMemberMap.get(sale.seller_member_id) : undefined;
+    const sellerProfile = member ? pendingWaSellerProfileMap.get(member.user_id) : undefined;
+    const saleTickets = pendingWaTicketsBySale.get(sale.id) ?? [];
+    const buyerName = buyer ? `${buyer.first_name} ${buyer.last_name}`.trim() : "Comprador";
+
+    const lines = [
+      `🎟️ *Tus entradas para ${event.name}*`,
+      "",
+      `Hola ${buyer?.first_name ?? buyerName} 👋`,
+      "",
+    ];
+    for (const ticket of saleTickets) {
+      lines.push(
+        `Entrada: ${ticket.ticket_type_id ? pendingWaTicketTypeNameMap.get(ticket.ticket_type_id) ?? "Entrada" : "Entrada"} · N.º #${String(ticket.display_number ?? "").padStart(7, "0")}`,
+        `Código: ${ticket.manual_code}`,
+        `${pendingWaBaseUrl}${createTicketPublicPath(ticket.id)}`,
+        ""
+      );
+    }
+    lines.push("Presentá cada entrada al ingresar.", "", "Capital Pass");
+
+    return {
+      id: sale.id,
+      buyerName,
+      buyerDni: buyer?.dni ?? null,
+      phone: buyer?.phone ?? null,
+      sellerName: sellerProfile ? `${sellerProfile.first_name ?? ""} ${sellerProfile.last_name ?? ""}`.trim() || "Vendedor" : "Organizador",
+      channel: sale.channel,
+      ticketCount: saleTickets.length,
+      confirmedAt: sale.confirmed_at ?? sale.created_at,
+      whatsappUrl: normalizeWhatsAppNumber(buyer?.phone ?? null)
+        ? `https://wa.me/${normalizeWhatsAppNumber(buyer?.phone ?? null)}?text=${encodeURIComponent(lines.join("\n"))}`
+        : null,
+    };
+  });
+
+  // ==========================================================
   // MÉTRICAS
   // ==========================================================
 
@@ -918,11 +1046,13 @@ export default async function NotificationsPage({
 
   const totalNotifications =
     returnedNotifications.length +
-    deliveryNotifications.length;
+    deliveryNotifications.length +
+    pendingWhatsappSales.length;
 
   const requiringAttention =
     pendingRefunds.length +
-    pendingDeliveryNotifications.length;
+    pendingDeliveryNotifications.length +
+    pendingWhatsappSales.length;
 
   // ==========================================================
   // STOCK BAJO (modulo de barra) -- seccion propia, independiente
@@ -1054,12 +1184,13 @@ export default async function NotificationsPage({
 
             <p className="mt-4 text-sm leading-6 text-[#f7f3ed]/45">
               {pendingRefunds.length} reintegros pendientes ·{" "}
-              {pendingDeliveryNotifications.length} entregas por resolver
+              {pendingDeliveryNotifications.length} entregas por resolver ·{" "}
+              {pendingWhatsappSales.length} sin enviar por WhatsApp
             </p>
           </div>
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <MetricBlock
             index="01"
             label="Notificaciones"
@@ -1090,6 +1221,77 @@ export default async function NotificationsPage({
             detail="problemas activos"
             tone="accent"
           />
+
+          <MetricBlock
+            index="05"
+            label="Por enviar"
+            value={String(pendingWhatsappSales.length)}
+            detail="sin WhatsApp todavía"
+            tone="warning"
+          />
+        </section>
+
+        <section className="mt-6 border border-white/[0.09] bg-[#080706]/88">
+          <SectionTitle
+            eyebrow="WhatsApp"
+            title="Entradas sin enviar"
+            count={pendingWhatsappSales.length}
+            tone="accent"
+          />
+
+          {pendingWhatsappSales.length === 0 ? (
+            <EmptyState
+              title="Todo enviado"
+              detail="No hay ventas en persona (puerta, RRPP, organizador) pendientes de mandar por WhatsApp."
+              success
+            />
+          ) : (
+            <div className="divide-y divide-white/[0.08]">
+              {pendingWhatsappSales.map((item) => (
+                <article
+                  key={item.id}
+                  className="grid gap-6 px-5 py-6 transition hover:bg-white/[0.025] md:px-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(220px,.65fr)]"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-xl font-black uppercase tracking-[-0.04em] text-[#f7f3ed]">
+                        {item.buyerName}
+                      </h3>
+
+                      <StatusPill tone="warning">
+                        Sin enviar
+                      </StatusPill>
+                    </div>
+
+                    <p className="mt-3 text-sm font-semibold text-[#f7f3ed]/55">
+                      {item.ticketCount} {item.ticketCount === 1 ? "entrada" : "entradas"}
+                    </p>
+
+                    <p className="mt-2 text-xs leading-5 text-[#f7f3ed]/35">
+                      DNI {item.buyerDni ?? "—"} · {item.sellerName} · {formatChannel(item.channel)} · WhatsApp: {item.phone ?? "—"}
+                    </p>
+                  </div>
+
+                  <div className="lg:text-right">
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#f7f3ed]/30">
+                      Vendida
+                    </p>
+
+                    <p className="mt-3 text-sm font-semibold text-[#f7f3ed]/60">
+                      {formatDate(item.confirmedAt)}
+                    </p>
+
+                    {item.whatsappUrl && (
+                      <SendWhatsAppButton
+                        saleId={item.id}
+                        whatsappUrl={item.whatsappUrl}
+                      />
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="mt-6 border border-white/[0.09] bg-[#080706]/88">

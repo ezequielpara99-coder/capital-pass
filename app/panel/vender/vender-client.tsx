@@ -168,7 +168,7 @@ export default function VenderClient({
 
       setEntriesResult(result as EntriesResponse);
 
-      sendAllWhatsApp(result as EntriesResponse, waWindow);
+      sendAllWhatsApp(result as EntriesResponse, waWindow, saleId);
 
       // Best-effort: si el comprador cargó email, le llega la entrada
       // (QR adjunto) ahí también, además del WhatsApp.
@@ -241,7 +241,7 @@ export default function VenderClient({
     }
   }
 
-  function sendAllWhatsApp(result: EntriesResponse, waWindow: Window | null) {
+  function sendAllWhatsApp(result: EntriesResponse, waWindow: Window | null, saleId: string) {
     const number = normalizeWhatsAppNumber(result.buyer.phone);
     if (!number) {
       waWindow?.close();
@@ -250,6 +250,11 @@ export default function VenderClient({
       );
       return;
     }
+
+    // Best-effort: para que Notificaciones pueda avisar qué ventas todavía
+    // nadie mandó por WhatsApp, en vez de enterarse recién cuando el
+    // comprador se queja.
+    fetch(`/api/ventas/${saleId}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
 
     const lines = [
       `🎟️ *Tus entradas para ${result.event.name}*`,
@@ -398,6 +403,7 @@ export default function VenderClient({
                             "_blank",
                             "noopener,noreferrer"
                           );
+                          fetch(`/api/ventas/${entriesResult.saleId}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
                         }}
                         className="h-13 rounded-2xl bg-gradient-to-r from-[#ff2a1a] to-[#ff5a2a] px-4 py-3.5 text-sm font-bold text-white shadow-[0_10px_30px_rgba(255,90,42,0.18)] transition hover:scale-[1.01]"
                       >

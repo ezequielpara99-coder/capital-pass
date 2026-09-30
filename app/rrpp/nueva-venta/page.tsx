@@ -841,6 +841,11 @@ export default function NuevaVentaRRPPPage() {
       return;
     }
 
+    // Best-effort: para que Notificaciones pueda avisar qué ventas todavía
+    // nadie mandó por WhatsApp, en vez de enterarse recién cuando el
+    // comprador se queja.
+    fetch(`/api/ventas/${result.saleId}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
+
     const buyerName =
       result.buyer.firstName;
 
@@ -948,6 +953,8 @@ export default function NuevaVentaRRPPPage() {
       "_blank",
       "noopener,noreferrer"
     );
+
+    fetch(`/api/ventas/${entriesResult.saleId}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
   }
 
   // =====================================================

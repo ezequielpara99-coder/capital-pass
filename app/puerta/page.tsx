@@ -705,6 +705,11 @@ export default function DoorSellerPage() {
       return;
     }
 
+    // Best-effort: para que Notificaciones pueda avisar qué ventas todavía
+    // nadie mandó por WhatsApp, en vez de enterarse recién cuando el
+    // comprador se queja.
+    fetch(`/api/ventas/${result.sale.id}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
+
     const lines = [
       `🎟️ *Tus entradas para ${result.event.name}*`,
       "",
@@ -781,6 +786,10 @@ export default function DoorSellerPage() {
       `https://wa.me/${number}?text=${message}`,
       "_blank"
     );
+
+    if (saleResult) {
+      fetch(`/api/ventas/${saleResult.sale.id}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
+    }
   }
 
   // =====================================================
