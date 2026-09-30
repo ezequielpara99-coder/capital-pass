@@ -23,6 +23,15 @@ export type TransferRoute = {
   stops: { id: string; position: number; name: string }[];
 };
 
+type Passenger = {
+  id: string;
+  passenger_name: string;
+  passenger_phone: string | null;
+  manual_code: string;
+  status: "issued" | "used" | "cancelled";
+  stop_id: string | null;
+};
+
 const INPUT =
   "mt-2 h-12 w-full border border-white/[0.12] bg-black/30 px-4 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-[#ff5a2a]/50";
 const LABEL = "block text-[9px] font-black uppercase tracking-[0.18em] text-white/40";
@@ -170,6 +179,53 @@ export default function TrasladosClient({
     }
   }
 
+  // Pasajeros y cancelacion -- se cargan al abrir, no de entrada (evita un
+  // fetch por cada colectivo del evento si el organizador no los mira).
+  const [passengersOpenId, setPassengersOpenId] = useState<string | null>(null);
+  const [passengers, setPassengers] = useState<Passenger[]>([]);
+  const [passengersLoading, setPassengersLoading] = useState(false);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  async function openPassengers(route: TransferRoute) {
+    if (passengersOpenId === route.id) {
+      setPassengersOpenId(null);
+      return;
+    }
+    setPassengersOpenId(route.id);
+    setPassengersLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/rrpps/traslados/pasajeros?eventId=${event.id}&routeId=${route.id}`);
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudieron cargar los pasajeros.");
+      setPassengers(result.passengers);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron cargar los pasajeros.");
+    } finally {
+      setPassengersLoading(false);
+    }
+  }
+
+  async function cancelPassenger(route: TransferRoute, passenger: Passenger) {
+    if (!window.confirm(`¿Cancelar el pasaje de "${passenger.passenger_name}"? Libera su lugar y el código deja de ser válido.`)) return;
+    setCancellingId(passenger.id);
+    setError("");
+    try {
+      const response = await fetch("/api/rrpps/traslados/pasajeros", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId: event.id, routeId: route.id, ticketId: passenger.id, reason: "Cancelado por el organizador" }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo cancelar.");
+      setPassengers((prev) => prev.map((p) => (p.id === passenger.id ? { ...p, status: "cancelled" } : p)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cancelar.");
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
   const editing = editingId !== null;
 
   return (
@@ -270,6 +326,9 @@ export default function TrasladosClient({
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => openPassengers(route)} className="h-9 border border-sky-400/30 px-3 text-[10px] font-black uppercase tracking-wide text-sky-300 hover:bg-sky-400/10">
+                      Pasajeros
+                    </button>
                     <button type="button" onClick={() => openStops(route)} className="h-9 border border-violet-400/30 px-3 text-[10px] font-black uppercase tracking-wide text-violet-300 hover:bg-violet-400/10">
                       Recorrido{route.stops.length > 0 ? ` (${route.stops.length})` : ""}
                     </button>
@@ -284,6 +343,44 @@ export default function TrasladosClient({
                     </button>
                   </div>
                 </div>
+
+                {passengersOpenId === route.id && (
+                  <div className="mt-3 border-t border-white/[0.06] pt-3">
+                    <span className={LABEL}>Pasajeros</span>
+                    {passengersLoading ? (
+                      <p className="mt-2 text-xs text-white/40">Cargando…</p>
+                    ) : passengers.length === 0 ? (
+                      <p className="mt-2 text-xs text-white/40">Todavía no tiene pasajeros.</p>
+                    ) : (
+                      <div className="mt-2 divide-y divide-white/[0.06]">
+                        {passengers.map((p) => (
+                          <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                            <div>
+                              <p className="text-xs font-bold text-white/80">
+                                {p.passenger_name} <span className="text-white/30">· {p.manual_code}</span>
+                              </p>
+                              <p className="mt-0.5 text-[11px] text-white/35">
+                                {p.passenger_phone || "Sin teléfono"}
+                                {" · "}
+                                {p.status === "issued" ? "Pendiente" : p.status === "used" ? "Embarcó" : "Cancelado"}
+                              </p>
+                            </div>
+                            {p.status === "issued" && (
+                              <button
+                                type="button"
+                                disabled={cancellingId === p.id}
+                                onClick={() => cancelPassenger(route, p)}
+                                className="h-8 border border-red-400/20 px-3 text-[10px] font-black uppercase tracking-wide text-red-300/70 hover:text-red-300 disabled:opacity-40"
+                              >
+                                {cancellingId === p.id ? "Cancelando…" : "Cancelar pasaje"}
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {route.stops.length > 0 && stopsOpenId !== route.id && (
                   <p className="mt-2 text-[11px] text-white/40">Recorrido: {route.stops.map((s) => s.name).join(" → ")}</p>

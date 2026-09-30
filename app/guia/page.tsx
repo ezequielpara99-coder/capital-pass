@@ -68,6 +68,14 @@ const GUIDE: Record<Role, RoleGuide> = {
         ],
       },
       {
+        title: "Traslados",
+        steps: [
+          "Desde RRPPs → Traslados armás los colectivos del evento: nombre, horario, lugar de salida, cupo y recorrido (paradas).",
+          "Podés dejarlo a cargo de un RRPP puntual o como colectivo \"general\", que cualquier RRPP del evento puede usar para sumar pasajeros.",
+          "Si un pasajero avisa que no va, entrá a Pasajeros dentro de ese colectivo y cancelá su pasaje: libera el lugar para otro y su código deja de ser válido.",
+        ],
+      },
+      {
         title: "Control de acceso",
         steps: [
           "Asigná controladores al evento en Ingresos. Ellos validan el QR o el código manual en la puerta.",
