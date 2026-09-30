@@ -711,11 +711,6 @@ export default function DoorSellerPage() {
       return;
     }
 
-    // Best-effort: para que Notificaciones pueda avisar qué ventas todavía
-    // nadie mandó por WhatsApp, en vez de enterarse recién cuando el
-    // comprador se queja.
-    fetch(`/api/ventas/${result.sale.id}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
-
     const lines = [
       `🎟️ *Tus entradas para ${result.event.name}*`,
       "",
@@ -747,6 +742,10 @@ export default function DoorSellerPage() {
 
     if (waWindow) {
       waWindow.location.href = url;
+      // Best-effort: para que Notificaciones pueda avisar qué ventas
+      // todavía nadie mandó por WhatsApp. Se marca DESPUES de intentar
+      // abrir la ventana, no antes.
+      fetch(`/api/ventas/${result.sale.id}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
     } else {
       // El navegador ya bloqueo la pestaña vacia (o no soporta abrirla
       // sin gesto directo) -- probamos igual, sabiendo que puede fallar.
@@ -756,7 +755,10 @@ export default function DoorSellerPage() {
         // popup, simplemente devuelve null -- sin este aviso, la pantalla
         // de "venta confirmada" seguia mostrando el cartel fijo "Ya te
         // abrimos WhatsApp" aunque en realidad no se haya abierto nada.
+        // Tampoco se marca como enviada: no llegamos a intentar mandarla.
         setWhatsAppBlocked(true);
+      } else {
+        fetch(`/api/ventas/${result.sale.id}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
       }
     }
   }

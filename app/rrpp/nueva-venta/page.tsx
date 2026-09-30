@@ -841,11 +841,6 @@ export default function NuevaVentaRRPPPage() {
       return;
     }
 
-    // Best-effort: para que Notificaciones pueda avisar qué ventas todavía
-    // nadie mandó por WhatsApp, en vez de enterarse recién cuando el
-    // comprador se queja.
-    fetch(`/api/ventas/${result.saleId}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
-
     const buyerName =
       result.buyer.firstName;
 
@@ -898,6 +893,13 @@ export default function NuevaVentaRRPPPage() {
         "noopener,noreferrer"
       );
     }
+
+    // Best-effort: para que Notificaciones pueda avisar qué ventas todavía
+    // nadie mandó por WhatsApp, en vez de enterarse recién cuando el
+    // comprador se queja. Se marca DESPUES de intentar abrir la ventana,
+    // no antes -- antes se marcaba apenas se sabia que el numero era
+    // valido, sin haber llegado siquiera a intentar abrir WhatsApp.
+    fetch(`/api/ventas/${result.saleId}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
   }
 
   function sendWhatsApp(

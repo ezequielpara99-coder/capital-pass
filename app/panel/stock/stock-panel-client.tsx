@@ -753,6 +753,20 @@ function MesasTab({
   const [dni, setDni] = useState("");
   const [phone, setPhone] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"efectivo" | "transferencia" | "">("");
+  const [soldCode, setSoldCode] = useState<string | null>(null);
+
+  // Se reusa en un reintento de la MISMA venta (ej. se corta la wifi justo
+  // cuando el servidor ya la registro) y se renueva si cambia algo del
+  // pedido -- mismo patron que ya usa /rrpp/mesas. Sin esto, sell_table no
+  // podia deduplicar un reintento del organizador (a diferencia de RRPP,
+  // que si mandaba esta clave), dejando esta unica rama sin la proteccion
+  // de idempotencia que la propia funcion ya soporta.
+  const saleAttemptKeyRef = useRef<string>(crypto.randomUUID());
+  useEffect(() => {
+    if (saving) return;
+    saleAttemptKeyRef.current = crypto.randomUUID();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sellingTable, firstName, lastName, dni, phone, paymentMethod]);
 
   async function createTable() {
     if (!name.trim()) return;
@@ -776,13 +790,25 @@ function MesasTab({
   async function sellTable() {
     if (!sellingTable || !firstName.trim() || !lastName.trim() || !phone.trim() || !paymentMethod) return;
     setSaving(true);
+    setSoldCode(null);
     try {
       const response = await fetch("/api/stock/tables/vender", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventId, tableId: sellingTable, firstName, lastName, dni, phone, paymentMethod }),
+        body: JSON.stringify({ eventId, tableId: sellingTable, firstName, lastName, dni, phone, paymentMethod, idempotencyKey: saleAttemptKeyRef.current }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
+
+      // Best-effort: muestra el codigo de la entrada recien generada para
+      // que el organizador se lo pueda pasar al comprador ahi mismo.
+      try {
+        const entriesResponse = await fetch(`/api/ventas/${result.saleId}/entradas`);
+        const entriesData = await entriesResponse.json();
+        if (entriesResponse.ok) setSoldCode(entriesData.entries?.[0]?.manualCode ?? null);
+      } catch {
+        // no bloquea la venta ya confirmada
+      }
+
       setSellingTable(null); setFirstName(""); setLastName(""); setDni(""); setPhone(""); setPaymentMethod("");
       onSaved();
     } catch (err) {
@@ -808,6 +834,9 @@ function MesasTab({
 
       <section className="rounded-2xl border border-[#ff5a2a]/20 bg-[#ff3b24]/[0.05] p-6">
         <h2 className="text-lg font-bold">Mesas</h2>
+        {soldCode && (
+          <p className="mt-2 text-xs text-emerald-300">Mesa vendida. Código de la entrada: <span className="font-bold">{soldCode}</span></p>
+        )}
         <div className="mt-4 space-y-3">
           {tables.map((table) => (
             <div key={table.id} className="rounded-xl border border-white/10 bg-black/40 p-4">

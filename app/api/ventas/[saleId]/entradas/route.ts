@@ -110,7 +110,7 @@ export async function GET(
     );
 
     if (
-      (sale.channel !== "rrpp" && sale.channel !== "organizer") ||
+      (sale.channel !== "rrpp" && sale.channel !== "organizer" && sale.channel !== "mesa") ||
       (!isSeller && !isOrganizer)
     ) {
       return NextResponse.json(

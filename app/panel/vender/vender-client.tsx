@@ -251,11 +251,6 @@ export default function VenderClient({
       return;
     }
 
-    // Best-effort: para que Notificaciones pueda avisar qué ventas todavía
-    // nadie mandó por WhatsApp, en vez de enterarse recién cuando el
-    // comprador se queja.
-    fetch(`/api/ventas/${saleId}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
-
     const lines = [
       `🎟️ *Tus entradas para ${result.event.name}*`,
       "",
@@ -278,6 +273,12 @@ export default function VenderClient({
     } else {
       window.open(whatsappUrl, "_blank", "noopener,noreferrer");
     }
+
+    // Best-effort: para que Notificaciones pueda avisar qué ventas todavía
+    // nadie mandó por WhatsApp, en vez de enterarse recién cuando el
+    // comprador se queja. Se marca DESPUES de intentar abrir la ventana,
+    // no antes.
+    fetch(`/api/ventas/${saleId}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
   }
 
   function newSale() {

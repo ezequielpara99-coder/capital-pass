@@ -10,17 +10,24 @@ function money(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
 }
 
+// Mismo criterio que ya usan nueva-venta/puerta/vender-client: exige que el
+// numero quede en la forma exacta de un celular argentino (549 + 10
+// digitos) o lo rechaza -- un numero que no matchea ningun patron conocido
+// NO se devuelve "tal cual" (esa version vieja podia coincidir por
+// casualidad con el WhatsApp real de otra persona y mandarle el link con
+// el nombre/mesa de un comprador ajeno).
 function normalizeWhatsAppNumber(value: string) {
   let digits = value.replace(/\D/g, "");
   if (!digits) return "";
-  if (digits.startsWith("549")) return digits;
   if (digits.startsWith("54")) {
-    const rest = digits.slice(2);
-    return rest.startsWith("9") ? digits : `549${rest}`;
+    let rest = digits.slice(2);
+    if (!rest.startsWith("9")) rest = `9${rest}`;
+    digits = `54${rest}`;
+  } else {
+    if (digits.startsWith("0")) digits = digits.slice(1);
+    digits = `549${digits}`;
   }
-  if (digits.startsWith("0")) digits = digits.slice(1);
-  if (digits.length === 10) return `549${digits}`;
-  return digits;
+  return /^549\d{10}$/.test(digits) ? digits : "";
 }
 
 export default function MesasClient({ eventId, eventName }: { eventId: string; eventName: string }) {
@@ -36,7 +43,15 @@ export default function MesasClient({ eventId, eventName }: { eventId: string; e
   const [phone, setPhone] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"efectivo" | "transferencia" | "">("");
 
-  const [result, setResult] = useState<{ tableName: string; totalMinor: number; phone: string } | null>(null);
+  const [result, setResult] = useState<{
+    saleId: string;
+    tableName: string;
+    totalMinor: number;
+    phone: string;
+    manualCode: string | null;
+    url: string | null;
+  } | null>(null);
+  const [entryError, setEntryError] = useState("");
 
   // Se reusa en un reintento de la MISMA venta (ej. se corta la wifi justo
   // cuando el servidor ya la registro) y se renueva si cambia algo del
@@ -82,12 +97,13 @@ export default function MesasClient({ eventId, eventName }: { eventId: string; e
 
   async function confirmSale() {
     if (!tableId || !firstName.trim() || !lastName.trim() || !phone.trim() || !paymentMethod) return;
-    if (normalizeWhatsAppNumber(phone).length < 12) {
-      setError("Ese número de WhatsApp no parece válido. Revisalo antes de cobrar — es donde le vamos a mandar la confirmación.");
+    if (!normalizeWhatsAppNumber(phone)) {
+      setError("Ese número de WhatsApp no parece válido. Revisalo antes de cobrar — es donde le vamos a mandar la entrada.");
       return;
     }
     setSelling(true);
     setError("");
+    setEntryError("");
     try {
       const response = await fetch("/api/stock/tables/vender", {
         method: "POST",
@@ -105,7 +121,33 @@ export default function MesasClient({ eventId, eventName }: { eventId: string; e
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "No se pudo vender la mesa.");
-      setResult({ tableName: selectedTable?.name ?? "Mesa", totalMinor: Number(data.totalMinor ?? 0), phone });
+
+      const saleId = String(data.saleId ?? "");
+      const tableName = selectedTable?.name ?? "Mesa";
+      const totalMinor = Number(data.totalMinor ?? 0);
+
+      // La venta ya existe (mesa cobrada y reservada) -- se muestra la
+      // pantalla de éxito igual aunque falle la carga del QR, con un
+      // aviso aparte, en vez de perder el registro de que la venta se
+      // concretó.
+      let manualCode: string | null = null;
+      let url: string | null = null;
+      try {
+        const entriesResponse = await fetch(`/api/ventas/${saleId}/entradas`);
+        const entriesData = await entriesResponse.json();
+        if (entriesResponse.ok) {
+          const entry = entriesData.entries?.[0];
+          manualCode = entry?.manualCode ?? null;
+          url = entry?.url ?? null;
+        }
+      } catch {
+        // best-effort, se avisa mas abajo si no hay codigo/link
+      }
+      if (!manualCode || !url) {
+        setEntryError("La mesa se vendió, pero no pudimos cargar el QR de la entrada. Recargá la página o avisale al organizador.");
+      }
+
+      setResult({ saleId, tableName, totalMinor, phone, manualCode, url });
     } catch (err) {
       setError(friendlyErrorMessage(err, "No se pudo vender la mesa."));
     } finally {
@@ -116,12 +158,31 @@ export default function MesasClient({ eventId, eventName }: { eventId: string; e
   function sendWhatsApp() {
     if (!result) return;
     const number = normalizeWhatsAppNumber(result.phone);
-    const message = `¡Hola! Tu mesa "${result.tableName}" para ${eventName} está reservada. Total: ${money(result.totalMinor)}. ¡Te esperamos!`;
-    window.open(`https://wa.me/${number}?text=${encodeURIComponent(message)}`, "_blank");
+    if (!number) {
+      setEntryError("El teléfono cargado no es válido. Contactá al comprador por otro medio para pasarle su entrada.");
+      return;
+    }
+    const lines = [
+      `🎟️ *Tu mesa para ${eventName}*`,
+      "",
+      `Mesa "${result.tableName}" reservada. Total: ${money(result.totalMinor)}.`,
+      "",
+    ];
+    if (result.manualCode && result.url) {
+      lines.push(`Código: ${result.manualCode}`, `${window.location.origin}${result.url}`, "", "Presentá esta entrada al ingresar.", "");
+    }
+    lines.push("¡Te esperamos!", "", "Capital Pass");
+    const message = lines.join("\n");
+    window.open(`https://wa.me/${number}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+    // Best-effort: para que Notificaciones pueda avisar qué ventas todavía
+    // nadie mandó por WhatsApp. Se marca DESPUES de intentar abrir la
+    // ventana, no antes.
+    fetch(`/api/ventas/${result.saleId}/whatsapp-enviado`, { method: "POST" }).catch(() => {});
   }
 
   function newSale() {
     setResult(null);
+    setEntryError("");
     setTableId("");
     setFirstName("");
     setLastName("");
@@ -184,6 +245,10 @@ export default function MesasClient({ eventId, eventName }: { eventId: string; e
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-emerald-400/30 bg-emerald-500/10 text-2xl">✓</div>
             <p className="mt-4 text-lg font-bold">Mesa vendida</p>
             <p className="mt-1 text-sm text-white/50">{result.tableName} · {money(result.totalMinor)}</p>
+            {result.manualCode && (
+              <p className="mt-2 text-xs text-white/40">Código de la entrada: <span className="font-bold text-white/70">{result.manualCode}</span></p>
+            )}
+            {entryError && <div className="mt-4 rounded-2xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">{entryError}</div>}
             <button
               type="button"
               onClick={sendWhatsApp}

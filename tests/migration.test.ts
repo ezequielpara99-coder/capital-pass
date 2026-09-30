@@ -102,6 +102,7 @@ const bloqueaVentaEventoTerminadoMigration = readFileSync(new URL("../supabase/m
 const arreglaColectivoFugaCancelacionMigration = readFileSync(new URL("../supabase/migrations/20261009_arregla_colectivo_fuga_y_cancelacion.sql", import.meta.url), "utf8");
 const arreglaComboStockRateLimitMigration = readFileSync(new URL("../supabase/migrations/20261010_arregla_combo_idempotente_stock_y_rate_limit_control.sql", import.meta.url), "utf8");
 const snapshotCuentaMpVentaOnlineMigration = readFileSync(new URL("../supabase/migrations/20261011_snapshot_cuenta_mp_venta_online.sql", import.meta.url), "utf8");
+const mesaGeneraEntradaMigration = readFileSync(new URL("../supabase/migrations/20261012_mesa_genera_entrada_y_endurece_venta.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -253,6 +254,7 @@ async function database() {
   await db.exec(arreglaColectivoFugaCancelacionMigration);
   await db.exec(arreglaComboStockRateLimitMigration);
   await db.exec(snapshotCuentaMpVentaOnlineMigration);
+  await db.exec(mesaGeneraEntradaMigration);
   return db;
 }
 
@@ -758,6 +760,8 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
   );
   assert.equal(await scalar(`select channel from sales where id='${tableSale}'`), "mesa");
   assert.equal(await scalar(`select status from bar_tables where id='${table}'`), "reserved");
+  assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${tableSale}'`), 1, "la mesa vendida en persona genera su propia entrada/QR, igual que ya hace confirm_online_sale para las mesas compradas online");
+  assert.equal(await scalar(`select status from tickets where sale_id='${tableSale}'`), "issued");
 
   // No se puede vender la misma mesa dos veces.
   await assert.rejects(
@@ -779,6 +783,7 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
   );
   assert.equal(tableSaleRetry, tableSaleFirst, "el reintento devuelve la MISMA venta, no crea una nueva");
   assert.equal(await scalar(`select count(*)::int from sales where table_id='${table2}'`), 1, "no se duplico la venta de la mesa");
+  assert.equal(await scalar(`select count(*)::int from tickets where sale_id='${tableSaleFirst}'`), 1, "el reintento tampoco duplico la entrada/QR de la mesa");
   assert.equal(await scalar(`select status from bar_tables where id='${table2}'`), "reserved");
 
   // Asignar la cuenta bartender a la barra (event_staff) para que pueda vender ahi.
@@ -964,6 +969,57 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
   assert.ok(resoldTable, "la mesa liberada se puede volver a vender");
 
   void organizerMember;
+  await db.close();
+});
+
+test("venta en persona: tickets.manual_code no admite duplicados en el mismo evento, y create_sale/sell_table se frenan con rate limit", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+
+  const admin = "c1111111-1111-4111-8111-111111111111";
+  const org = "c2222222-2222-4222-8222-222222222222";
+  const event = "c3333333-3333-4333-8333-333333333333";
+  const ticketType = "c4444444-4444-4444-8444-444444444444";
+  const table = "c5555555-5555-4555-8555-555555555555";
+
+  await db.exec(`insert into auth.users values ('${admin}','admin-venta@example.test',now(),'{}');
+    insert into platform_admins(user_id) values ('${admin}');
+    insert into organizations(id,name,slug) values ('${org}','Club Venta','club-venta');
+    insert into events(id,organization_id,status) values ('${event}','${org}','active');
+    insert into ticket_types(id,event_id,name,price_minor,capacity,active,status) values ('${ticketType}','${event}','General',5000,10,true,'available');
+    insert into bar_tables(id,event_id,name,capacity,price_minor) values ('${table}','${event}','Mesa 1',6,8000);
+    select set_config('request.jwt.claim.sub','${admin}',false);`);
+
+  // Union unico real: dos entradas del mismo evento no pueden terminar con
+  // el mismo codigo (antes no habia ninguna restriccion versionada -- la
+  // busqueda por codigo en validate_ticket_manual/redeem_combo_ticket no
+  // tenia red de seguridad si alguna vez colisionaba).
+  const firstTicket = await scalar(
+    `insert into tickets(sale_id,event_id,ticket_type_id,status,manual_code) values (null,'${event}','${ticketType}','issued','DUPCODE1') returning id::text`
+  );
+  await assert.rejects(
+    () => db.query(`insert into tickets(sale_id,event_id,ticket_type_id,status,manual_code) values (null,'${event}','${ticketType}','issued','dupcode1')`),
+    /duplicate key|unique/i,
+    "el mismo codigo (sin importar mayusculas) no puede repetirse en el mismo evento"
+  );
+  void firstTicket;
+
+  // Rate limit: se precarga el balde ya en el limite para no tener que
+  // llamar create_sale/sell_table 31 veces de verdad en el test.
+  await db.exec(
+    `insert into rate_limit_buckets(key, window_start, count) values ('sale-create:${admin}', now(), 30)`
+  );
+  await assert.rejects(
+    () => db.query(`select * from create_sale('${event}','${ticketType}',1,'Cliente','Uno','30111111','3462111111',null,null)`),
+    /Demasiados intentos/,
+    "create_sale se frena con rate limit"
+  );
+  await assert.rejects(
+    () => db.query(`select * from sell_table('${event}','${table}','Cliente','Uno','30111111','3462111111','efectivo')`),
+    /Demasiados intentos/,
+    "sell_table se frena con el mismo rate limit (misma clave, la cuota se comparte entre ambas formas de vender)"
+  );
+
   await db.close();
 });
 
