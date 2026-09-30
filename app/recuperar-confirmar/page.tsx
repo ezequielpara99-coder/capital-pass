@@ -61,6 +61,11 @@ export default function ConfirmRecoveryPage() {
       return;
     }
 
+    // Marca de un solo uso para /crear-contrasena: sin esto, esa pantalla
+    // no puede distinguir "se acaba de verificar un link de recuperacion
+    // real" de "ya habia cualquier sesion abierta en este dispositivo".
+    document.cookie = "cp_recovery_ok=1; path=/; max-age=120; samesite=lax";
+
     router.replace("/crear-contrasena");
   }
 

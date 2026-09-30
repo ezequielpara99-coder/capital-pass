@@ -51,55 +51,75 @@ export default function CreatePasswordPage() {
     };
   }, [validSession, supabase]);
 
+  // Esta pantalla NO puede confiar en "hay una sesión activa" a secas --
+  // confirmar un link de recuperación deja una sesión completa utilizable
+  // (no solo "permiso para cambiar la contraseña"), y Capital Pass se usa
+  // en tablets/celulares compartidos entre turnos (control, puerta,
+  // bartender). Si alguien no cerró sesión y el siguiente turno entra
+  // directo a esta URL, "getSession() sin más" mostraba el formulario de
+  // contraseña nueva sin que esa persona haya pasado por ningún link real
+  // de recuperación -- le alcanzaba con escribir la URL para secuestrar la
+  // cuenta de quien dejó la sesión abierta.
+  //
+  // Se exige UNA de estas dos pruebas de que sí se pasó por un link real:
+  //   1) ?code=... en la URL (PKCE): intercambiarlo con éxito ya es prueba
+  //      en sí misma, es un código de un solo uso.
+  //   2) El link directo del mail (flujo implicit, fragmento
+  //      #access_token=...&type=recovery en la URL): el SDK lo procesa
+  //      solo y dispara el evento PASSWORD_RECOVERY -- se confía SOLO en
+  //      ese evento puntual, nunca en el estado de sesión "ya existente".
+  //   3) Una marca de un solo uso en una cookie (cp_recovery_ok), que solo
+  //      ponen recuperar-confirmar y auth/confirm justo antes de mandar
+  //      para acá, después de verificar el link ellos mismos.
   useEffect(() => {
-    async function initializeRecovery() {
-      const url = new URL(window.location.href);
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("code");
 
-      const code =
-        url.searchParams.get("code");
-
-      // Si Supabase devuelve un código PKCE,
-      // lo intercambiamos por una sesión.
-      if (code) {
-        const { error: exchangeError } =
-          await supabase.auth.exchangeCodeForSession(
-            code
-          );
-
+    if (code) {
+      supabase.auth.exchangeCodeForSession(code).then(({ error: exchangeError }) => {
+        window.history.replaceState({}, "", "/crear-contrasena");
         if (exchangeError) {
-          setError(
-            "El enlace no es válido o ya venció."
-          );
-          setChecking(false);
-          return;
+          setError("El enlace no es válido o ya venció.");
+          setValidSession(false);
+        } else {
+          setValidSession(true);
         }
-
-        // Quitamos el código de la URL.
-        window.history.replaceState(
-          {},
-          "",
-          "/crear-contrasena"
-        );
-      }
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session) {
-        setError(
-          "El enlace no es válido o ya venció."
-        );
-        setValidSession(false);
         setChecking(false);
-        return;
-      }
+      });
+      return;
+    }
 
-      setValidSession(true);
+    const hasMarker = document.cookie.split("; ").some((c) => c === "cp_recovery_ok=1");
+    if (hasMarker) document.cookie = "cp_recovery_ok=; path=/; max-age=0";
+
+    let settled = false;
+    function finish(ok: boolean) {
+      if (settled) return;
+      settled = true;
+      if (!ok) setError("El enlace no es válido o ya venció.");
+      setValidSession(ok);
       setChecking(false);
     }
 
-    initializeRecovery();
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") finish(true);
+    });
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (settled) return;
+      if (session && hasMarker) {
+        finish(true);
+        return;
+      }
+      // Sin marca: le da un respiro corto a PASSWORD_RECOVERY (puede llegar
+      // un instante después de getSession) antes de rendirse -- evita
+      // rechazar por una carrera el link directo del mail.
+      setTimeout(() => finish(Boolean(session && hasMarker)), 250);
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
   }, [supabase]);
 
   async function handleSubmit(
