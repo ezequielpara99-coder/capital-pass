@@ -100,6 +100,7 @@ const normalizaEmailCompradorMigration = readFileSync(new URL("../supabase/migra
 const seguimientoEnvioWhatsappMigration = readFileSync(new URL("../supabase/migrations/20261007_seguimiento_envio_whatsapp.sql", import.meta.url), "utf8");
 const bloqueaVentaEventoTerminadoMigration = readFileSync(new URL("../supabase/migrations/20261008_bloquea_venta_online_evento_terminado.sql", import.meta.url), "utf8");
 const arreglaColectivoFugaCancelacionMigration = readFileSync(new URL("../supabase/migrations/20261009_arregla_colectivo_fuga_y_cancelacion.sql", import.meta.url), "utf8");
+const arreglaComboStockRateLimitMigration = readFileSync(new URL("../supabase/migrations/20261010_arregla_combo_idempotente_stock_y_rate_limit_control.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -249,6 +250,7 @@ async function database() {
   await db.exec(seguimientoEnvioWhatsappMigration);
   await db.exec(bloqueaVentaEventoTerminadoMigration);
   await db.exec(arreglaColectivoFugaCancelacionMigration);
+  await db.exec(arreglaComboStockRateLimitMigration);
   return db;
 }
 
@@ -843,6 +845,17 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
     /negativo/
   );
 
+  // assign_stock_to_bar debe medir "ya repartido" con la suma EN VIVO de
+  // bar_stock (7 en esta barra + 2 en otherBar = 9), no con el historico de
+  // stock_movements tipo asignacion_barra (8 + 2 = 10, que no bajo con la
+  // perdida de arriba) -- con el historico, total_stock=10 ya estaria "al
+  // limite" (10+cualquier cosa > 10) y esto rechazaria sin motivo real.
+  await db.query(`select assign_stock_to_bar('${eventProduct}','${otherBar}',1)`);
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${otherBar}' and event_product_id='${eventProduct}'`), 3, "la perdida en OTRA barra libero margen para asignar aca");
+  // Se revierte para no alterar el margen que asume la prueba siguiente.
+  await db.query(`select adjust_bar_stock('${otherBar}','${eventProduct}',-1,'ajuste','Revertir prueba de assign_stock_to_bar')`);
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${otherBar}' and event_product_id='${eventProduct}'`), 2);
+
   // Un ajuste positivo tampoco puede "inventar" mas stock del total
   // comprado: bar=7 + otherBar=2 = 9 repartido, total_stock=10, asi que
   // solo hay lugar para 1 mas entre todas las barras.
@@ -1286,6 +1299,19 @@ test("combos (entrada + consumicion) y packs de entradas", async () => {
   assert.equal(retriedRedeem.rows[0].remaining_quantity, 1, "el reintento no descuenta el saldo de nuevo (sigue en 1, no en 0)");
   assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProductFernet}'`), 9, "el reintento no descuenta stock de nuevo");
   assert.equal(await scalar(`select count(*)::int from bar_sales where ticket_id = '${vipTicketId}' and payment_method = 'combo'`), 1, "no se duplico la fila de canje");
+
+  // Reintento con la MISMA key pero producto/cantidad DISTINTOS en el
+  // request (ej: bug de UI, o el bartender cambio de bebida en la pantalla
+  // antes de que el primer pedido terminara) -- la respuesta tiene que
+  // reflejar lo que REALMENTE se descarto la primera vez (Fernet, 1), no
+  // lo que pide este reintento (Coca, 5): antes armaba el recibo con
+  // p_event_product_id/p_quantity del request nuevo.
+  const retriedWithDifferentParams = await db.query<{ product_name: string; quantity: number }>(
+    `select * from redeem_combo_ticket('${bar}','VIPCODE1','${eventProductCoca}',5,'${vipRedeemKey}')`
+  );
+  assert.equal(retriedWithDifferentParams.rows[0].quantity, 1, "el reintento devuelve la cantidad real canjeada la primera vez, no la del request nuevo");
+  assert.match(retriedWithDifferentParams.rows[0].product_name, /Fernet/i, "el reintento devuelve el producto real canjeado la primera vez, no el del request nuevo");
+  assert.equal(await scalar(`select quantity from bar_stock where bar_id='${bar}' and event_product_id='${eventProductCoca}'`), 10, "el reintento con producto distinto tampoco toco el stock de ese otro producto");
 
   // No puede canjear un producto distinto al incluido en un combo tipo 'producto'.
   await assert.rejects(
@@ -1781,6 +1807,20 @@ test("control de ingreso: validate_ticket_manual valida, bloquea doble uso y reg
   );
   assert.equal(invalid.rows[0].result, "invalid");
   assert.equal(invalid.rows[0].ticket_id, null);
+
+  // Rate limit: a diferencia del escaneo de QR (protegido en la API route),
+  // el codigo manual se llama directo por RPC sin ningun freno propio -- se
+  // precarga el balde ya en el limite para no tener que escanear 121 veces
+  // de verdad en el test.
+  await db.exec(
+    `insert into rate_limit_buckets(key, window_start, count) values ('ticket-validate:${controllerUser}', now(), 120)
+     on conflict (key) do update set window_start = now(), count = 120`
+  );
+  await assert.rejects(
+    () => db.query(`select validate_ticket_manual('${event}','NOEXISTE','manual')`),
+    /Demasiados intentos/,
+    "el codigo manual tambien se frena con rate limit, igual que el camino de QR"
+  );
 
   await db.close();
 });

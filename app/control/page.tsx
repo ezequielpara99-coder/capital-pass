@@ -262,6 +262,12 @@ export default function ControlPage() {
             "status",
             "active"
           )
+          // Mismo motivo que el order by de event_staff, mas abajo: sin
+          // esto, alguien que controla puerta para 2 organizaciones a la
+          // vez podia recibir cualquiera de sus 2 membresias de forma no
+          // determinista, buscando despues el evento asignado dentro de
+          // la organizacion equivocada.
+          .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
 
