@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 
+import StaffPasswordButton from "./staff-password-button";
+
 import {
   CSSProperties,
   FormEvent,
@@ -433,6 +435,13 @@ export default function IngresosPanel({
                       </div>
                     </div>
 
+                    <div className="flex flex-wrap gap-2">
+                    <StaffPasswordButton
+                      memberId={controller.memberId}
+                      name={`${controller.firstName} ${controller.lastName}`.trim()}
+                      role="controller"
+                      className={STATUS_BUTTON + " border-[var(--cp-border)] bg-[var(--cp-hover)] text-[color:var(--cp-muted)] hover:border-[#ff5a2a]/30 hover:text-[color:var(--cp-text)]"}
+                    />
                     <button
                       type="button"
                       disabled={changingId === controller.memberId}
@@ -445,6 +454,7 @@ export default function IngresosPanel({
                     >
                       {changingId === controller.memberId ? "..." : controller.active ? "Pausar" : "Activar"}
                     </button>
+                    </div>
                   </article>
                 ))}
               </div>

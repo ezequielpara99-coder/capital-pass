@@ -6,6 +6,7 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 import CortesiaToggle from "./cortesia-toggle";
 import StockAccessToggle from "./stock-access-toggle";
 import PremiumMembershipToggle from "./premium-membership-toggle";
+import StaffPasswordButton from "../../../panel/staff-password-button";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -153,6 +154,31 @@ export default async function AdminOrganizationDetailPage({
     organizerEmail = authUser?.user?.email ?? null;
   }
 
+  const STAFF_ROLE_LABEL: Record<string, string> = {
+    rrpp: "RRPP",
+    controller: "Controlador",
+    door_seller: "Puerta",
+    bartender: "Bartender",
+  };
+  const staffMembers = members.filter((m) => m.role in STAFF_ROLE_LABEL);
+  const staffUserIds = [...new Set(staffMembers.map((m) => m.user_id))];
+  const { data: staffProfiles } = staffUserIds.length
+    ? await admin.from("profiles").select("id, first_name, last_name, phone").in("id", staffUserIds)
+    : { data: [] as { id: string; first_name: string | null; last_name: string | null; phone: string | null }[] };
+  const staffProfileById = new Map((staffProfiles ?? []).map((p) => [p.id, p]));
+  const staff = staffMembers
+    .map((m) => {
+      const profile = staffProfileById.get(m.user_id);
+      return {
+        memberId: m.id,
+        role: m.role,
+        status: m.status,
+        name: `${profile?.first_name ?? ""} ${profile?.last_name ?? ""}`.trim() || "Sin nombre",
+        phone: profile?.phone ?? null,
+      };
+    })
+    .sort((a, b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name));
+
   const membersByRole = {
     rrpp: members.filter((m) => m.role === "rrpp" && m.status === "active").length,
     door_seller: members.filter((m) => m.role === "door_seller" && m.status === "active").length,
@@ -212,6 +238,42 @@ export default async function AdminOrganizationDetailPage({
           <Metric label="RRPPs" value={String(membersByRole.rrpp)} detail="activos" />
           <Metric label="Puerta" value={String(membersByRole.door_seller)} detail="vendedores activos" />
           <Metric label="Controladores" value={String(membersByRole.controller)} detail="activos" />
+        </section>
+
+        {/* EQUIPO */}
+        <section className="mt-5 border border-white/[0.08] bg-[#090807]/92">
+          <div className="border-b border-white/[0.07] px-6 py-5">
+            <p className="text-[8px] font-black uppercase tracking-[0.22em] text-[#ff7958]">Equipo</p>
+            <h2 className="mt-2 text-lg font-black uppercase tracking-[-0.03em]">{staff.length} en total</h2>
+            <p className="mt-1 text-xs text-white/35">
+              Si alguien se olvidó la contraseña, generale una nueva y mandásela por WhatsApp.
+            </p>
+          </div>
+
+          {staff.length === 0 ? (
+            <div className="p-6 text-sm text-white/35">Todavía no tiene RRPPs, controladores, puerta ni bartenders.</div>
+          ) : (
+            <div className="divide-y divide-white/[0.06]">
+              {staff.map((person) => (
+                <div key={person.memberId} className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black text-white/80">{person.name}</p>
+                    <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white/35">
+                      {STAFF_ROLE_LABEL[person.role]}
+                      {person.status !== "active" ? " · pausado" : ""}
+                      {person.phone ? ` · ${person.phone}` : ""}
+                    </p>
+                  </div>
+                  <StaffPasswordButton
+                    memberId={person.memberId}
+                    name={person.name}
+                    role={person.role}
+                    endpoint="/api/admin/equipo/contrasena"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* SUSCRIPCIÓN */}

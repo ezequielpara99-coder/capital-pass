@@ -85,6 +85,14 @@ const GUIDE: Record<Role, RoleGuide> = {
         ],
       },
       {
+        title: "Si alguien del equipo se olvida la contraseña",
+        steps: [
+          "En la lista de RRPPs, Venta en puerta, Ingresos (controladores) o Stock (bartenders), tocá \"🔑 Contraseña\" al lado de esa persona.",
+          "Se genera una contraseña nueva al instante (la anterior deja de funcionar) y te aparece lista para mandársela por WhatsApp con su usuario y el link para entrar.",
+          "Si no tenía teléfono cargado, escribilo ahí mismo antes de enviar. La contraseña se muestra una sola vez: mandala o copiala antes de cerrar.",
+        ],
+      },
+      {
         title: "Membresía premium (app del socio)",
         steps: [
           "Si tu boliche tiene socios fijos, activá Membresía y cargá cada socio con su carnet digital (QR + código de socio).",

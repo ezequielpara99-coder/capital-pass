@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../../lib/supabase/client";
 import BarCoverageCard from "../bar-coverage-card";
 import EventSwitcher from "../event-switcher";
+import StaffPasswordButton from "../staff-password-button";
 
 type EventOption = { id: string; name: string };
 type Product = { id: string; name: string; category: string; brand: string | null; image_path: string | null; servings_per_bottle: number | null; organization_id: string | null };
@@ -718,12 +719,20 @@ function BartendersTab({
                 <p className="font-bold">{bt.firstName} {bt.lastName}</p>
                 <p className="text-xs text-white/40">{bars.find((b) => b.id === bt.barId)?.name ?? "Sin barra"}</p>
               </div>
-              <button
-                type="button" onClick={() => toggle(bt.memberId, !bt.active)}
-                className={`rounded-lg border px-3 py-2 text-xs font-bold ${bt.active ? "border-[#ff5a2a]/30 text-[#ffb199]" : "border-white/15 text-white/40"}`}
-              >
-                {bt.active ? "Activo" : "Pausado"}
-              </button>
+              <div className="flex flex-wrap justify-end gap-2">
+                <StaffPasswordButton
+                  memberId={bt.memberId}
+                  name={`${bt.firstName} ${bt.lastName}`.trim()}
+                  role="bartender"
+                  className="rounded-lg border border-white/15 px-3 py-2 text-xs font-bold text-white/60 hover:text-white disabled:opacity-40"
+                />
+                <button
+                  type="button" onClick={() => toggle(bt.memberId, !bt.active)}
+                  className={`rounded-lg border px-3 py-2 text-xs font-bold ${bt.active ? "border-[#ff5a2a]/30 text-[#ffb199]" : "border-white/15 text-white/40"}`}
+                >
+                  {bt.active ? "Activo" : "Pausado"}
+                </button>
+              </div>
             </div>
           ))}
           {bartenders.length === 0 && <p className="py-4 text-sm text-white/35">Sin bartenders todavía.</p>}

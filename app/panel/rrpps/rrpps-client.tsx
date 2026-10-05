@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { EventBar, type SwitcherEvent } from "../event-switcher";
+import StaffPasswordButton from "../staff-password-button";
 
 import {
   FormEvent,
@@ -1168,6 +1169,12 @@ export default function RRPPsClient({
                             >
                               Editar
                             </button>
+
+                            <StaffPasswordButton
+                              memberId={rrpp.memberId}
+                              name={`${rrpp.firstName} ${rrpp.lastName}`.trim()}
+                              role="rrpp"
+                            />
 
                             <button
                               type="button"

@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { EventBar, type SwitcherEvent } from "../event-switcher";
 import { friendlyErrorMessage } from "../../../lib/errors/friendly-message";
+import StaffPasswordButton from "../staff-password-button";
 
 import {
   FormEvent,
@@ -311,6 +312,13 @@ export default function PuertaPanelClient({
                       </div>
                     </div>
                   </div>
+                  <div className="flex flex-wrap gap-2">
+                  <StaffPasswordButton
+                    memberId={seller.memberId}
+                    name={`${seller.firstName} ${seller.lastName}`.trim()}
+                    role="door_seller"
+                    className="inline-flex min-h-[44px] shrink-0 items-center justify-center border border-white/[0.09] bg-white/[0.02] px-4 py-3 text-[9px] font-black uppercase tracking-[0.13em] text-white/65 transition hover:border-[#ff5a2a]/30 hover:text-white disabled:opacity-45"
+                  />
                   <button
                     type="button"
                     disabled={changingId === seller.memberId}
@@ -323,6 +331,7 @@ export default function PuertaPanelClient({
                   >
                     {changingId === seller.memberId ? "..." : seller.active ? "Pausar" : "Activar"}
                   </button>
+                  </div>
                 </article>
               ))}
             </div>
