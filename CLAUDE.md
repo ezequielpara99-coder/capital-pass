@@ -61,6 +61,20 @@ Crear `.env.local` en la raíz. Nunca escribir valores secretos en el código ni
 - Pide rondas de auditoría seguidas ("seguí con más auditorías"). El objetivo es que todo ande perfecto, no "suficientemente bien". Ir rincón por rincón, verificar en vivo y no solo leyendo código.
 - **Guía de uso:** todo cambio que agregue o cambie algo que un usuario ve o puede hacer se refleja en `app/guia/page.tsx` (organizada por rol), en el mismo commit.
 
+## Mantener este archivo al día (pedido de Eze)
+
+Eze va a seguir el proyecto desde otro Claude, así que todo lo que se haga tiene que quedar guardado y explicado:
+
+- Cada cambio se commitea y se pushea a GitHub. No dejar trabajo sin subir.
+- Cuando cambie el estado (algo auditado, algo nuevo, una prueba pendiente, una decisión de Eze), actualizar este `CLAUDE.md` en el mismo commit. Lo mismo con el `CLAUDE.md` del otro proyecto.
+
+## Proyectos
+
+- **capital-pass** (esta carpeta): la plataforma de entradas, en capitalpass.app.
+- **capital-studio** (`../capital-studio`): el sitio madre, en capitalstudio.ar. Presenta Capital Design, Capital Prod, Capital Rentals y Capital Pass. Es un proyecto aparte, con su propio repo, su propio proyecto de Vercel y su propio `CLAUDE.md`. Para verlo local: `preview_start` con la configuración `studio` (puerto 3001).
+  - Estado al 2026-10-05: armado y commiteado local. Falta que Eze cree el repo en GitHub (`capital-studio`, vacío), pushearlo, importarlo en Vercel como proyecto nuevo, cargar `NEXT_PUBLIC_WHATSAPP` (y opcional `NEXT_PUBLIC_INSTAGRAM`) y conectar el dominio capitalstudio.ar (registrado en nic.ar).
+  - Los textos de Capital Prod son provisorios: falta que Eze diga qué ofrece.
+
 ## Deploy y verificación
 
 - Repositorio: `github.com/ezequielpara99-coder/capital-pass`. **Cada push a `main` se publica solo en producción (Vercel).** No hay staging.
