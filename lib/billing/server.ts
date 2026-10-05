@@ -10,6 +10,7 @@ import { createMemberPublicPath } from "../members/signature";
 import { createTicketPublicPath } from "../tickets/signature";
 import { ticketQrPngBuffer } from "../tickets/qr-image";
 import { getAppBaseUrl } from "../mercadopago/server";
+import { accessTokenFor } from "../mercadopago/oauth";
 
 export type Signup = {
   id: string; user_id: string | null; organization_id: string | null; plan_id: string;
@@ -324,6 +325,65 @@ async function sendOnlineSaleTicketEmail(saleId: string, opts?: { organizationId
 // reclama el envio de forma atomica (ticket_email_sent_at), asi que aunque
 // esta funcion se llame 2 veces casi al mismo tiempo (webhook + polling) el
 // mail sale una sola vez.
+// =========================================================
+// PAGOS COBRADOS CON LA CUENTA DEL ORGANIZADOR
+//
+// Las ventas online y las recargas de socios se cobran con el access_token
+// del organizador (la plata cae en SU cuenta). Leer esos pagos solo con el
+// token de la plataforma depende de que Mercado Pago le de acceso al
+// marketplace sobre los pagos del vendedor -- algo que nunca se pudo probar
+// con un cobro real. Con el token del organizador el pago siempre es
+// legible (es el cobrador). Se intenta primero con el del organizador y se
+// cae al de la plataforma si no hay conexion o falla. La verificacion de
+// monto, moneda y cuenta cobradora sigue siendo la misma en ambos casos.
+// =========================================================
+
+async function organizerAccessToken(organizationId: string | null | undefined) {
+  if (!organizationId) return null;
+  try {
+    return await accessTokenFor(organizationId);
+  } catch (error) {
+    console.error("BILLING: no se pudo obtener el token del organizador.", organizationId, error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+async function sellerPaymentsForReference(reference: string, organizationId: string | null | undefined) {
+  const token = await organizerAccessToken(organizationId);
+  if (token) {
+    try {
+      return await paymentsForReference(reference, token);
+    } catch (error) {
+      console.error("BILLING: fallo la busqueda con el token del organizador, se reintenta con el de la plataforma.", error instanceof Error ? error.message : error);
+    }
+  }
+  return paymentsForReference(reference);
+}
+
+// Lo usa el webhook de ventas: notification_url lleva ?sale= o ?topup=
+// (no firmado, solo indica con que cuenta leer el pago -- el pago leido
+// igual se verifica contra su propia external_reference y cobrador).
+export async function getSellerPayment(paymentId: string, hint: { saleId?: string | null; topupId?: string | null }) {
+  const admin = createAdminClient();
+  let organizationId: string | null = null;
+  if (hint.saleId) {
+    const { data } = await admin.from("sales").select("organization_id").eq("id", hint.saleId).maybeSingle();
+    organizationId = (data?.organization_id as string | undefined) ?? null;
+  } else if (hint.topupId) {
+    const { data } = await admin.from("wallet_topups").select("organization_id").eq("id", hint.topupId).maybeSingle();
+    organizationId = (data?.organization_id as string | undefined) ?? null;
+  }
+  const token = await organizerAccessToken(organizationId);
+  if (token) {
+    try {
+      return await getPayment(paymentId, token);
+    } catch (error) {
+      console.error("BILLING: no se pudo leer el pago con el token del organizador, se reintenta con el de la plataforma.", error instanceof Error ? error.message : error);
+    }
+  }
+  return getPayment(paymentId);
+}
+
 export async function applySalePayment(payment: ProviderPayment, saleId: string) {
   const admin = createAdminClient();
   const { data: sale, error } = await admin.from("sales")
@@ -353,6 +413,23 @@ export async function applySalePayment(payment: ProviderPayment, saleId: string)
     amount: Number(sale.total_charged_minor), currency: sale.currency, collectorId,
     live: process.env.MERCADOPAGO_ENV !== "sandbox",
   });
+
+  // Un reembolso solo anula la venta si ningun OTRO pago de esta misma
+  // venta sigue aprobado. Si el comprador pago dos veces el mismo link y el
+  // organizador le devuelve el pago repetido, antes se anulaban las
+  // entradas de la venta aunque el otro pago seguia cobrado.
+  if ((verified.status === "refunded" || verified.status === "charged_back") && sale.status === "confirmed") {
+    try {
+      const others = await sellerPaymentsForReference(`capitalpass_sale:${saleId}`, sale.organization_id as string);
+      const stillPaid = others.some((other) =>
+        String(other.id) !== String(payment.id) && other.status === "approved" && !((other.transaction_amount_refunded ?? 0) > 0)
+      );
+      if (stillPaid) return true;
+    } catch (error) {
+      console.error("BILLING: no se pudo revisar si la venta tiene otro pago vigente.", saleId, error instanceof Error ? error.message : error);
+    }
+  }
+
   const result = await admin.rpc("confirm_online_sale", { p_sale_id: saleId, p_status: verified.status });
   if (result.error) throw new Error("No se pudo confirmar la venta.");
   if (verified.status === "approved") {
@@ -371,7 +448,8 @@ export async function applySalePayment(payment: ProviderPayment, saleId: string)
 // pantalla de vuelta de Mercado Pago, sin necesitar sesion (la referencia
 // es el UUID de la venta, ya visible en esa misma URL).
 export async function reconcileOnlineSale(saleId: string) {
-  const payments = await paymentsForReference(`capitalpass_sale:${saleId}`);
+  const { data: sale } = await createAdminClient().from("sales").select("organization_id").eq("id", saleId).maybeSingle();
+  const payments = await sellerPaymentsForReference(`capitalpass_sale:${saleId}`, sale?.organization_id as string | undefined);
   let applied = false;
   for (const payment of payments) {
     if (await applySalePayment(payment, saleId)) applied = true;
@@ -433,7 +511,8 @@ export async function applyTopupPayment(payment: ProviderPayment, topupId: strin
 }
 
 export async function reconcileTopup(topupId: string) {
-  const payments = await paymentsForReference(`capitalpass_topup:${topupId}`);
+  const { data: topup } = await createAdminClient().from("wallet_topups").select("organization_id").eq("id", topupId).maybeSingle();
+  const payments = await sellerPaymentsForReference(`capitalpass_topup:${topupId}`, topup?.organization_id as string | undefined);
   let applied = false;
   for (const payment of payments) {
     if (await applyTopupPayment(payment, topupId)) applied = true;

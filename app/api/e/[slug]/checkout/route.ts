@@ -148,7 +148,7 @@ export async function POST(
         items: preferenceItems,
         payer: { name: buyerFirstName, surname: buyerLastName, email: buyerEmail ?? undefined },
         external_reference: `capitalpass_sale:${sale.sale_id}`,
-        notification_url: `${getAppBaseUrl()}/api/mercadopago/webhook-ventas`,
+        notification_url: `${getAppBaseUrl()}/api/mercadopago/webhook-ventas?sale=${sale.sale_id}`,
         back_urls: {
           success: `${getAppBaseUrl()}/e/${slug}?venta=${sale.sale_id}`,
           pending: `${getAppBaseUrl()}/e/${slug}?venta=${sale.sale_id}`,

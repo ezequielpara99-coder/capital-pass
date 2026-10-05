@@ -86,7 +86,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         items: [{ id: `recarga-${topup.id}`, title: `Recarga de saldo (no reembolsable) - ${org?.name ?? "Capital Pass"}`, quantity: 1, unit_price: amount, currency_id: "ARS" }],
         payer: { name: member.first_name, surname: member.last_name },
         external_reference: `capitalpass_topup:${topup.id}`,
-        notification_url: `${base}/api/mercadopago/webhook-ventas`,
+        notification_url: `${base}/api/mercadopago/webhook-ventas?topup=${topup.id}`,
         back_urls: { success: back, pending: back, failure: back },
         auto_return: "approved",
       },

@@ -52,9 +52,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const admin = createAdminClient();
 
-    // Pagar con saldo mueve plata: no alcanza con tener el link del carnet,
-    // hay que haber ingresado con el email de la membresia.
-    if (payment === "wallet") {
+    // Pagar con saldo mueve plata, y canjear premios gasta los puntos del
+    // socio: no alcanza con tener el link del carnet (es el mismo dato que
+    // va en el QR que se muestra en la puerta), hay que haber ingresado con
+    // el email de la membresia.
+    let spendsPoints = false;
+    if (payment !== "wallet" && items.length > 0) {
+      const { data: prizes } = await admin
+        .from("member_menu_items")
+        .select("id")
+        .in("id", items.map((i: { id: string }) => i.id))
+        .eq("kind", "premio")
+        .limit(1);
+      spendsPoints = (prizes?.length ?? 0) > 0;
+    }
+    if (payment === "wallet" || spendsPoints) {
       const { data: owner } = await admin.from("premium_members").select("email").eq("id", memberId).is("deleted_at", null).maybeSingle();
       const session = await memberSessionStatus((owner?.email as string | null) ?? null);
       if (session !== "ready") {

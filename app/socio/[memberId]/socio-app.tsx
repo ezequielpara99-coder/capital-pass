@@ -84,14 +84,19 @@ function urlBase64ToUint8Array(base64String: string) {
   return output;
 }
 
-// Aviso cuando todavia no se puede pagar con saldo: hay que ingresar con el email.
-function WalletLockHint({ status }: { status: "no_email" | "login" | "mismatch" | "ready" | undefined }) {
+// Aviso cuando todavia no se puede pagar con saldo ni canjear puntos: hay
+// que ingresar con el email (el link del carnet solo no alcanza, es el mismo
+// dato que va en el QR que se muestra en la puerta).
+function WalletLockHint({ status, reason = "saldo" }: { status: "no_email" | "login" | "mismatch" | "ready" | undefined; reason?: "saldo" | "puntos" }) {
+  const action = reason === "puntos" ? "canjear premios con tus puntos" : "pagar con saldo";
   const text =
     status === "no_email"
-      ? "Tu membresía no tiene email cargado. Pedile al boliche que lo cargue para pagar con saldo."
+      ? `Tu membresía no tiene email cargado. Pedile al boliche que lo cargue para ${action}.`
       : status === "mismatch"
-        ? "Ingresaste con otro email. Usá el email de tu membresía para pagar con saldo."
-        : "Para pagar con saldo, primero ingresá con tu email. Podés pagar al recibir sin ingresar.";
+        ? `Ingresaste con otro email. Usá el email de tu membresía para ${action}.`
+        : reason === "puntos"
+          ? "Para canjear premios con tus puntos, primero ingresá con tu email."
+          : "Para pagar con saldo, primero ingresá con tu email. Podés pagar al recibir sin ingresar.";
   return (
     <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2">
       <p className="text-xs text-amber-100/80">{text}</p>
@@ -1001,6 +1006,8 @@ export default function SocioApp({ memberId, signature, qrDataUrl }: Props) {
                 )}
               </>
             )}
+
+            {cartPointsCost > 0 && !walletUnlocked && <WalletLockHint status={data?.alerts?.status} reason="puntos" />}
 
             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Aclaración (opcional)" maxLength={200} className="mt-5 h-11 w-full border border-white/[0.12] bg-black/30 px-3 text-sm text-white outline-none focus:border-violet-400/50" />
 

@@ -105,7 +105,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
         items,
         payer: { name: firstName, surname: lastName, email: email ?? undefined },
         external_reference: `capitalpass_sale:${sale.sale_id}`,
-        notification_url: `${base}/api/mercadopago/webhook-ventas`,
+        notification_url: `${base}/api/mercadopago/webhook-ventas?sale=${sale.sale_id}`,
         back_urls: { success: back, pending: back, failure: back },
         auto_return: "approved",
       },

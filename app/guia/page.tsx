@@ -211,8 +211,8 @@ const GUIDE: Record<Role, RoleGuide> = {
         title: "Pedir y reservar mesa",
         steps: [
           "Desde la carta podés pedir tragos o combos, pagando con tu saldo o en la barra.",
-          "Para pagar con saldo necesitás haber iniciado sesión con tu email una vez (no alcanza con tener el link del carnet) — es una protección para que nadie gaste tu saldo sin tu permiso.",
-          "También podés reservar una mesa desde ahí mismo.",
+          "Para pagar con saldo o canjear premios con tus puntos necesitás haber iniciado sesión con tu email una vez (no alcanza con tener el link del carnet) — es una protección para que nadie gaste tu saldo ni tus puntos sin tu permiso.",
+          "También podés reservar una mesa desde ahí mismo, aunque sea para un evento de otro día: la reserva se mantiene hasta el evento.",
         ],
       },
       {
@@ -224,7 +224,7 @@ const GUIDE: Record<Role, RoleGuide> = {
       {
         title: "Puntos y ranking",
         steps: [
-          "Ganás puntos con cada consumo. Podés ver el ranking de socios y competir por los premios del mes.",
+          "Ganás puntos con cada consumo que te entregan y, si el boliche lo activó, por cada fiesta a la que vas (al escanear tu carnet en la puerta). Podés ver el ranking de socios y competir por los premios del mes.",
           "Algunos días pueden tener puntos dobles (o más) — te lo muestra en tu carnet cuando está activo.",
         ],
       },

@@ -22,7 +22,7 @@ export async function memberSessionStatus(memberEmail: string | null | undefined
 }
 
 export const SESSION_MESSAGES: Record<Exclude<MemberSessionStatus, "ready">, { status: number; error: string }> = {
-  login: { status: 401, error: "Ingresá con tu email para pagar con saldo." },
+  login: { status: 401, error: "Ingresá con tu email para pagar con saldo o canjear puntos." },
   mismatch: { status: 403, error: "Ingresaste con otro email. Usá el email de tu membresía." },
-  no_email: { status: 403, error: "Tu membresía no tiene email cargado. Pedile al boliche que lo cargue para pagar con saldo." },
+  no_email: { status: 403, error: "Tu membresía no tiene email cargado. Pedile al boliche que lo cargue para pagar con saldo o canjear puntos." },
 };

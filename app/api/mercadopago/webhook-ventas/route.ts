@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { WebhookSignatureValidator } from "mercadopago";
-import { getPayment } from "../../../../lib/billing/provider";
 import { saleFromReference, topupFromReference, validResourceId } from "../../../../lib/billing/rules";
-import { applySalePayment, applyTopupPayment } from "../../../../lib/billing/server";
+import { applySalePayment, applyTopupPayment, getSellerPayment } from "../../../../lib/billing/server";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Notificaciones de pagos de ventas online (Marketplace/OAuth): el pago se
-// crea con el access_token del organizador, pero lo LEEMOS con el token de
-// la plataforma (acceso de marketplace a sus transacciones conectadas) y
-// verificamos que el collector_id sea justo el de ESE organizador -- nunca
-// confiamos en el monto/organizacion que venga del lado del cliente.
+// crea con el access_token del organizador. Lo leemos con ese mismo token
+// (notification_url trae ?sale= o ?topup= para saber de que organizador es)
+// y, si no se puede, con el de la plataforma -- ver getSellerPayment. En
+// ambos casos verificamos que el collector_id sea justo el de ESE
+// organizador: nunca confiamos en el monto/organizacion que venga del lado
+// del cliente.
 export async function POST(request: NextRequest) {
   const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET?.trim();
   if (!secret) {
@@ -38,7 +41,12 @@ export async function POST(request: NextRequest) {
     const type = body.type ?? request.nextUrl.searchParams.get("type");
     if (type !== "payment") return NextResponse.json({ ok: true, ignored: true });
 
-    const payment = await getPayment(id);
+    const saleHint = request.nextUrl.searchParams.get("sale");
+    const topupHint = request.nextUrl.searchParams.get("topup");
+    const payment = await getSellerPayment(id, {
+      saleId: saleHint && UUID.test(saleHint) ? saleHint : null,
+      topupId: topupHint && UUID.test(topupHint) ? topupHint : null,
+    });
 
     // Recarga de saldo de un socio premium (mismo webhook, otra referencia).
     const topupId = topupFromReference(payment.external_reference);

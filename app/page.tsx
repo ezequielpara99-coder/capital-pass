@@ -1069,6 +1069,24 @@ export default function Home() {
               "Barras",
               "Stock de bebidas, barras, bartenders, mesas y análisis de precios.",
             ],
+
+            [
+              "08",
+              "Colectivos",
+              "Traslados al evento con cupo, paradas y seguimiento del recorrido en vivo.",
+            ],
+
+            [
+              "09",
+              "Packs",
+              "Entradas agrupadas con descuento para grupos, en puerta, RRPP y online.",
+            ],
+
+            [
+              "10",
+              "Membresía",
+              "Tus clientes suman puntos, compran desde su app y recargan saldo con Mercado Pago.",
+            ],
           ].map(
             (
               [

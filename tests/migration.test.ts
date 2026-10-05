@@ -107,6 +107,7 @@ const arreglaPermisoUpdateSalesMigration = readFileSync(new URL("../supabase/mig
 const snapshotCuentaMpRecargaMigration = readFileSync(new URL("../supabase/migrations/20261014_snapshot_cuenta_mp_recarga_socio.sql", import.meta.url), "utf8");
 const verificacionFinalBarraColectivosMigration = readFileSync(new URL("../supabase/migrations/20261015_verificacion_final_barra_y_colectivos.sql", import.meta.url), "utf8");
 const renovacionAnticipadaMigration = readFileSync(new URL("../supabase/migrations/20261016_renovacion_anticipada_y_cobro_por_intento.sql", import.meta.url), "utf8");
+const recargasRepetidasMesasSocioMigration = readFileSync(new URL("../supabase/migrations/20261017_recargas_repetidas_y_mesas_de_socio.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -263,6 +264,7 @@ async function database() {
   await db.exec(snapshotCuentaMpRecargaMigration);
   await db.exec(verificacionFinalBarraColectivosMigration);
   await db.exec(renovacionAnticipadaMigration);
+  await db.exec(recargasRepetidasMesasSocioMigration);
   return db;
 }
 
@@ -3063,37 +3065,47 @@ test("pedidos completos: stock al entregar, venta de mesa, nivel con descuento y
   await db.close();
 });
 
-test("pedidos completos: un pedido de mesa colgado (nadie lo marco) vence solo, libera la mesa y reembolsa; uno reciente no se toca", async () => {
+test("pedidos de socio: un pedido de barra colgado vence solo; una reserva de mesa solo vence cuando el evento ya paso, y una mesa pagada con saldo nunca", async () => {
   const db = await database();
   const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
   const org = "d2d2d2d2-1111-4111-8111-111111111111";
-  const event = "d2d2d2d2-2222-4222-8222-222222222222";
+  const futureEvent = "d2d2d2d2-2222-4222-8222-222222222222";
+  const pastEvent = "d2d2d2d2-3333-4333-8333-333333333333";
 
   await db.exec(`insert into organizations(id,name,slug) values ('${org}','Club Vencidos','club-vencidos');
-    insert into events(id,organization_id,status) values ('${event}','${org}','active');`);
+    insert into events(id,organization_id,status,starts_at) values ('${futureEvent}','${org}','upcoming', now() + interval '3 days');
+    insert into events(id,organization_id,status,starts_at,ends_at) values ('${pastEvent}','${org}','active', now() - interval '20 hours', now() - interval '2 hours');`);
 
   const member = await scalar(`insert into premium_members(organization_id, first_name, last_name, member_code, balance_minor) values ('${org}','Beto','Colgado','CV0001', 50000) returning id::text`);
-  const table = await scalar(`insert into bar_tables(event_id,name,capacity,price_minor) values ('${event}','Mesa vieja',4,4000) returning id::text`);
-  const otherTable = await scalar(`insert into bar_tables(event_id,name,capacity,price_minor) values ('${event}','Mesa nueva',4,4000) returning id::text`);
+  const fernet = await scalar(`insert into member_menu_items(organization_id, kind, name, price_minor) values ('${org}','trago','Fernet',3000) returning id::text`);
+  const paidTable = await scalar(`insert into bar_tables(event_id,name,capacity,price_minor) values ('${futureEvent}','Mesa paga',4,4000) returning id::text`);
+  const laterTable = await scalar(`insert into bar_tables(event_id,name,capacity,price_minor) values ('${futureEvent}','Mesa sabado',4,4000) returning id::text`);
+  const pastTable = await scalar(`insert into bar_tables(event_id,name,capacity,price_minor) values ('${pastEvent}','Mesa vieja',4,4000) returning id::text`);
 
-  const stale = await db.query<{ order_id: string }>(`select * from member_place_order('${member}','mesa','[]'::jsonb,'wallet','${table}',null,null)`);
-  await db.exec(`update member_orders set created_at = now() - interval '10 hours' where id='${stale.rows[0].order_id}'`);
-  assert.equal(await scalar(`select status from bar_tables where id='${table}'`), "reserved");
-  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 46000, "se descuenta al reservar");
+  const paid = await db.query<{ order_id: string }>(`select * from member_place_order('${member}','mesa','[]'::jsonb,'wallet','${paidTable}',null,null)`);
+  const later = await db.query<{ order_id: string }>(`select * from member_place_order('${member}','mesa','[]'::jsonb,'en_barra','${laterTable}',null,null)`);
+  const past = await db.query<{ order_id: string }>(`select * from member_place_order('${member}','mesa','[]'::jsonb,'en_barra','${pastTable}',null,null)`);
+  const drink = await db.query<{ order_id: string }>(`select * from member_place_order('${member}','consumo','[{"id":"${fernet}","qty":1}]'::jsonb,'wallet',null,null,null)`);
+  const freshDrink = await db.query<{ order_id: string }>(`select * from member_place_order('${member}','consumo','[{"id":"${fernet}","qty":1}]'::jsonb,'wallet',null,null,null)`);
+  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 40000, "mesa paga 4000 + dos tragos 3000");
 
-  // Un pedido reciente (otra mesa, para no chocar con la del pedido colgado) no tiene que tocarse.
-  const recent = await db.query<{ order_id: string }>(`select * from member_place_order('${member}','mesa','[]'::jsonb,'wallet','${otherTable}',null,null)`);
+  // Todo se pidio hace 10 horas, salvo el trago fresco.
+  await db.exec(`update member_orders set created_at = now() - interval '10 hours' where id in ('${paid.rows[0].order_id}','${later.rows[0].order_id}','${past.rows[0].order_id}','${drink.rows[0].order_id}')`);
 
   const cancelled = Number(await scalar(`select cp_expire_stale_member_orders(6)`));
-  assert.equal(cancelled, 1, "solo el pedido colgado se cancela");
+  assert.equal(cancelled, 2, "solo el trago colgado y la mesa de un evento que ya paso");
 
-  assert.equal(await scalar(`select status from member_orders where id='${stale.rows[0].order_id}'`), "cancelled");
-  assert.equal(await scalar(`select status from bar_tables where id='${table}'`), "available", "la mesa se libera sola");
-  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 46000, "se reembolsa el saldo del pedido colgado (quedan descontados los 4000 del reciente, que sigue pendiente)");
-  assert.equal(await scalar(`select status from member_orders where id='${recent.rows[0].order_id}'`), "pending", "un pedido reciente no se toca");
-  assert.equal(await scalar(`select status from bar_tables where id='${otherTable}'`), "reserved", "la mesa del pedido reciente sigue reservada");
+  assert.equal(await scalar(`select status from member_orders where id='${drink.rows[0].order_id}'`), "cancelled", "pedido de barra colgado: se cancela");
+  assert.equal(await scalar(`select status from member_orders where id='${freshDrink.rows[0].order_id}'`), "pending", "pedido de barra reciente: no se toca");
+  assert.equal(await scalar(`select status from member_orders where id='${past.rows[0].order_id}'`), "cancelled");
+  assert.equal(await scalar(`select status from bar_tables where id='${pastTable}'`), "available");
+  assert.equal(await scalar(`select status from member_orders where id='${later.rows[0].order_id}'`), "pending", "reserva para un evento de otro dia: sigue reservada (antes se cancelaba a las 6 horas)");
+  assert.equal(await scalar(`select status from bar_tables where id='${laterTable}'`), "reserved");
+  assert.equal(await scalar(`select status from member_orders where id='${paid.rows[0].order_id}'`), "pending", "mesa pagada con saldo: nunca se cancela sola");
+  assert.equal(await scalar(`select status from bar_tables where id='${paidTable}'`), "reserved");
+  assert.equal(Number(await scalar(`select balance_minor from premium_members where id='${member}'`)), 43000, "solo se reembolsa el trago cancelado");
 
-  // Correrlo de nuevo no encuentra nada mas para cancelar (no es repetible sobre lo mismo).
+  // Correrlo de nuevo no encuentra nada mas para cancelar.
   assert.equal(Number(await scalar(`select cp_expire_stale_member_orders(6)`)), 0);
 
   await db.close();
@@ -3662,8 +3674,9 @@ test("recarga de saldo: acredita una sola vez por pago, permite reintento tras r
 
   // El mismo pago de Mercado Pago no puede acreditar otra recarga.
   const other = await newTopup(5000);
-  await assert.rejects(() => apply(other, "111", "approved"), /duplicate|unique/i);
+  assert.equal((await apply(other, "111", "approved")).rows[0].applied, false);
   assert.equal(await balance(), 5000);
+  assert.equal(await scalar(`select status from wallet_topups where id='${other}'`), "pending");
 
   // Rechazado y despues aprobado (reintento con la misma preferencia).
   assert.equal((await apply(other, "222", "rejected")).rows[0].new_status, "rejected");
@@ -3677,6 +3690,25 @@ test("recarga de saldo: acredita una sola vez por pago, permite reintento tras r
   assert.equal(refunded.rows[0].new_status, "refunded");
   assert.equal(await balance(), 0, "no queda saldo negativo si ya consumio parte");
   assert.equal((await apply(other, "333", "refunded")).rows[0].applied, false, "el reembolso tampoco se aplica dos veces");
+
+  // Pago repetido del mismo link (dos pestañas): el segundo pago aprobado
+  // tambien se cobro, asi que tambien se acredita -- antes se perdia.
+  const twice = await newTopup(4000);
+  await db.exec(`update premium_members set balance_minor = 0 where id='${member}'`);
+  assert.equal((await apply(twice, "444", "approved")).rows[0].applied, true);
+  assert.equal((await apply(twice, "555", "approved")).rows[0].applied, true, "el segundo pago se acredita");
+  assert.equal(await balance(), 8000);
+  assert.equal((await apply(twice, "555", "approved")).rows[0].applied, false, "pero el mismo pago repetido no");
+  assert.equal(await balance(), 8000);
+  assert.equal(await scalar(`select count(*)::int from wallet_topups where mp_payment_id in ('444','555')`), 2);
+
+  // El reembolso del pago repetido descuenta solo ese, y no toca la recarga original.
+  assert.equal((await apply(twice, "555", "refunded")).rows[0].applied, true);
+  assert.equal(await balance(), 4000);
+  assert.equal(await scalar(`select status from wallet_topups where id='${twice}'`), "approved");
+  // Un reembolso de un pago que no es de esta recarga no hace nada.
+  assert.equal((await apply(twice, "999", "refunded")).rows[0].applied, false);
+  assert.equal(await balance(), 4000);
 
   await db.close();
 });

@@ -1,8 +1,11 @@
 import "server-only";
 import { validResourceId, type ProviderPayment } from "./rules";
 
-async function get<T>(path: string): Promise<T> {
-  const token = process.env.MERCADOPAGO_PLATFORM_ACCESS_TOKEN?.trim();
+// Sin accessToken usa la cuenta de la plataforma (suscripciones). Los pagos
+// de ventas online y recargas de socios se cobran con la cuenta del
+// ORGANIZADOR: para esos se pasa su access_token (ver lib/billing/server.ts).
+async function get<T>(path: string, accessToken?: string): Promise<T> {
+  const token = accessToken?.trim() || process.env.MERCADOPAGO_PLATFORM_ACCESS_TOKEN?.trim();
   if (!token || /ACA_VA|TU_ACCESS|tu_api/.test(token)) throw new Error("Credenciales de pago sin configurar.");
   const response = await fetch(`https://api.mercadopago.com${path}`, {
     headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
@@ -17,7 +20,7 @@ function resource(value: string) {
   return encodeURIComponent(value);
 }
 
-export function getPayment(id: string) { return get<ProviderPayment>(`/v1/payments/${resource(id)}`); }
+export function getPayment(id: string, accessToken?: string) { return get<ProviderPayment>(`/v1/payments/${resource(id)}`, accessToken); }
 
 let cachedCollectorId: number | null = null;
 
@@ -34,9 +37,9 @@ export async function getPlatformCollectorId() {
 // "capitalpass_signup:<uuid>", "capitalpass_upgrade:<uuid>" o
 // "capitalpass_sale:<uuid>"). Se usa tanto desde el webhook como desde
 // "Verificar mi pago" para reconciliar sin depender de una notificacion.
-export async function paymentsForReference(externalReference: string) {
+export async function paymentsForReference(externalReference: string, accessToken?: string) {
   if (!/^capitalpass_(signup|upgrade|sale|topup):[0-9a-f-]{36}$/i.test(externalReference)) throw new Error("Referencia invalida.");
   const params = new URLSearchParams({ external_reference: externalReference, sort: "date_created", criteria: "desc" });
-  const page = await get<{ results?: ProviderPayment[] }>(`/v1/payments/search?${params}`);
+  const page = await get<{ results?: ProviderPayment[] }>(`/v1/payments/search?${params}`, accessToken);
   return page.results ?? [];
 }
