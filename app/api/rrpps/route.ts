@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { generateStaffPassword } from "../../../lib/staff/reset-password";
+import { ensureStaffUsername, staffCredentials } from "../../../lib/staff/credentials";
 
 // ============================================================
 // GEOREF ARGENTINA
@@ -476,10 +478,12 @@ export async function POST(
         body.phone
       );
 
+    // Si el organizador no escribe una contraseña, se genera sola y se le
+    // muestra para mandarla por WhatsApp (ver staff-credentials-modal).
     const password =
       cleanText(
         body.password
-      );
+      ) ?? generateStaffPassword();
 
     // ========================================================
     // UBICACIÓN OFICIAL
@@ -766,6 +770,11 @@ export async function POST(
 
           last_name:
             lastName,
+
+          // Tambien en el perfil (antes solo iba en user_metadata): lo usa
+          // el ingreso con celular y el envio de datos por WhatsApp.
+          phone:
+            phone ?? null,
         },
         {
           onConflict:
@@ -955,9 +964,20 @@ export async function POST(
       );
     }
 
+    const username = await ensureStaffUsername(admin, rrppUser.id, firstName, lastName);
+
     return NextResponse.json(
       {
         ok: true,
+
+        credentials: staffCredentials({
+          name: `${firstName} ${lastName}`.trim(),
+          role: "rrpp",
+          email,
+          username,
+          phone: phone ?? null,
+          password,
+        }),
 
         rrpp: {
           userId:

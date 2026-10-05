@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import StaffPasswordButton from "./staff-password-button";
+import StaffCredentialsModal, { type StaffCredentials } from "./staff-credentials-modal";
 
 import {
   CSSProperties,
@@ -95,6 +96,9 @@ export default function IngresosPanel({
 
   const [password, setPassword] =
     useState("");
+
+  const [createdCredentials, setCreatedCredentials] =
+    useState<StaffCredentials | null>(null);
 
   function toggleTheme() {
     const next =
@@ -196,6 +200,13 @@ export default function IngresosPanel({
           data?.error ??
             "No se pudo crear el controlador."
         );
+      }
+
+      // Antes de recargar, los datos de acceso para mandarlos por WhatsApp.
+      if (data?.credentials) {
+        setModalOpen(false);
+        setCreatedCredentials(data.credentials as StaffCredentials);
+        return;
       }
 
       window.location.reload();
@@ -541,8 +552,8 @@ export default function IngresosPanel({
                   <Field label="Apellido" value={lastName} onChange={setLastName} required />
                 </div>
                 <Field label="Email" type="email" value={email} onChange={setEmail} required />
-                <Field label="Teléfono" value={phone} onChange={setPhone} placeholder="Opcional" />
-                <Field label="Contraseña inicial" type="password" value={password} onChange={setPassword} required />
+                <Field label="WhatsApp" value={phone} onChange={setPhone} placeholder="Para mandarle sus datos de acceso" />
+                <Field label="Contraseña" value={password} onChange={setPassword} placeholder="Vacía = se genera sola" />
                 <p className="text-xs leading-5 text-[color:var(--cp-muted)]">
                   El controlador usará este email y contraseña para ingresar a Capital Pass.
                 </p>
@@ -554,6 +565,14 @@ export default function IngresosPanel({
             </div>
           </div>
         </div>
+      )}
+
+      {createdCredentials && (
+        <StaffCredentialsModal
+          credentials={createdCredentials}
+          title="Controlador creado"
+          onClose={() => window.location.reload()}
+        />
       )}
     </main>
   );

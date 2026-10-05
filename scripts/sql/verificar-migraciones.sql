@@ -26,7 +26,7 @@ from (values
   ('20260980_calendario_rental', to_regclass('public.rental_assets') is not null),
   ('20260982_app_socio', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'member_checkin_award' and position('select organization_id, status, expires_at into v_org_id, v_status, v_expires' in p.prosrc) > 0)),
   ('20260983_ranking_socios', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'organizations' and column_name = 'member_ranking_enabled')),
-  ('20260984_recarga_saldo', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'member_wallet_topup_apply' and position('v_topup public.wallet_topups%rowtype;' in p.prosrc) > 0)),
+  ('20260984_recarga_saldo', to_regclass('public.wallet_topups') is not null),
   ('20260985_premio_mensual', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'member_ranking' and position('select member_ranking_enabled,' in p.prosrc) > 0)),
   ('20260986_seguimiento_colectivo', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'transfer_tickets' and column_name = 'stop_id')),
   ('20260987_avisos_socio', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'transfer_claim_notifications' and position('select * into v_route from public.transfer_routes where id = p_route_id and deleted_at is null and active = true;' in p.prosrc) > 0)),
@@ -55,6 +55,8 @@ from (values
   ('20261013_arregla_permiso_update_sales', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'claim_ticket_email_sent' and position('update public.sales set ticket_email_sent_at = now(), updated_at = now()' in p.prosrc) > 0)),
   ('20261014_snapshot_cuenta_mp_recarga_socio', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'wallet_topups' and column_name = 'mercadopago_collector_id')),
   ('20261015_verificacion_final_barra_y_colectivos', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'adjust_bar_stock' and position('-- Reintento de un ajuste que ya se aplico con exito (mismo caller, misma' in p.prosrc) > 0)),
-  ('20261016_renovacion_anticipada_y_cobro_por_intento', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'cp_record_payment' and position('existing public.subscription_payments%rowtype;' in p.prosrc) > 0))
+  ('20261016_renovacion_anticipada_y_cobro_por_intento', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'cp_record_payment' and position('existing public.subscription_payments%rowtype;' in p.prosrc) > 0)),
+  ('20261017_recargas_repetidas_y_mesas_de_socio', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'member_wallet_topup_apply' and position('v_other public.wallet_topups%rowtype;' in p.prosrc) > 0)),
+  ('20261018_usuario_y_celular_para_ingresar', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'cp_login_email' and position('join auth.users u on u.id = p.id' in p.prosrc) > 0))
 ) as m(migracion, aplicada)
 order by migracion;

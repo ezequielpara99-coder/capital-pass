@@ -1,6 +1,7 @@
 import "server-only";
 import { randomInt } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { ensureStaffUsername, staffCredentials, type StaffCredentials } from "./credentials";
 
 export const STAFF_ROLES = ["rrpp", "controller", "door_seller", "bartender"] as const;
 export type StaffRole = (typeof STAFF_ROLES)[number];
@@ -29,7 +30,7 @@ export async function findStaffMember(admin: SupabaseClient, memberId: string): 
 }
 
 type ResetResult =
-  | { ok: true; email: string; password: string; phone: string | null; firstName: string; lastName: string; role: StaffRole }
+  | { ok: true; credentials: StaffCredentials }
   | { ok: false; status: number; error: string };
 
 // Le pone una contraseña nueva a la cuenta de un miembro del equipo. La
@@ -82,13 +83,21 @@ export async function resetStaffPassword(
   const metadata = (authUser.user.user_metadata ?? {}) as Record<string, unknown>;
   const metadataPhone = typeof metadata.phone === "string" ? metadata.phone : "";
 
+  const firstName = profile?.first_name ?? "";
+  const lastName = profile?.last_name ?? "";
+  // Si es alguien creado antes de que existieran los usuarios, se le asigna
+  // uno ahora, asi el mensaje ya le dice con que puede entrar.
+  const username = await ensureStaffUsername(admin, member.user_id, firstName, lastName);
+
   return {
     ok: true,
-    email: authUser.user.email,
-    password,
-    phone: profile?.phone?.trim() || metadataPhone.trim() || null,
-    firstName: profile?.first_name ?? "",
-    lastName: profile?.last_name ?? "",
-    role: member.role as StaffRole,
+    credentials: staffCredentials({
+      name: `${firstName} ${lastName}`.trim(),
+      role: member.role as StaffRole,
+      email: authUser.user.email,
+      username,
+      phone: profile?.phone?.trim() || metadataPhone.trim() || null,
+      password,
+    }),
   };
 }

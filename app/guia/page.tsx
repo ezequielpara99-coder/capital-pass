@@ -85,11 +85,12 @@ const GUIDE: Record<Role, RoleGuide> = {
         ],
       },
       {
-        title: "Si alguien del equipo se olvida la contraseña",
+        title: "Datos de acceso de tu equipo",
         steps: [
-          "En la lista de RRPPs, Venta en puerta, Ingresos (controladores) o Stock (bartenders), tocá \"🔑 Contraseña\" al lado de esa persona.",
-          "Se genera una contraseña nueva al instante (la anterior deja de funcionar) y te aparece lista para mandársela por WhatsApp con su usuario y el link para entrar.",
-          "Si no tenía teléfono cargado, escribilo ahí mismo antes de enviar. La contraseña se muestra una sola vez: mandala o copiala antes de cerrar.",
+          "Al crear un RRPP, vendedor de puerta, controlador o bartender, cargá su email y su WhatsApp. La contraseña podés dejarla vacía: se genera sola.",
+          "Apenas lo creás te aparece un mensaje con su usuario, email, contraseña y el link para entrar, con un botón para mandárselo por WhatsApp. La contraseña se muestra una sola vez: mandala o copiala antes de cerrar.",
+          "Cada persona puede entrar con su usuario, su email o su celular (con código de área), más la contraseña.",
+          "Si alguien se la olvida, tocá \"🔑 Contraseña\" al lado de esa persona (en RRPPs, Venta en puerta, Ingresos o Stock): se genera una nueva al instante y la anterior deja de funcionar.",
         ],
       },
       {

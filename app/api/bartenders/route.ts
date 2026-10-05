@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { generateStaffPassword } from "../../../lib/staff/reset-password";
+import { ensureStaffUsername, staffCredentials } from "../../../lib/staff/credentials";
 import { verifyOrganizerForEvent } from "../../../lib/stock/auth";
 
 type CreateBartenderBody = {
@@ -28,10 +30,12 @@ export async function POST(request: NextRequest) {
     const lastName = body.lastName?.trim();
     const email = body.email?.trim().toLowerCase();
     const phone = body.phone?.trim() || null;
-    const password = body.password ?? "";
+    // Sin contraseña escrita, se genera sola y se le muestra al organizador
+    // para mandarla por WhatsApp.
+    const password = body.password?.trim() || generateStaffPassword();
 
-    if (!eventId || !barId || !firstName || !lastName || !email || !password) {
-      return NextResponse.json({ error: "Completá nombre, apellido, barra, email y contraseña." }, { status: 400 });
+    if (!eventId || !barId || !firstName || !lastName || !email) {
+      return NextResponse.json({ error: "Completá nombre, apellido, barra y email." }, { status: 400 });
     }
 
     if (password.length < 8) {
@@ -99,8 +103,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No se pudo asignar el bartender a la barra." }, { status: 500 });
     }
 
+    const username = await ensureStaffUsername(admin, newUser.id, firstName, lastName);
+
     return NextResponse.json(
-      { ok: true, bartender: { memberId: member.id, firstName, lastName, email, active: true, barId } },
+      {
+        ok: true,
+        credentials: staffCredentials({ name: `${firstName} ${lastName}`.trim(), role: "bartender", email, username, phone, password }),
+        bartender: { memberId: member.id, firstName, lastName, email, active: true, barId },
+      },
       { status: 201 }
     );
   } catch (error) {

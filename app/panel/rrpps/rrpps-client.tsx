@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { EventBar, type SwitcherEvent } from "../event-switcher";
 import StaffPasswordButton from "../staff-password-button";
+import StaffCredentialsModal, { type StaffCredentials } from "../staff-credentials-modal";
 
 import {
   FormEvent,
@@ -196,6 +197,9 @@ export default function RRPPsClient({
   const [phone, setPhone] =
     useState("");
 
+  const [createdCredentials, setCreatedCredentials] =
+    useState<StaffCredentials | null>(null);
+
   const [password, setPassword] =
     useState("");
 
@@ -344,6 +348,13 @@ export default function RRPPsClient({
           data?.error ??
             "No se pudo crear el RRPP."
         );
+      }
+
+      // Antes de recargar, se muestran los datos de acceso para mandarlos
+      // por WhatsApp (la contraseña no se vuelve a mostrar).
+      if (data?.credentials) {
+        setCreatedCredentials(data.credentials as StaffCredentials);
+        return;
       }
 
       window.location.reload();
@@ -1380,17 +1391,17 @@ export default function RRPPsClient({
                 onChange={
                   setPhone
                 }
-                placeholder="Opcional"
+                placeholder="Para mandarle sus datos de acceso"
               />
 
               <Field
-                label="Contraseña inicial"
-                type="password"
+                label="Contraseña"
+                type="text"
                 value={password}
                 onChange={
                   setPassword
                 }
-                required
+                placeholder="Vacía = se genera sola"
               />
 
               <div className="my-5 border-t border-white/[0.07]" />
@@ -1698,6 +1709,14 @@ export default function RRPPsClient({
 
         </ModalOverlay>
 
+      )}
+
+      {createdCredentials && (
+        <StaffCredentialsModal
+          credentials={createdCredentials}
+          title="RRPP creado"
+          onClose={() => window.location.reload()}
+        />
       )}
 
     </main>

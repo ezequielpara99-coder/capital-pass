@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
-import { getAppBaseUrl } from "../../../../../lib/mercadopago/server";
 import { findStaffMember, resetStaffPassword } from "../../../../../lib/staff/reset-password";
 
 const FALLBACK_ADMIN_EMAILS = ["ezequiel.para99@gmail.com"];
@@ -37,7 +36,7 @@ export async function POST(request: NextRequest) {
     const result = await resetStaffPassword(admin, member, { allowOtherOrganizations: true });
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
 
-    return NextResponse.json({ ...result, loginUrl: `${getAppBaseUrl()}/login` });
+    return NextResponse.json({ ok: true, credentials: result.credentials });
   } catch (error) {
     console.error("ERROR POST ADMIN CONTRASEÑA EQUIPO:", error);
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });

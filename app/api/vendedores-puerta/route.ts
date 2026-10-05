@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { generateStaffPassword } from "../../../lib/staff/reset-password";
+import { ensureStaffUsername, staffCredentials } from "../../../lib/staff/credentials";
 
 type CreateDoorSellerBody = {
   eventId?: string;
@@ -87,19 +89,20 @@ export async function POST(request: NextRequest) {
     const lastName = body.lastName?.trim();
     const email = body.email?.trim().toLowerCase();
     const phone = body.phone?.trim() || null;
-    const password = body.password ?? "";
+    // Sin contraseña escrita, se genera sola y se le muestra al organizador
+    // para mandarla por WhatsApp.
+    const password = body.password?.trim() || generateStaffPassword();
 
     if (
       !eventId ||
       !firstName ||
       !lastName ||
-      !email ||
-      !password
+      !email
     ) {
       return NextResponse.json(
         {
           error:
-            "Completá nombre, apellido, email y contraseña.",
+            "Completá nombre, apellido y email.",
         },
         {
           status: 400,
@@ -290,9 +293,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const username = await ensureStaffUsername(admin, newUser.id, firstName, lastName);
+
     return NextResponse.json(
       {
         ok: true,
+
+        credentials: staffCredentials({
+          name: `${firstName} ${lastName}`.trim(),
+          role: "door_seller",
+          email,
+          username,
+          phone,
+          password,
+        }),
 
         seller: {
           memberId: member.id,

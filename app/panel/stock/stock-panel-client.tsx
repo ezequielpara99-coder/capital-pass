@@ -6,6 +6,7 @@ import { createClient } from "../../../lib/supabase/client";
 import BarCoverageCard from "../bar-coverage-card";
 import EventSwitcher from "../event-switcher";
 import StaffPasswordButton from "../staff-password-button";
+import StaffCredentialsModal, { type StaffCredentials } from "../staff-credentials-modal";
 
 type EventOption = { id: string; name: string };
 type Product = { id: string; name: string; category: string; brand: string | null; image_path: string | null; servings_per_bottle: number | null; organization_id: string | null };
@@ -652,20 +653,25 @@ function BartendersTab({
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [barId, setBarId] = useState(bars[0]?.id ?? "");
   const [saving, setSaving] = useState(false);
+  const [createdCredentials, setCreatedCredentials] = useState<StaffCredentials | null>(null);
 
   async function create() {
     setSaving(true);
     try {
       const response = await fetch("/api/bartenders", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventId, barId, firstName, lastName, email, password }),
+        body: JSON.stringify({ eventId, barId, firstName, lastName, email, phone, password }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
-      setFirstName(""); setLastName(""); setEmail(""); setPassword("");
+      setFirstName(""); setLastName(""); setEmail(""); setPhone(""); setPassword("");
+      // Datos de acceso para mandarlos por WhatsApp (la contraseña no se
+      // vuelve a mostrar).
+      if (result.credentials) setCreatedCredentials(result.credentials as StaffCredentials);
       onSaved();
     } catch (err) {
       onError(err instanceof Error ? err.message : "No se pudo crear el bartender.");
@@ -698,7 +704,8 @@ function BartendersTab({
           <Field label="Apellido" value={lastName} onChange={setLastName} />
         </div>
         <div className="mt-3"><Field label="Email" value={email} onChange={setEmail} /></div>
-        <div className="mt-3"><Field label="Contraseña inicial" value={password} onChange={setPassword} type="password" /></div>
+        <div className="mt-3"><Field label="WhatsApp (para mandarle sus datos)" value={phone} onChange={setPhone} /></div>
+        <div className="mt-3"><Field label="Contraseña (vacía = se genera sola)" value={password} onChange={setPassword} /></div>
         <label className="mt-3 block text-xs text-white/40">
           Barra asignada
           <select value={barId} onChange={(e) => setBarId(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-white/15 bg-black px-3 text-sm">
@@ -738,6 +745,10 @@ function BartendersTab({
           {bartenders.length === 0 && <p className="py-4 text-sm text-white/35">Sin bartenders todavía.</p>}
         </div>
       </section>
+
+      {createdCredentials && (
+        <StaffCredentialsModal credentials={createdCredentials} title="Bartender creado" onClose={() => setCreatedCredentials(null)} />
+      )}
     </div>
   );
 }

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { verifyOrganizerForOrg } from "../../../../lib/auth/organizer";
 import { checkRateLimit } from "../../../../lib/http/rate-limit";
-import { getAppBaseUrl } from "../../../../lib/mercadopago/server";
 import { findStaffMember, resetStaffPassword } from "../../../../lib/staff/reset-password";
 
 // POST: el organizador le genera una contraseña nueva a alguien de su equipo
@@ -29,7 +28,7 @@ export async function POST(request: NextRequest) {
     const result = await resetStaffPassword(admin, member, { allowOtherOrganizations: false });
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
 
-    return NextResponse.json({ ...result, loginUrl: `${getAppBaseUrl()}/login` });
+    return NextResponse.json({ ok: true, credentials: result.credentials });
   } catch (error) {
     console.error("ERROR POST CONTRASEÑA EQUIPO:", error);
     return NextResponse.json({ error: "Ocurrió un error inesperado." }, { status: 500 });

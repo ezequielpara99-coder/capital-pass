@@ -5,6 +5,7 @@ import Link from "next/link";
 import { EventBar, type SwitcherEvent } from "../event-switcher";
 import { friendlyErrorMessage } from "../../../lib/errors/friendly-message";
 import StaffPasswordButton from "../staff-password-button";
+import StaffCredentialsModal, { type StaffCredentials } from "../staff-credentials-modal";
 
 import {
   FormEvent,
@@ -67,6 +68,9 @@ export default function PuertaPanelClient({
   const [password, setPassword] =
     useState("");
 
+  const [createdCredentials, setCreatedCredentials] =
+    useState<StaffCredentials | null>(null);
+
   // =====================================================
   // CREAR VENDEDOR
   // =====================================================
@@ -110,6 +114,13 @@ export default function PuertaPanelClient({
           data?.error ??
             "No se pudo crear el vendedor."
         );
+      }
+
+      // Antes de recargar, los datos de acceso para mandarlos por WhatsApp.
+      if (data?.credentials) {
+        setModalOpen(false);
+        setCreatedCredentials(data.credentials as StaffCredentials);
+        return;
       }
 
       window.location.reload();
@@ -370,8 +381,8 @@ export default function PuertaPanelClient({
                   <Field label="Apellido" value={lastName} onChange={setLastName} required />
                 </div>
                 <Field label="Email" type="email" value={email} onChange={setEmail} required />
-                <Field label="Teléfono" value={phone} onChange={setPhone} placeholder="Opcional" />
-                <Field label="Contraseña inicial" type="password" value={password} onChange={setPassword} required />
+                <Field label="WhatsApp" value={phone} onChange={setPhone} placeholder="Para mandarle sus datos de acceso" />
+                <Field label="Contraseña" value={password} onChange={setPassword} placeholder="Vacía = se genera sola" />
                 {error && <ErrorBox message={error} />}
                 <button type="submit" disabled={loading} aria-busy={loading} className={PRIMARY_BUTTON + " h-12 w-full px-5"}>
                   {loading ? "Creando..." : "Crear vendedor"}
@@ -380,6 +391,14 @@ export default function PuertaPanelClient({
             </div>
           </div>
         </div>
+      )}
+
+      {createdCredentials && (
+        <StaffCredentialsModal
+          credentials={createdCredentials}
+          title="Vendedor creado"
+          onClose={() => window.location.reload()}
+        />
       )}
     </main>
   );

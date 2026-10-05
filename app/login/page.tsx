@@ -41,14 +41,30 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
-      const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(), password,
+      // Mismo mensaje generico sin importar el motivo (igual que registro y
+      // recuperar contraseña): decir "no existe" a diferencia de "contraseña
+      // incorrecta" revela si esa cuenta existe.
+      const identifier = email.trim();
+      if (identifier.includes("@")) {
+        const { data, error: authError } = await supabase.auth.signInWithPassword({
+          email: identifier.toLowerCase(), password,
+        });
+        if (authError || !data.user) throw new Error("Usuario o contraseña incorrectos.");
+        window.location.replace("/cuenta");
+        return;
+      }
+
+      // Usuario o celular: el servidor lo traduce al email de la cuenta e
+      // inicia la sesion ahi mismo, sin devolver el email al navegador (ver
+      // /api/auth/ingresar).
+      const response = await fetch("/api/auth/ingresar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier, password }),
       });
-      if (authError || !data.user) {
-        // Mismo mensaje genérico sin importar el motivo (igual que registro
-        // y recuperar contraseña): decir "confirmá tu email" a diferencia
-        // de "contraseña incorrecta" revela si ese email tiene cuenta.
-        throw new Error("Email o contraseña incorrectos.");
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error ?? "Usuario o contraseña incorrectos.");
       }
       window.location.replace("/cuenta");
     } catch (err) {
@@ -160,20 +176,23 @@ export default function LoginPage() {
               onSubmit={handleLogin}
               className="p-6 sm:p-8"
             >
-              {/* EMAIL */}
+              {/* EMAIL, USUARIO O CELULAR */}
               <label className="text-[10px] font-black uppercase tracking-[0.26em] text-[#f7f3ed]/55">
-                Email
+                Email, usuario o celular
               </label>
 
               <input
-                type="email"
+                type="text"
                 value={email}
                 onChange={(e) =>
                   setEmail(e.target.value)
                 }
-                autoComplete="email"
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 required
-                placeholder="tu@email.com"
+                placeholder="tu@email.com, tu usuario o 3468 529047"
                 className="mt-3 h-14 w-full border border-white/[0.10] bg-black/25 px-4 text-sm font-semibold text-[#f7f3ed] outline-none transition placeholder:text-[#f7f3ed]/20 focus:border-[#ff3b24]/70 focus:ring-4 focus:ring-[#ff3b24]/10"
               />
 

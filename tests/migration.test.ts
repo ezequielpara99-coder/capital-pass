@@ -108,6 +108,7 @@ const snapshotCuentaMpRecargaMigration = readFileSync(new URL("../supabase/migra
 const verificacionFinalBarraColectivosMigration = readFileSync(new URL("../supabase/migrations/20261015_verificacion_final_barra_y_colectivos.sql", import.meta.url), "utf8");
 const renovacionAnticipadaMigration = readFileSync(new URL("../supabase/migrations/20261016_renovacion_anticipada_y_cobro_por_intento.sql", import.meta.url), "utf8");
 const recargasRepetidasMesasSocioMigration = readFileSync(new URL("../supabase/migrations/20261017_recargas_repetidas_y_mesas_de_socio.sql", import.meta.url), "utf8");
+const usuarioCelularIngresarMigration = readFileSync(new URL("../supabase/migrations/20261018_usuario_y_celular_para_ingresar.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -265,6 +266,7 @@ async function database() {
   await db.exec(verificacionFinalBarraColectivosMigration);
   await db.exec(renovacionAnticipadaMigration);
   await db.exec(recargasRepetidasMesasSocioMigration);
+  await db.exec(usuarioCelularIngresarMigration);
   return db;
 }
 
@@ -3872,6 +3874,41 @@ test("suscripcion: renovar antes de vencer suma dias, ventana de 7 dias, cortesi
   await db.exec(`update organizations set complimentary = true where id = '${org}'`);
   await db.exec(`update subscription_payments set period_end = now() + interval '1 day', period_start = now() - interval '1 day' where signup_id in (select id from subscription_signups where organization_id = '${org}')`);
   await assert.rejects(() => db.query(`select cp_prepare_checkout('${user}', '${plan}')`), /cortesía/);
+
+  await db.close();
+});
+
+test("ingreso con usuario o celular: cp_login_email traduce al email de la cuenta y no adivina si el celular esta repetido", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const rrpp = "f1111111-1111-4111-8111-111111111111";
+  const legacyRrpp = "f2222222-2222-4222-8222-222222222222";
+  const a = "f3333333-3333-4333-8333-333333333333";
+  const b = "f4444444-4444-4444-8444-444444444444";
+  await db.exec(`insert into auth.users values ('${rrpp}','juan@example.test',now(),'{}');
+    insert into auth.users values ('${legacyRrpp}','viejo@example.test',now(),'{"phone":"+54 9 11 5555-1234"}');
+    insert into auth.users values ('${a}','a@example.test',now(),'{}');
+    insert into auth.users values ('${b}','b@example.test',now(),'{}');
+    insert into profiles(id, first_name, last_name, phone, username) values ('${rrpp}','Juan','Perez','03468 529047','juanperez');
+    insert into profiles(id, first_name, last_name) values ('${legacyRrpp}','Viejo','Rrpp');
+    insert into profiles(id, first_name, last_name, phone) values ('${a}','A','Uno','3462 111222'), ('${b}','B','Dos','+5493462111222');`);
+
+  assert.equal(await scalar(`select cp_login_email('JuanPerez')`), "juan@example.test", "usuario sin importar mayusculas");
+  assert.equal(await scalar(`select cp_login_email(' Juan@Example.test ')`), "juan@example.test", "email tal cual, en minusculas");
+  assert.equal(await scalar(`select cp_login_email('+54 9 3468 52-9047')`), "juan@example.test", "celular con otro formato");
+  assert.equal(await scalar(`select cp_login_email('1155551234')`), "viejo@example.test", "celular guardado solo en user_metadata (RRPP viejos)");
+  assert.equal(await scalar(`select cp_login_email('3462111222')`), null, "celular en dos cuentas: no adivina");
+  assert.equal(await scalar(`select cp_login_email('noexiste')`), null);
+  assert.equal(await scalar(`select cp_login_email('12345')`), null, "pocos digitos no matchea nada");
+
+  // Usuario unico sin importar mayusculas, y con formato valido.
+  await assert.rejects(() => db.query(`update profiles set username = 'JUANPEREZ' where id = '${a}'`), /profiles_username/);
+  await assert.rejects(() => db.query(`update profiles set username = 'juanperez' where id = '${a}'`), /duplicate|unique/i);
+
+  // Solo el servidor puede llamarla.
+  await db.exec(`set role authenticated;`);
+  await assert.rejects(() => db.query(`select cp_login_email('juanperez')`), /permission denied/);
+  await db.exec("reset role;");
 
   await db.close();
 });
