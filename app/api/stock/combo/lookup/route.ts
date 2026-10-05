@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
+import { currentBartenderAssignment } from "../../../../../lib/stock/bartender-assignment";
 
 // Busca una entrada por su codigo (el mismo que usa la puerta) y muestra
 // que tiene incluido y cuanto le queda, SIN canjear nada todavia -- es
@@ -25,19 +26,10 @@ export async function GET(request: NextRequest) {
     .maybeSingle();
   if (!member) return NextResponse.json({ error: "Tu cuenta no tiene acceso activo a la barra." }, { status: 403 });
 
-  // Sin order by, Postgres no garantiza que fila devuelve si el
-  // bartender quedo asignado a mas de un evento activo a la vez --
-  // podia devolver un evento/barra distinto al de /api/stock/bartender-context
-  // en la misma sesion. Se prioriza la asignacion mas reciente.
-  const { data: staff } = await admin
-    .from("event_staff")
-    .select("event_id, bar_id")
-    .eq("organization_member_id", member.id)
-    .eq("staff_role", "bartender")
-    .eq("active", true)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // El evento en curso o el proximo, no la asignacion mas reciente (ver
+  // lib/stock/bartender-assignment.ts). Misma regla en bartender-context y
+  // combo/lookup, asi devuelven siempre la misma barra.
+  const staff = await currentBartenderAssignment(admin, member.id);
   if (!staff || !staff.bar_id) return NextResponse.json({ error: "No tenés ninguna barra asignada." }, { status: 403 });
 
   // combo_type/combo_event_product_id se leen del SNAPSHOT de la entrada

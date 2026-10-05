@@ -48,7 +48,11 @@ export async function trackingForIdentity(admin: SupabaseClient, identity: Ident
 
   // 1) Por compra: el comprador de la venta a la que se le sumo el colectivo.
   const filters: string[] = [];
-  if (email) filters.push(`email.ilike.${email}`);
+  // Igualdad exacta, no ilike: en un ilike el "_" es comodin, asi que alguien
+  // que entro a /mi con "j_hn@yahoo.com" veia el colectivo de
+  // "john@yahoo.com". Los emails de buyers se guardan siempre en minuscula
+  // (trigger de 20261006), asi que la comparacion exacta alcanza.
+  if (email) filters.push(`email.eq.${email}`);
   if (dniRaw) filters.push(`dni.in.(${[...new Set([dniRaw, dniDigits].filter(Boolean))].join(",")})`);
   if (filters.length > 0) {
     let buyerQuery = admin.from("buyers").select("id").or(filters.join(",")).limit(100);

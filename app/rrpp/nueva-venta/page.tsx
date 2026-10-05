@@ -10,6 +10,7 @@ import {
 
 import { useRouter } from "next/navigation";
 import { createClient } from "../../../lib/supabase/client";
+import { pickCurrentEvent } from "../../../lib/events/current-event";
 
 type EventRow = {
   id: string;
@@ -364,7 +365,7 @@ export default function NuevaVentaRRPPPage() {
         } = await supabase
           .from("events")
           .select(
-            "id, name, starts_at"
+            "id, name, starts_at, status"
           )
           .in(
             "id",
@@ -373,8 +374,11 @@ export default function NuevaVentaRRPPPage() {
           .order("starts_at", { ascending: true })
           .order("created_at", { ascending: false });
 
+        // El evento en curso o el proximo, no el mas viejo (ver
+        // lib/events/current-event.ts) -- antes un RRPP asignado a un evento
+        // ya terminado terminaba vendiendo para ese y la venta se rechazaba.
         const eventData =
-          eventError ? null : (eventsData ?? [])[0] ?? null;
+          eventError ? null : pickCurrentEvent((eventsData ?? []) as EventRow[]);
 
         if (eventError) {
           throw eventError;

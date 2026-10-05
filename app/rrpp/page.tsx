@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "../../lib/supabase/server";
+import { pickCurrentEvent } from "../../lib/events/current-event";
 
 type Membership = {
   id: string;
@@ -136,7 +137,7 @@ export default async function RRPPPage() {
   if (eventIds.length > 0) {
     const { data: eventsData } = await supabase
       .from("events")
-      .select("id, name, starts_at")
+      .select("id, name, starts_at, status")
       .in("id", eventIds)
       .order("starts_at", { ascending: true })
       .order("created_at", { ascending: false });
@@ -144,7 +145,8 @@ export default async function RRPPPage() {
     events = (eventsData ?? []) as EventRow[];
   }
 
-  const selectedEvent = events[0] ?? null;
+  // El evento en curso o el proximo, no el mas viejo (ver lib/events/current-event.ts).
+  const selectedEvent = pickCurrentEvent(events);
 
   // =====================================================
   // 5. VENTAS DEL RRPP

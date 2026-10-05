@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "../../../lib/supabase/client";
+import { pickCurrentEvent } from "../../../lib/events/current-event";
 
 type EventRow = { id: string; name: string };
 type StopRow = { id: string; position: number; name: string };
@@ -84,12 +85,13 @@ export default function TrasladoRRPPPage() {
 
         const { data: events } = await supabase
           .from("events")
-          .select("id, name, starts_at")
+          .select("id, name, starts_at, status")
           .in("id", eventIds)
           .order("starts_at", { ascending: true })
           .order("created_at", { ascending: false });
 
-        const selectedEvent = (events ?? [])[0];
+        // El evento en curso o el proximo, no el mas viejo (ver lib/events/current-event.ts).
+        const selectedEvent = pickCurrentEvent(events ?? []);
         if (!selectedEvent) {
           setError("No se pudo encontrar el evento asignado.");
           return;

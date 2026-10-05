@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { createClient } from "../../lib/supabase/client";
+import { pickCurrentEvent } from "../../lib/events/current-event";
 import { friendlyErrorMessage } from "../../lib/errors/friendly-message";
 
 type EventData = {
@@ -279,20 +280,13 @@ export default function DoorSellerPage() {
             "staff_role",
             "door_seller"
           )
-          .eq("active", true)
-          // Sin order by, Postgres no garantiza que fila devuelve si el
-          // vendedor quedo asignado a mas de un evento activo a la vez
-          // -- podia mostrar/vender entradas de un evento distinto en
-          // cada refresh. Se prioriza la asignacion mas reciente.
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .eq("active", true);
 
         if (staffError) {
           throw staffError;
         }
 
-        if (!staff) {
+        if (!staff || staff.length === 0) {
           setError(
             "No tenés ningún evento asignado para vender en puerta."
           );
@@ -303,8 +297,11 @@ export default function DoorSellerPage() {
         // EVENTO
         // -------------------------------------------------
 
+        // Si esta asignado a varios eventos: el que esta en curso o el
+        // proximo (ver lib/events/current-event.ts). Antes se tomaba la
+        // asignacion mas reciente, que podia ser la de un evento futuro.
         const {
-          data: eventData,
+          data: eventRows,
           error: eventError,
         } = await supabase
           .from("events")
@@ -319,8 +316,8 @@ export default function DoorSellerPage() {
             door_sales_start_at,
             door_sales_end_at
           `)
-          .eq("id", staff.event_id)
-          .maybeSingle();
+          .in("id", staff.map((row) => row.event_id));
+        const eventData = pickCurrentEvent((eventRows ?? []) as EventData[]);
 
         if (eventError) {
           throw eventError;

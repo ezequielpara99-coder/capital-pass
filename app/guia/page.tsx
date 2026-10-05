@@ -41,6 +41,7 @@ const GUIDE: Record<Role, RoleGuide> = {
         steps: [
           "Invitá un RRPP desde RRPPs → agregar. Asignalo al evento y definí su % de comisión.",
           "El % se congela en cada venta: si después lo cambiás, no afecta lo que ya vendió, solo las ventas nuevas.",
+          "Podés dejar a tu equipo (RRPP, puerta, control, barra) asignado a varios eventos: cada uno ve siempre el evento en curso o el próximo, no uno que ya terminó.",
           "En Informes vas a ver cuánto generó cada RRPP y cuánto ya le pagaste. Si le pagás de más por error, el sistema te lo muestra aparte para que lo descuentes del próximo pago.",
         ],
       },

@@ -85,7 +85,10 @@ export async function POST(request: NextRequest) {
     if (!firstName || !lastName) return NextResponse.json({ error: "Ingresá nombre y apellido." }, { status: 400 });
 
     const dni = String(body.dni ?? "").trim().slice(0, 30) || null;
-    const email = String(body.email ?? "").trim().slice(0, 200) || null;
+    // En minuscula: /mi y el pago con saldo buscan al socio por email exacto
+    // (antes "Juan@Gmail.com" nunca encontraba su membresia en /mi).
+    const email = String(body.email ?? "").trim().toLowerCase().slice(0, 200) || null;
+    if (email && !/^[^\s@,()]+@[^\s@,()]+\.[^\s@,()]+$/.test(email)) return NextResponse.json({ error: "El email no es válido." }, { status: 400 });
     const startsAt = body.startsAt || new Date().toISOString().slice(0, 10);
     const expiresAt = body.expiresAt || null;
     if (expiresAt && expiresAt < startsAt) return NextResponse.json({ error: "La fecha de vencimiento no puede ser anterior al alta." }, { status: 400 });
@@ -162,7 +165,11 @@ export async function PATCH(request: NextRequest) {
     if (body.lastName !== undefined) updates.last_name = String(body.lastName).trim().slice(0, 120) || null;
     if (body.dni !== undefined) updates.dni = String(body.dni).trim().slice(0, 30) || null;
     if (body.phone !== undefined) updates.phone = String(body.phone).trim().slice(0, 60) || null;
-    if (body.email !== undefined) updates.email = String(body.email).trim().slice(0, 200) || null;
+    if (body.email !== undefined) {
+      const email = String(body.email).trim().toLowerCase().slice(0, 200) || null;
+      if (email && !/^[^\s@,()]+@[^\s@,()]+\.[^\s@,()]+$/.test(email)) return NextResponse.json({ error: "El email no es válido." }, { status: 400 });
+      updates.email = email;
+    }
     if (body.expiresAt !== undefined) updates.expires_at = body.expiresAt || null;
     if (body.notes !== undefined) updates.notes = String(body.notes).trim().slice(0, 2000) || null;
     if (body.status !== undefined && ["active", "expired", "cancelled"].includes(body.status)) updates.status = body.status;

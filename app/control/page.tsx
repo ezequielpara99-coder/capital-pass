@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { createClient } from "../../lib/supabase/client";
+import { pickCurrentEvent } from "../../lib/events/current-event";
 import { friendlyErrorMessage } from "../../lib/errors/friendly-message";
 import { parseQRPayload } from "../../lib/tickets/qr-payload";
 import {
@@ -300,20 +301,13 @@ export default function ControlPage() {
             "staff_role",
             "controller"
           )
-          .eq("active", true)
-          // Sin order by, Postgres no garantiza que fila devuelve si el
-          // controlador quedo asignado a mas de un evento activo a la
-          // vez -- podia mostrar/validar entradas de un evento distinto
-          // en cada refresh. Se prioriza la asignacion mas reciente.
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .eq("active", true);
 
         if (staffError) {
           throw staffError;
         }
 
-        if (!staffData) {
+        if (!staffData || staffData.length === 0) {
           setError(
             "No tenés ningún evento asignado para controlar."
           );
@@ -322,10 +316,14 @@ export default function ControlPage() {
         }
 
         const staff =
-          staffData as StaffAssignment;
+          staffData as StaffAssignment[];
 
+        // Si esta asignado a varios eventos: el que esta en curso o el
+        // proximo (ver lib/events/current-event.ts). Antes se tomaba la
+        // asignacion mas reciente: si el organizador ya lo habia cargado
+        // para un evento futuro, esa noche no veia el evento de hoy.
         const {
-          data: eventData,
+          data: eventRows,
           error: eventError,
         } = await supabase
           .from("events")
@@ -334,13 +332,15 @@ export default function ControlPage() {
             name,
             starts_at,
             venue_name,
-            city
+            city,
+            status
           `)
-          .eq(
+          .in(
             "id",
-            staff.event_id
-          )
-          .maybeSingle();
+            staff.map((row) => row.event_id)
+          );
+
+        const eventData = pickCurrentEvent((eventRows ?? []) as (EventRow & { status: string | null })[]);
 
         if (eventError) {
           throw eventError;

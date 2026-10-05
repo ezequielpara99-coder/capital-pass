@@ -116,10 +116,8 @@ Escribí el mensaje en un archivo y usá `git commit -F archivo`. Si usás `-m`,
   - membresía y app del socio;
   - suscripción del organizador (renovación anticipada);
   - panel admin (suscripciones y organizaciones).
+- Auditados también (2026-10-05, segunda tanda): registro, login y recuperación; portal del comprador `/mi`; panel del RRPP y la elección de evento de todo el equipo (`lib/events/current-event.ts`).
 - Falta auditar:
-  - registro, login y recuperación vistos juntos;
-  - portal del comprador `/mi`;
-  - panel principal del RRPP `/rrpp`;
   - tareas automáticas (`app/api/cron/*`);
   - Sales Agent (`/admin/sales-agent`);
   - resto del admin: finanzas, presupuestos y rentals desde el admin.
