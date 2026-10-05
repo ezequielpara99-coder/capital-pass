@@ -118,9 +118,8 @@ Escribí el mensaje en un archivo y usá `git commit -F archivo`. Si usás `-m`,
   - panel admin (suscripciones y organizaciones).
 - Auditados también (2026-10-05, segunda tanda): registro, login y recuperación; portal del comprador `/mi`; panel del RRPP y la elección de evento de todo el equipo (`lib/events/current-event.ts`).
 - Tareas automáticas (`app/api/cron/*`) auditadas el 2026-10-05: resumen de ventas corregido; checkout online con `binary_mode` (sin efectivo) y aviso al organizador si entra un pago aprobado sin cupo.
-- Falta auditar:
-  - Sales Agent (`/admin/sales-agent`);
-  - resto del admin: finanzas, presupuestos y rentals desde el admin.
+- Sales Agent auditado el 2026-10-05: el filtro para no entrar a direcciones internas cubre IPv6 disfrazadas (`lib/sales-agent/private-ip.ts`), y el valor mensual de una conversión va en pesos enteros.
+- Para la próxima ronda: todo tuvo al menos una pasada. Conviene una segunda vuelta por los flujos de plata con datos reales (venta online, recarga, suscripción) apenas haya movimiento real, y revisar los avisos al celular (push) de punta a punta.
 - Pruebas reales pendientes de Eze:
   1. Crear un RRPP de prueba, mandarle los datos por WhatsApp y entrar con usuario, celular y email.
   2. Comprar una entrada barata online en la cuenta QA y confirmar que llega el mail con el QR.

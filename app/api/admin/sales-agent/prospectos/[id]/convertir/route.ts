@@ -25,7 +25,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     }
 
     const organizationId = UUID.test(String(body.organizationId ?? "")) ? body.organizationId : null;
-    const monthlyValue = body.monthlyValue !== undefined && body.monthlyValue !== "" ? Math.round(Number(body.monthlyValue) * 100) : null;
+    // En pesos enteros, como todos los "_minor" de la app (price_minor,
+    // total_minor...) -- antes se multiplicaba por 100.
+    const monthlyValue = body.monthlyValue !== undefined && body.monthlyValue !== "" ? Math.round(Number(body.monthlyValue)) : null;
 
     const { data, error } = await admin
       .from("prospect_conversions")

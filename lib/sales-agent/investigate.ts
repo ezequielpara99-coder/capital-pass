@@ -1,6 +1,6 @@
 import "server-only";
 import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { isPrivateOrReservedIp } from "./private-ip";
 
 // Trae la pagina publica que el ADMIN indico para un prospecto (nunca una
 // que el sistema haya "encontrado" solo) y devuelve su HTML crudo (para
@@ -16,28 +16,6 @@ import { isIP } from "node:net";
 const MAX_BYTES = 600_000;
 const TIMEOUT_MS = 8000;
 
-function isPrivateOrReservedIp(ip: string): boolean {
-  const type = isIP(ip);
-  if (type === 4) {
-    const parts = ip.split(".").map(Number);
-    const [a, b] = parts;
-    if (a === 127) return true; // loopback
-    if (a === 10) return true; // privada
-    if (a === 172 && b >= 16 && b <= 31) return true; // privada
-    if (a === 192 && b === 168) return true; // privada
-    if (a === 169 && b === 254) return true; // link-local (incluye metadata cloud)
-    if (a === 0) return true;
-    return false;
-  }
-  if (type === 6) {
-    const lower = ip.toLowerCase();
-    if (lower === "::1") return true; // loopback
-    if (lower.startsWith("fe80:")) return true; // link-local
-    if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // ULA privada
-    return false;
-  }
-  return true; // no es una IP valida -> no confiar
-}
 
 export type FetchedPage = { ok: true; html: string; text: string; finalUrl: string } | { ok: false; error: string };
 
@@ -108,7 +86,12 @@ export async function fetchProspectPage(rawUrl: string): Promise<FetchedPage> {
       if (done) break;
       if (value) {
         total += value.byteLength;
-        if (total > MAX_BYTES) break;
+        if (total > MAX_BYTES) {
+          // Corta la descarga de verdad (si no, la conexion seguia abierta
+          // hasta el timeout).
+          await reader.cancel().catch(() => {});
+          break;
+        }
         chunks.push(value);
       }
     }
