@@ -72,7 +72,7 @@ Eze va a seguir el proyecto desde otro Claude, así que todo lo que se haga tien
 
 - **capital-pass** (esta carpeta): la plataforma de entradas, en capitalpass.app.
 - **capital-studio** (`../capital-studio`): el sitio madre, en capitalstudio.ar. Presenta Capital Design, Capital Prod, Capital Rentals y Capital Pass. Es un proyecto aparte, con su propio repo, su propio proyecto de Vercel y su propio `CLAUDE.md`. Para verlo local: `preview_start` con la configuración `studio` (puerto 3001).
-  - Estado al 2026-10-05: armado y commiteado local. Falta que Eze cree el repo en GitHub (`capital-studio`, vacío), pushearlo, importarlo en Vercel como proyecto nuevo, cargar `NEXT_PUBLIC_WHATSAPP` (y opcional `NEXT_PUBLIC_INSTAGRAM`) y conectar el dominio capitalstudio.ar (registrado en nic.ar).
+  - Estado al 2026-10-05: subido a GitHub (`github.com/ezequielpara99-coder/capital-studio`, privado). Falta importarlo en Vercel como proyecto nuevo, cargar `NEXT_PUBLIC_WHATSAPP` (y opcional `NEXT_PUBLIC_INSTAGRAM`), conectar el dominio capitalstudio.ar (registrado en nic.ar) y cargar los trabajos de Capital Design.
   - Los textos de Capital Prod son provisorios: falta que Eze diga qué ofrece.
 
 ## Deploy y verificación
