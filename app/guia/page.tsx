@@ -33,7 +33,7 @@ const GUIDE: Record<Role, RoleGuide> = {
         title: "Combos y packs",
         steps: [
           "Un combo es una entrada con consumición incluida (ej. \"Entrada + Fernet\"): se vincula a un producto de tu stock y se descuenta solo cuando el bartender lo entrega.",
-          "Un pack es un conjunto de varias entradas de la misma tanda con descuento (ej. \"Pack x4\"), pensado para grupos.",
+          "Un pack es un conjunto de varias entradas de la misma tanda con descuento (ej. \"Pack x4\"), pensado para grupos. Puede tener de 2 a 50 entradas.",
         ],
       },
       {
@@ -74,6 +74,7 @@ const GUIDE: Record<Role, RoleGuide> = {
           "Desde RRPPs → Traslados armás los colectivos del evento: nombre, horario, lugar de salida, cupo y recorrido (paradas).",
           "Podés dejarlo a cargo de un RRPP puntual o como colectivo \"general\", que cualquier RRPP del evento puede usar para sumar pasajeros.",
           "Si un pasajero avisa que no va, entrá a Pasajeros dentro de ese colectivo y cancelá su pasaje: libera el lugar para otro y su código deja de ser válido.",
+          "Podés agregar, reordenar o corregir paradas cuando quieras: cada pasajero conserva la parada donde sube. El cupo no se puede bajar por debajo de los pasajeros que ya tiene.",
         ],
       },
       {

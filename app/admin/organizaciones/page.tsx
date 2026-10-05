@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { fetchAllRows } from "../../../lib/supabase/fetch-all";
+import { effectiveSubscriptionStatus, latestSubscriptionByOrganization } from "../../../lib/billing/subscription-status";
 import CrearCuenta from "./crear-cuenta";
 
 export const dynamic = "force-dynamic";
@@ -73,22 +75,28 @@ export default async function AdminOrganizationsPage() {
         .select("id, name, contact_email, active, complimentary, stock_access_blocked, created_at")
         .order("created_at", { ascending: false })
         .limit(1000),
-      admin
-        .from("organization_subscriptions")
-        .select("organization_id, status, current_period_end, updated_at")
-        // Puede haber mas de una fila por organizacion (no hay constraint
-        // UNIQUE sobre organization_id -- una recontratacion deja la vieja
-        // sin borrar). Se ordena ascendente para que, al armar el Map mas
-        // abajo, la ULTIMA entrada por organizacion (la que sobrescribe) sea
-        // la mas reciente -- si no, quedaba la que Postgres devolviera
-        // primero sin garantia de orden, pudiendo mostrar el estado/
-        // vencimiento de una suscripcion vieja en vez de la vigente.
-        .order("updated_at", { ascending: true }),
-      admin.from("events").select("organization_id, status, city"),
-      admin
-        .from("organization_members")
-        .select("organization_id, user_id, role, status")
-        .eq("role", "organizer"),
+      // Puede haber mas de una fila por organizacion (una por solicitud de
+      // suscripcion): mas abajo se elige la de vencimiento mas lejano.
+      fetchAllRows((from, to) =>
+        admin
+          .from("organization_subscriptions")
+          .select("id, organization_id, status, current_period_end, updated_at")
+          .order("id")
+          .range(from, to)
+      ),
+      // Paginado: PostgREST corta en 1000 filas sin avisar, y con mas eventos
+      // u organizadores que eso los conteos de esta pantalla quedaban mal.
+      fetchAllRows((from, to) =>
+        admin.from("events").select("id, organization_id, status, city").order("id").range(from, to)
+      ),
+      fetchAllRows((from, to) =>
+        admin
+          .from("organization_members")
+          .select("id, organization_id, user_id, role, status")
+          .eq("role", "organizer")
+          .order("id")
+          .range(from, to)
+      ),
     ]);
 
   // Tolerante en capas: si falta la migracion de bloqueo de stock y/o la de
@@ -121,11 +129,7 @@ export default async function AdminOrganizationsPage() {
   const events = (eventsResult.data ?? []) as EventRow[];
   const members = (membersResult.data ?? []) as MemberRow[];
 
-  const subscriptionByOrg = new Map(
-    subscriptions
-      .filter((s) => s.organization_id)
-      .map((s) => [s.organization_id as string, s])
-  );
+  const subscriptionByOrg = latestSubscriptionByOrganization(subscriptions);
 
   const eventsByOrg = new Map<string, EventRow[]>();
   for (const event of events) {
@@ -248,7 +252,9 @@ export default async function AdminOrganizationsPage() {
                       value={
                         organization.complimentary
                           ? "Cortesía (gratis)"
-                          : subscription?.status ?? "Sin suscripción"
+                          : subscription
+                            ? effectiveSubscriptionStatus(subscription.status, subscription.current_period_end)
+                            : "Sin suscripción"
                       }
                     />
                     <DataBlock

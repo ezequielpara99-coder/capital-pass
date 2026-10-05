@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { effectiveSubscriptionStatus } from "../../../../lib/billing/subscription-status";
 import CortesiaToggle from "./cortesia-toggle";
 import StockAccessToggle from "./stock-access-toggle";
 import PremiumMembershipToggle from "./premium-membership-toggle";
@@ -285,7 +286,7 @@ export default async function AdminOrganizationDetailPage({
           </p>
           {subscription ? (
             <div className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              <DataBlock label="Estado" value={effectiveStatus(subscription.status, subscription.current_period_end)} />
+              <DataBlock label="Estado" value={effectiveSubscriptionStatus(subscription.status, subscription.current_period_end)} />
               <DataBlock label="Plan" value={subscription.plan_name ?? "Capital Pass"} />
               <DataBlock label="Monto" value={formatMoney(Number(subscription.amount_minor ?? 0))} />
               <DataBlock label="Vence" value={formatDate(subscription.current_period_end)} />
@@ -402,16 +403,6 @@ function DataBlock({ label, value }: { label: string; value: string }) {
       <p className="mt-2 truncate text-sm font-black text-white/68">{value}</p>
     </div>
   );
-}
-
-// El estado guardado solo se actualiza cuando llega un cobro: una
-// suscripcion vencida seguia diciendo "active". Fuera del componente porque
-// el linter marca Date.now() como impuro en el render.
-function effectiveStatus(status: string, periodEnd: string | null) {
-  const expired = Boolean(periodEnd && new Date(periodEnd).getTime() <= Date.now());
-  if (status === "active") return expired ? "vencida" : "activa";
-  if (status === "payment_required") return "vencida";
-  return status;
 }
 
 function formatMoney(value: number) {

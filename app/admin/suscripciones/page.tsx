@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { fetchAllRows } from "../../../lib/supabase/fetch-all";
+import { effectiveSubscriptionStatus, latestSubscriptionByOrganization } from "../../../lib/billing/subscription-status";
 import PlanesClient from "./planes-client";
 
 export const dynamic = "force-dynamic";
@@ -58,25 +60,28 @@ export default async function AdminSubscriptionsPage() {
   }
 
   const [organizationsResult, subscriptionsResult, plansResult] = await Promise.all([
-    admin.from("organizations").select("id, name").limit(1000),
-    admin
-      .from("organization_subscriptions")
-      .select(`
-        id,
-        organization_id,
-        plan_id,
-        status,
-        plan_name,
-        amount_minor,
-        currency,
-        payer_email,
-        mercadopago_preapproval_id,
-        current_period_start,
-        current_period_end,
-        created_at
-      `)
-      .order("created_at", { ascending: false })
-      .limit(500),
+    fetchAllRows((from, to) => admin.from("organizations").select("id, name").order("id").range(from, to)),
+    // Paginado: antes se cortaba en 500 filas sin avisar.
+    fetchAllRows((from, to) =>
+      admin
+        .from("organization_subscriptions")
+        .select(`
+          id,
+          organization_id,
+          plan_id,
+          status,
+          plan_name,
+          amount_minor,
+          currency,
+          payer_email,
+          mercadopago_preapproval_id,
+          current_period_start,
+          current_period_end,
+          created_at
+        `)
+        .order("id")
+        .range(from, to)
+    ),
     admin
       .from("subscription_plans")
       .select("id, code, name, description, price_minor, currency, billing_interval, active")
@@ -119,30 +124,15 @@ export default async function AdminSubscriptionsPage() {
   // Hay una fila por solicitud: una organizacion que cambio de plan o de
   // precio tiene varias. Se muestra una sola por organizacion, la de
   // vencimiento mas lejano (la que realmente le da el servicio).
-  const latestByOrganization = new Map<string, SubscriptionRow>();
-  for (const subscription of rawSubscriptions) {
-    const key = subscription.organization_id ?? subscription.id;
-    const current = latestByOrganization.get(key);
-    if (!current || periodEndTime(subscription) > periodEndTime(current)) {
-      latestByOrganization.set(key, subscription);
-    }
-  }
+  const latestByOrganization = latestSubscriptionByOrganization(rawSubscriptions);
 
   // El estado guardado solo se actualiza cuando llega un cobro, asi que una
   // suscripcion vencida seguia figurando "active" para siempre. El estado
   // real sale de la fecha de vencimiento.
-  const now = currentTime();
   const subscriptions = [...latestByOrganization.values()]
     .map((subscription) => ({
       ...subscription,
-      status:
-        subscription.status === "active" && periodEndTime(subscription) <= now
-          ? "vencida"
-          : subscription.status === "active"
-            ? "activa"
-            : subscription.status === "payment_required"
-              ? "vencida"
-              : subscription.status,
+      status: effectiveSubscriptionStatus(subscription.status, subscription.current_period_end),
     }))
     .sort((a, b) => periodEndTime(b) - periodEndTime(a));
 
@@ -264,12 +254,6 @@ export default async function AdminSubscriptionsPage() {
       </section>
     </main>
   );
-}
-
-// Fuera del componente: el linter marca "Date.now()" como impuro si se
-// llama directo en el render (mismo patron que app/admin/page.tsx).
-function currentTime() {
-  return Date.now();
 }
 
 function periodEndTime(subscription: SubscriptionRow) {

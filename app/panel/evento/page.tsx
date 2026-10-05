@@ -2761,7 +2761,7 @@ function PacksSection({
               {ticketTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </div>
-          <InputField label="Cantidad de entradas por pack" placeholder="4" type="number" value={newPack.quantityPerPack} onChange={(v) => setNewPack({ ...newPack, quantityPerPack: v })} />
+          <InputField label="Cantidad de entradas por pack (2 a 50)" placeholder="4" type="number" value={newPack.quantityPerPack} onChange={(v) => setNewPack({ ...newPack, quantityPerPack: v })} />
           <InputField label="Precio del pack ($)" placeholder="18000" type="number" value={newPack.price} onChange={(v) => setNewPack({ ...newPack, price: v })} />
           <div className="md:col-span-2">
             <button

@@ -102,8 +102,10 @@ export async function POST(request: NextRequest) {
     if (!verification.ok) return NextResponse.json({ error: verification.error }, { status: verification.status });
 
     if (!ticketTypeId || !name) return NextResponse.json({ error: "Completá el nombre y la tanda del pack." }, { status: 400 });
-    if (!Number.isInteger(quantityPerPack) || quantityPerPack <= 1) {
-      return NextResponse.json({ error: "La cantidad por pack tiene que ser 2 o más." }, { status: 400 });
+    // Tope: una venta puede ser de hasta 100 packs, asi que un pack de 1000
+    // entradas generaba 100.000 entradas en una sola operacion.
+    if (!Number.isInteger(quantityPerPack) || quantityPerPack <= 1 || quantityPerPack > 50) {
+      return NextResponse.json({ error: "La cantidad por pack tiene que ser entre 2 y 50." }, { status: 400 });
     }
     if (!Number.isInteger(priceMinor) || priceMinor <= 0) {
       return NextResponse.json({ error: "Ingresá un precio válido para el pack." }, { status: 400 });
