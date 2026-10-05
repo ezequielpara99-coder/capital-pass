@@ -7,6 +7,17 @@ export function destinationFor(members: BillingMembership[]) {
   return "/cuenta";
 }
 
+// Con el servicio activo se puede renovar desde estos dias antes del
+// vencimiento (mismo limite que cp_prepare_checkout en la base). Lo que se
+// paga se suma al final del periodo vigente.
+export const RENEWAL_WINDOW_DAYS = 7;
+
+export function isRenewable(account: { active: boolean; organizationId: string | null; complimentary: boolean; periodEnd: string | null }, now = Date.now()) {
+  if (!account.active || !account.organizationId || account.complimentary || !account.periodEnd) return false;
+  const end = Date.parse(account.periodEnd);
+  return Number.isFinite(end) && end - now <= RENEWAL_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+}
+
 export function signupFromReference(reference: unknown): string | null {
   if (typeof reference !== "string") return null;
   return /^capitalpass_signup:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(reference)?.[1] ?? null;

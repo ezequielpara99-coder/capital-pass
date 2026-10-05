@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { WebhookSignatureValidator } from "mercadopago";
-import { destinationFor, safeCheckoutUrl, signupFromReference, verifiedPayment } from "../lib/billing/rules";
+import { destinationFor, isRenewable, safeCheckoutUrl, signupFromReference, verifiedPayment } from "../lib/billing/rules";
 
 test("una cuenta sin membresia va a su cuenta y no vuelve al login", () => {
   assert.equal(destinationFor([]), "/cuenta");
@@ -38,4 +38,15 @@ test("rechaza firmas falsificadas y cambios en la referencia firmada", () => {
   assert.doesNotThrow(() => WebhookSignatureValidator.validate(args));
   assert.throws(() => WebhookSignatureValidator.validate({ ...args, dataId: "456" }));
   assert.throws(() => WebhookSignatureValidator.validate({ ...args, secret: "wrong" }));
+});
+
+test("renovacion anticipada: solo en los ultimos 7 dias, nunca en cortesia ni sin servicio", () => {
+  const now = Date.parse("2026-10-05T12:00:00Z");
+  const base = { active: true, organizationId: "org", complimentary: false };
+  assert.equal(isRenewable({ ...base, periodEnd: "2026-10-10T12:00:00Z" }, now), true, "faltan 5 dias");
+  assert.equal(isRenewable({ ...base, periodEnd: "2026-10-12T12:00:00Z" }, now), true, "faltan 7 dias justos");
+  assert.equal(isRenewable({ ...base, periodEnd: "2026-10-20T12:00:00Z" }, now), false, "faltan 15 dias");
+  assert.equal(isRenewable({ ...base, complimentary: true, periodEnd: "2026-10-10T12:00:00Z" }, now), false);
+  assert.equal(isRenewable({ ...base, active: false, periodEnd: "2026-10-10T12:00:00Z" }, now), false);
+  assert.equal(isRenewable({ ...base, periodEnd: null }, now), false);
 });

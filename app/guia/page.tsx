@@ -108,6 +108,14 @@ const GUIDE: Record<Role, RoleGuide> = {
         ],
       },
       {
+        title: "Tu suscripción",
+        steps: [
+          "La suscripción se paga por período con Mercado Pago, desde Perfil → Gestionar suscripción y pagos. Te avisamos por email 5 días antes del vencimiento.",
+          "Desde 7 días antes del vencimiento ya podés renovar ahí mismo: lo que pagues se suma a partir del vencimiento, así que no perdés ningún día.",
+          "Si no renovás a tiempo, tu panel y el de tu equipo se bloquean hasta que pagues. Apenas se confirma el pago, se habilita todo de nuevo.",
+        ],
+      },
+      {
         title: "Informes y finanzas",
         steps: [
           "En Informes vas a ver ventas por canal (online, RRPP, puerta, mesas), comisiones y totales del evento.",

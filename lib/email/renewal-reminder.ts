@@ -68,7 +68,7 @@ export async function sendRenewalReminder(
     "",
     `Organización: ${input.organizationName}`,
     "",
-    "Renová acá para que tu cuenta no se bloquee:",
+    "Ya podés renovarla: lo que pagues se suma a partir del vencimiento, no perdés ningún día. Renová acá para que tu cuenta no se bloquee:",
     input.renewUrl,
     "",
     "Gracias por usar Capital Pass.",
@@ -85,7 +85,7 @@ export async function sendRenewalReminder(
             Tu suscripción vence pronto
           </h1>
           <p style="margin:22px 0 0;color:rgba(247,243,237,.66);font-size:15px;line-height:1.65;">
-            Hola ${safeCustomerName}, tu suscripción a Capital Pass vence el <strong style="color:#fff4ee;">${safePeriodEnd}</strong>. Renovala antes de esa fecha para que tu cuenta y la de tu equipo no se bloqueen.
+            Hola ${safeCustomerName}, tu suscripción a Capital Pass vence el <strong style="color:#fff4ee;">${safePeriodEnd}</strong>. Renovala antes de esa fecha para que tu cuenta y la de tu equipo no se bloqueen: lo que pagues se suma a partir del vencimiento, no perdés ningún día.
           </p>
 
           <div style="margin-top:26px;border:1px solid rgba(255,255,255,.10);">

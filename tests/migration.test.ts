@@ -106,6 +106,7 @@ const mesaGeneraEntradaMigration = readFileSync(new URL("../supabase/migrations/
 const arreglaPermisoUpdateSalesMigration = readFileSync(new URL("../supabase/migrations/20261013_arregla_permiso_update_sales.sql", import.meta.url), "utf8");
 const snapshotCuentaMpRecargaMigration = readFileSync(new URL("../supabase/migrations/20261014_snapshot_cuenta_mp_recarga_socio.sql", import.meta.url), "utf8");
 const verificacionFinalBarraColectivosMigration = readFileSync(new URL("../supabase/migrations/20261015_verificacion_final_barra_y_colectivos.sql", import.meta.url), "utf8");
+const renovacionAnticipadaMigration = readFileSync(new URL("../supabase/migrations/20261016_renovacion_anticipada_y_cobro_por_intento.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -261,6 +262,7 @@ async function database() {
   await db.exec(arreglaPermisoUpdateSalesMigration);
   await db.exec(snapshotCuentaMpRecargaMigration);
   await db.exec(verificacionFinalBarraColectivosMigration);
+  await db.exec(renovacionAnticipadaMigration);
   return db;
 }
 
@@ -312,21 +314,23 @@ test("migracion real: alta, cobro, RLS, repetidos, reembolsos y recuperacion", a
   assert.equal(await scalar(`select cp_lock_checkout('${signup}')`), false, "el enfriamiento de 2 minutos sigue vigente");
 
   // cp_prepare_checkout con un plan DISTINTO al de la solicitud existente
-  // (el servicio sigue sin estar activo por el reembolso de arriba) debe
-  // actualizar esa solicitud al plan nuevo, no devolver la vieja tal cual.
+  // (el servicio sigue sin estar activo por el reembolso de arriba) crea una
+  // solicitud NUEVA con el plan elegido -- la vieja conserva su plan y su
+  // monto, asi un link de pago viejo sigue verificando contra su propio monto.
   const planB = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
   await db.exec(`insert into subscription_plans(id,code,name,price_minor,currency,billing_interval) values ('${planB}','anual','Anual',90000,'ARS','yearly')`);
   const switched = await db.query<{ id: string; plan_id: string; expected_amount: string; expected_currency: string; frequency_months: number }>(
     `select id, plan_id, expected_amount, expected_currency, frequency_months from jsonb_to_record(cp_prepare_checkout('${user}', '${planB}')) as x(id uuid, plan_id uuid, expected_amount bigint, expected_currency text, frequency_months integer)`
   );
-  assert.equal(switched.rows[0].id, signup, "no crea una solicitud nueva, actualiza la misma");
-  assert.equal(switched.rows[0].plan_id, planB, "el plan pasa a ser el elegido, no el viejo");
-  assert.equal(Number(switched.rows[0].expected_amount), 90000, "el monto a cobrar tambien pasa a ser el del plan nuevo");
+  assert.notEqual(switched.rows[0].id, signup, "crea una solicitud nueva en vez de reescribir la vieja");
+  assert.equal(switched.rows[0].plan_id, planB, "el plan es el elegido, no el viejo");
+  assert.equal(Number(switched.rows[0].expected_amount), 90000, "el monto a cobrar es el del plan nuevo");
   assert.equal(switched.rows[0].expected_currency, "ARS");
   assert.equal(switched.rows[0].frequency_months, 12, "anual = 12 meses, no el 1 del plan mensual anterior");
+  assert.equal(Number(await scalar(`select expected_amount from subscription_signups where id = '${signup}'`)), 10000, "la solicitud vieja conserva su monto");
 
-  // Reintentar con el MISMO plan nuevo es idempotente: no lo vuelve a actualizar de mas.
-  assert.equal(await scalar(`select cp_prepare_checkout('${user}', '${planB}')->>'id'`), signup);
+  // Reintentar con el MISMO plan nuevo es idempotente: devuelve la misma solicitud.
+  assert.equal(await scalar(`select cp_prepare_checkout('${user}', '${planB}')->>'id'`), switched.rows[0].id);
   assert.equal(await scalar(`select cp_prepare_checkout('${user}', '${planB}')->>'plan_id'`), planB);
 
   await db.exec(`insert into subscription_signups(plan_id,first_name,last_name,organization_name,email,mercadopago_preapproval_id)
@@ -1347,14 +1351,23 @@ test("upgrade de plan: usa lo que se pago (no el precio de lista) y recalcula si
   // El admin despues ajusta el precio de Gestion avanzada -- si se vuelve a
   // pedir el mismo upgrade (mismo periodo), el monto tiene que recalcularse
   // con el precio nuevo, no reusar el que se calculo la primera vez.
-  await db.exec(`update subscription_plans set price_minor = 100000 where code = 'gestion_avanzada'`);
+  // (el link tiene mas de una hora: dentro de la hora se reusa tal cual)
+  await db.exec(`update subscription_plans set price_minor = 100000 where code = 'gestion_avanzada';
+    update plan_upgrade_charges set created_at = now() - interval '2 hours' where id = '${first.rows[0].result.id}';`);
   const second = await db.query<{ result: { id: string; amount_minor: number; checkout_url: string | null } }>(
     `select cp_prepare_plan_upgrade('${organizerUser}','${avanzadaId}') as result`
   );
-  assert.equal(second.rows[0].result.id, first.rows[0].result.id, "sigue siendo el mismo cobro pendiente, no uno nuevo");
+  assert.notEqual(second.rows[0].result.id, first.rows[0].result.id, "el cobro con link viejo se reemplaza por uno nuevo");
   // (100000-10000)*~0.5 ~= 45000, bien distinto del ~90000 original.
   assert.ok(second.rows[0].result.amount_minor < 55000, `debe recalcular con el precio nuevo, no reusar el monto viejo; dio ${second.rows[0].result.amount_minor}`);
-  assert.equal(second.rows[0].result.checkout_url, null, "el link de pago viejo (con el monto viejo) queda invalidado");
+  assert.equal(second.rows[0].result.checkout_url, null, "el cobro nuevo todavia no tiene link");
+  assert.equal(await scalar(`select status from plan_upgrade_charges where id = '${first.rows[0].result.id}'`), "superseded");
+
+  // Si igual paga el link VIEJO (con su monto viejo), se aprueba por su
+  // propio monto -- antes el monto se pisaba y ese pago no coincidia nunca.
+  const oldAmount = Number(first.rows[0].result.amount_minor);
+  await db.query(`select cp_apply_upgrade_payment('${first.rows[0].result.id}','mp-old-link','approved',${oldAmount},'ARS', now())`);
+  assert.equal(await scalar(`select status from plan_upgrade_charges where id = '${first.rows[0].result.id}'`), "approved");
 
   await db.exec(`update subscription_plans set price_minor = 190000 where code = 'gestion_avanzada'`);
 
@@ -3758,6 +3771,75 @@ test("sales.ticket_email_sent_at se reclama una sola vez (evita mandar la entrad
   // quedarse con el envio del mail.
   assert.equal((await claim("2026-01-01T00:00:00Z")).length, 1, "la primera llamada reclama el envio");
   assert.equal((await claim("2026-01-01T00:00:01Z")).length, 0, "la segunda no encuentra nada para reclamar -- no reenvia el mail");
+
+  await db.close();
+});
+
+test("suscripcion: renovar antes de vencer suma dias, ventana de 7 dias, cortesia y link viejo de otro plan", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const user = "e1111111-1111-4111-8111-111111111111";
+  const plan = "e2222222-2222-4222-8222-222222222222";
+  const planB = "e3333333-3333-4333-8333-333333333333";
+  await db.exec(`insert into auth.users values ('${user}','renueva@example.test',now(),'{"first_name":"Renu","last_name":"Eva","organization_name":"Club Renueva"}');
+    insert into subscription_plans(id,code,name,price_minor) values ('${plan}','renueva-basica','Básica',10000);
+    insert into subscription_plans(id,code,name,price_minor) values ('${planB}','renueva-otra','Otra',20000);`);
+  const org = await scalar(`select cp_ensure_account('${user}')`);
+  const signup = await scalar(`select cp_prepare_checkout('${user}', '${plan}')->>'id'`);
+
+  // Pagado hace 25 dias: le quedan ~5 dias.
+  await db.query(`select cp_record_payment('${signup}','renueva-1','approved',10000,'ARS', now() - interval '25 days', now())`);
+  assert.equal(await scalar(`select cp_org_has_service('${org}')`), true);
+  const firstEnd = await scalar("select period_end::text from subscription_payments where payment_id = 'renueva-1'");
+
+  // Dentro de los ultimos 7 dias SI puede preparar la renovacion (antes: "El servicio ya esta activo").
+  assert.equal(await scalar(`select cp_prepare_checkout('${user}', '${plan}')->>'id'`), signup, "mismo plan y precio: reusa la solicitud");
+
+  // Renueva hoy: el periodo nuevo arranca donde termina el actual, no hoy.
+  await db.query(`select cp_record_payment('${signup}','renueva-2','approved',10000,'ARS', now(), now())`);
+  assert.equal(await scalar("select period_start::text from subscription_payments where payment_id = 'renueva-2'"), firstEnd, "arranca al vencimiento anterior");
+  assert.equal(
+    await scalar(`select (period_end = period_start + interval '1 month')::text from subscription_payments where payment_id = 'renueva-2'`), "true");
+  assert.equal(
+    await scalar(`select current_period_end::text from organization_subscriptions where signup_id = '${signup}'`),
+    await scalar("select period_end::text from subscription_payments where payment_id = 'renueva-2'"),
+    "el vencimiento visible es el del periodo sumado");
+
+  // Un reintento del webhook del pago 2 no recalcula su periodo.
+  const secondEnd = await scalar("select period_end::text from subscription_payments where payment_id = 'renueva-2'");
+  await db.query(`select cp_record_payment('${signup}','renueva-2','approved',10000,'ARS', now(), now())`);
+  assert.equal(await scalar("select period_end::text from subscription_payments where payment_id = 'renueva-2'"), secondEnd);
+
+  // Ya renovado: le quedan ~35 dias, fuera de la ventana de 7.
+  await assert.rejects(() => db.query(`select cp_prepare_checkout('${user}', '${plan}')`), /7 días antes/);
+
+  // Sube el precio del plan: la proxima renovacion es una solicitud nueva
+  // con el precio nuevo, y un reembolso del pago viejo sigue verificando
+  // contra lo que se cobro.
+  await db.exec(`update subscription_payments set period_end = now() + interval '3 days' where payment_id = 'renueva-2';
+    update subscription_plans set price_minor = 12000 where id = '${plan}';`);
+  const renewed = await scalar(`select cp_prepare_checkout('${user}', '${plan}')->>'id'`);
+  assert.notEqual(renewed, signup, "precio nuevo = solicitud nueva");
+  assert.equal(Number(await scalar(`select expected_amount from subscription_signups where id = '${renewed}'`)), 12000);
+  await db.query(`select cp_record_payment('${signup}','renueva-1','refunded',10000,'ARS', now() - interval '25 days', now() + interval '1 second')`);
+  assert.equal(await scalar("select status from subscription_payments where payment_id = 'renueva-1'"), "refunded");
+
+  // Link viejo de otro plan: genera link del plan B, cambia de idea, y
+  // termina pagando el link del plan B igual -- se acredita por su monto.
+  const viaB = await scalar(`select cp_prepare_checkout('${user}', '${planB}')->>'id'`);
+  assert.notEqual(viaB, renewed);
+  await db.query(`select cp_record_payment('${viaB}','renueva-b','approved',20000,'ARS', now(), now())`);
+  assert.equal(await scalar("select status from subscription_payments where payment_id = 'renueva-b'"), "approved");
+  // Y despues paga tambien el link basico: se suma despues del de B.
+  await db.query(`select cp_record_payment('${renewed}','renueva-3','approved',12000,'ARS', now(), now())`);
+  assert.equal(
+    await scalar("select (p3.period_start = pb.period_end)::text from subscription_payments p3, subscription_payments pb where p3.payment_id = 'renueva-3' and pb.payment_id = 'renueva-b'"),
+    "true", "cada pago se suma al final del ultimo");
+
+  // Cuenta de cortesia: nunca le pide pagar.
+  await db.exec(`update organizations set complimentary = true where id = '${org}'`);
+  await db.exec(`update subscription_payments set period_end = now() + interval '1 day', period_start = now() - interval '1 day' where signup_id in (select id from subscription_signups where organization_id = '${org}')`);
+  await assert.rejects(() => db.query(`select cp_prepare_checkout('${user}', '${plan}')`), /cortesía/);
 
   await db.close();
 });

@@ -18,8 +18,9 @@ async function verifyAdmin() {
 }
 
 // PATCH: cambiar el precio (y opcionalmente nombre/descripcion/activo) de un
-// plan de suscripcion existente. No afecta a organizaciones ya suscriptas
-// hasta que se les renueve/genere un nuevo cobro con el precio nuevo.
+// plan de suscripcion existente. No cambia lo que ya se cobro: cada
+// organizacion paga el precio nuevo recien en su proxima renovacion
+// (cp_prepare_checkout crea una solicitud nueva cuando el precio cambio).
 export async function PATCH(request: NextRequest) {
   try {
     const verification = await verifyAdmin();
@@ -33,8 +34,10 @@ export async function PATCH(request: NextRequest) {
 
     if (body.priceMinor !== undefined) {
       const priceMinor = Number(body.priceMinor);
-      if (!Number.isInteger(priceMinor) || priceMinor < 0) {
-        return NextResponse.json({ error: "El precio no es válido." }, { status: 400 });
+      // Un plan en $0 no se puede pagar (cp_prepare_checkout lo rechaza
+      // como "no disponible"): para dar el servicio gratis esta la cortesia.
+      if (!Number.isInteger(priceMinor) || priceMinor <= 0) {
+        return NextResponse.json({ error: "El precio tiene que ser mayor a $0. Para dar el servicio gratis usá la cuenta de cortesía." }, { status: 400 });
       }
       updates.price_minor = priceMinor;
     }

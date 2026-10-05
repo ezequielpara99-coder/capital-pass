@@ -16,6 +16,7 @@ type OrganizationRow = {
 type SubscriptionRow = {
   id: string;
   organization_id: string | null;
+  plan_id: string | null;
   status: string;
   plan_name: string | null;
   amount_minor: number | string | null;
@@ -63,6 +64,7 @@ export default async function AdminSubscriptionsPage() {
       .select(`
         id,
         organization_id,
+        plan_id,
         status,
         plan_name,
         amount_minor,
@@ -109,26 +111,59 @@ export default async function AdminSubscriptionsPage() {
         .includes("organization_subscriptions")
   );
 
-  const subscriptions =
+  const rawSubscriptions =
     tableMissing || subscriptionsResult.error
       ? []
       : ((subscriptionsResult.data ?? []) as SubscriptionRow[]);
 
+  // Hay una fila por solicitud: una organizacion que cambio de plan o de
+  // precio tiene varias. Se muestra una sola por organizacion, la de
+  // vencimiento mas lejano (la que realmente le da el servicio).
+  const latestByOrganization = new Map<string, SubscriptionRow>();
+  for (const subscription of rawSubscriptions) {
+    const key = subscription.organization_id ?? subscription.id;
+    const current = latestByOrganization.get(key);
+    if (!current || periodEndTime(subscription) > periodEndTime(current)) {
+      latestByOrganization.set(key, subscription);
+    }
+  }
+
+  // El estado guardado solo se actualiza cuando llega un cobro, asi que una
+  // suscripcion vencida seguia figurando "active" para siempre. El estado
+  // real sale de la fecha de vencimiento.
+  const now = currentTime();
+  const subscriptions = [...latestByOrganization.values()]
+    .map((subscription) => ({
+      ...subscription,
+      status:
+        subscription.status === "active" && periodEndTime(subscription) <= now
+          ? "vencida"
+          : subscription.status === "active"
+            ? "activa"
+            : subscription.status === "payment_required"
+              ? "vencida"
+              : subscription.status,
+    }))
+    .sort((a, b) => periodEndTime(b) - periodEndTime(a));
+
   const activeSubscriptions = subscriptions.filter(
-    (subscription) => subscription.status === "active"
+    (subscription) => subscription.status === "activa"
   ).length;
 
-  const pendingSubscriptions = subscriptions.filter((subscription) =>
-    ["pending", "authorized", "paused"].includes(subscription.status)
+  const expiredSubscriptions = subscriptions.filter(
+    (subscription) => subscription.status === "vencida"
   ).length;
 
+  // Un plan anual se cobra una vez por año: para el ingreso mensual cuenta
+  // la doceava parte.
+  const intervalByPlan = new Map(plans.map((plan) => [plan.id, plan.billing_interval]));
   const totalMonthly = subscriptions
-    .filter((subscription) => subscription.status === "active")
-    .reduce(
-      (total, subscription) =>
-        total + Number(subscription.amount_minor ?? 0),
-      0
-    );
+    .filter((subscription) => subscription.status === "activa")
+    .reduce((total, subscription) => {
+      const amount = Number(subscription.amount_minor ?? 0);
+      const yearly = subscription.plan_id ? intervalByPlan.get(subscription.plan_id) === "yearly" : false;
+      return total + (yearly ? amount / 12 : amount);
+    }, 0);
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#050505] text-[#f7f3ed]">
@@ -165,9 +200,9 @@ export default async function AdminSubscriptionsPage() {
 
         <section className="mt-7 grid gap-[1px] overflow-hidden border border-white/[0.08] bg-white/[0.08] sm:grid-cols-2 xl:grid-cols-4">
           <Metric
-            label="Suscripciones"
+            label="Organizaciones"
             value={String(subscriptions.length)}
-            detail="registradas"
+            detail="con suscripción"
           />
           <Metric
             label="Activas"
@@ -176,9 +211,9 @@ export default async function AdminSubscriptionsPage() {
             accent
           />
           <Metric
-            label="Pendientes"
-            value={String(pendingSubscriptions)}
-            detail="a revisar"
+            label="Vencidas"
+            value={String(expiredSubscriptions)}
+            detail="sin renovar"
           />
           <Metric
             label="Ingreso mensual"
@@ -229,6 +264,17 @@ export default async function AdminSubscriptionsPage() {
       </section>
     </main>
   );
+}
+
+// Fuera del componente: el linter marca "Date.now()" como impuro si se
+// llama directo en el render (mismo patron que app/admin/page.tsx).
+function currentTime() {
+  return Date.now();
+}
+
+function periodEndTime(subscription: SubscriptionRow) {
+  const time = subscription.current_period_end ? Date.parse(subscription.current_period_end) : NaN;
+  return Number.isFinite(time) ? time : 0;
 }
 
 function MissingTable() {

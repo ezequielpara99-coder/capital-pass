@@ -112,7 +112,18 @@ export async function GET(request: NextRequest) {
       });
 
       if (!result.ok) {
-        console.error("CRON RECORDATORIOS: no se pudo enviar el recordatorio (ya quedo reclamado, no reintenta hasta el proximo vencimiento).", subscription.id, result.error);
+        // Si el envio fallo de verdad (Resend caido, error de red), se
+        // libera el reclamo para reintentar en la corrida de mañana --
+        // antes quedaba marcado como enviado y el organizador nunca se
+        // enteraba del vencimiento. Si el mail no esta configurado
+        // (skipped), no tiene sentido reintentar todos los dias.
+        console.error("CRON RECORDATORIOS: no se pudo enviar el recordatorio.", subscription.id, result.error);
+        if (!result.skipped) {
+          await admin.from("organization_subscriptions")
+            .update({ reminder_sent_for_period_end: subscription.reminder_sent_for_period_end })
+            .eq("id", subscription.id)
+            .eq("reminder_sent_for_period_end", subscription.current_period_end);
+        }
         continue;
       }
 

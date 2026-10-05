@@ -1,7 +1,7 @@
 import "server-only";
 import type { User } from "@supabase/supabase-js";
 import { createAdminClient } from "../supabase/admin";
-import { destinationFor, saleFromReference, signupFromReference, topupFromReference, upgradeChargeFromReference, verifiedPayment, type BillingMembership, type ProviderPayment } from "./rules";
+import { destinationFor, isRenewable, saleFromReference, signupFromReference, topupFromReference, upgradeChargeFromReference, verifiedPayment, type BillingMembership, type ProviderPayment } from "./rules";
 import { getPayment, getPlatformCollectorId, paymentsForReference } from "./provider";
 import { sendSubscriptionReceipt } from "../email/subscription-receipt";
 import { sendTicketDelivery } from "../email/ticket-delivery";
@@ -26,7 +26,7 @@ export async function accountFor(user: User) {
   const { data: platformAdmin, error: adminError } = await admin.from("platform_admins").select("user_id").eq("user_id", user.id).maybeSingle();
   if (adminError) throw new Error("No se pudo verificar el acceso.");
   const isFallbackAdmin = Boolean(user.email && FALLBACK_ADMIN_EMAILS.includes(user.email.toLowerCase()));
-  if (platformAdmin || isFallbackAdmin) return { active: true, destination: "/admin", organizationId: null, organizationName: "Capital Pass", isAdmin: true, signup: null, email: user.email ?? "", periodEnd: null as string | null, lastPlanId: null as string | null };
+  if (platformAdmin || isFallbackAdmin) return { active: true, destination: "/admin", organizationId: null, organizationName: "Capital Pass", isAdmin: true, signup: null, email: user.email ?? "", periodEnd: null as string | null, renewable: false, lastPlanId: null as string | null };
   const { data, error } = await admin.from("organization_members").select("organization_id, role, status").eq("user_id", user.id).order("created_at");
   if (error) throw new Error("No se pudo verificar la cuenta.");
   const members = (data ?? []) as BillingMembership[];
@@ -46,9 +46,15 @@ export async function accountFor(user: User) {
   }
   const { data: signups, error: signupError } = await admin.from("subscription_signups").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(1);
   if (signupError) throw new Error("No se pudo leer la suscripcion.");
-  const { data: org } = organizationId ? await admin.from("organizations").select("name, active").eq("id", organizationId).maybeSingle() : { data: null };
+  const { data: org } = organizationId ? await admin.from("organizations").select("name, active, complimentary").eq("id", organizationId).maybeSingle() : { data: null };
+  // Hay una fila de organization_subscriptions por solicitud: una
+  // organizacion que cambio de plan o de precio tiene varias. Con
+  // .maybeSingle() sin limite eso era un error silencioso (periodEnd null);
+  // el vencimiento real es el mas lejano.
   const { data: subscription } = organizationId
-    ? await admin.from("organization_subscriptions").select("current_period_end").eq("organization_id", organizationId).maybeSingle()
+    ? await admin.from("organization_subscriptions").select("current_period_end, plan_id")
+        .eq("organization_id", organizationId).not("current_period_end", "is", null)
+        .order("current_period_end", { ascending: false }).limit(1).maybeSingle()
     : { data: null };
   // Si la organizacion pago un upgrade de plan vigente para el periodo
   // actual, ese es el plan a preseleccionar en la renovacion -- no el de
@@ -59,12 +65,15 @@ export async function accountFor(user: User) {
         .gte("period_end_at_charge", new Date().toISOString())
         .order("created_at", { ascending: false }).limit(1).maybeSingle()
     : { data: null };
+  const active = entitled.length > 0;
+  const periodEnd = (subscription?.current_period_end as string | undefined) ?? null;
   return {
-    active: entitled.length > 0, destination: destinationFor(entitled), organizationId,
+    active, destination: destinationFor(entitled), organizationId,
     organizationName: org?.name ?? "Mi cuenta", isAdmin: false,
     signup: (signups?.[0] ?? null) as Signup | null, email: user.email ?? "",
-    periodEnd: subscription?.current_period_end ?? null,
-    lastPlanId: upgrade?.to_plan_id ?? signups?.[0]?.plan_id ?? null,
+    periodEnd,
+    renewable: isRenewable({ active, organizationId, complimentary: Boolean(org?.complimentary), periodEnd }),
+    lastPlanId: upgrade?.to_plan_id ?? subscription?.plan_id ?? signups?.[0]?.plan_id ?? null,
   };
 }
 
@@ -84,8 +93,13 @@ async function applyPayment(payment: ProviderPayment, signupId: string) {
   if (!data) return false;
   const signup = data as Signup;
   const collectorId = await getPlatformCollectorId();
+  // Un pago ya registrado (ej. llega su reembolso) se verifica contra el
+  // monto que se grabo, no contra el de la solicitud -- mismo criterio que
+  // cp_record_payment.
+  const { data: recorded } = await admin.from("subscription_payments").select("amount, currency")
+    .eq("payment_id", String(payment.id)).eq("signup_id", signupId).maybeSingle();
   const verified = verifiedPayment(payment, {
-    amount: Number(signup.expected_amount), currency: signup.expected_currency,
+    amount: Number(recorded?.amount ?? signup.expected_amount), currency: recorded?.currency ?? signup.expected_currency,
     collectorId, live: process.env.MERCADOPAGO_ENV !== "sandbox",
   });
   const result = await admin.rpc("cp_record_payment", {
@@ -462,9 +476,11 @@ export async function reconcileUpgradesForUser(user: User) {
     .from("plan_upgrade_charges")
     .select("id, status")
     .in("organization_id", orgIds)
-    .eq("status", "pending")
+    // superseded: cobro con link viejo que se reemplazo por uno nuevo
+    // (cp_prepare_plan_upgrade) -- si igual lo pago, hay que aplicarlo.
+    .in("status", ["pending", "superseded"])
     .order("created_at", { ascending: false })
-    .limit(5);
+    .limit(10);
   if (chargesError) throw new Error("No se pudo buscar la actualizacion de plan.");
   let upgraded = false;
   for (const charge of charges ?? []) {

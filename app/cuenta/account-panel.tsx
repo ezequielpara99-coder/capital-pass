@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Plan = { id: string; name: string; price_minor: number; currency: string; billing_interval: string };
-type Account = { active: boolean; destination: string; organizationName: string; canManage: boolean; isAdmin: boolean; email: string; hasSignup: boolean; mpStatus: string | null; periodEnd: string | null; lastPlanId: string | null };
+type Account = { active: boolean; destination: string; organizationName: string; canManage: boolean; isAdmin: boolean; email: string; hasSignup: boolean; mpStatus: string | null; periodEnd: string | null; renewable: boolean; lastPlanId: string | null };
 
 export default function AccountPanel({ initial, plans, returning }: { initial: Account; plans: Plan[]; returning: boolean }) {
   const [account, setAccount] = useState(initial);
@@ -19,6 +19,10 @@ export default function AccountPanel({ initial, plans, returning }: { initial: A
   const checking = useRef(false);
   const activeRef = useRef(initial.active);
   const plan = plans.find((p) => p.id === planId);
+  // Renovacion anticipada: el servicio sigue activo, asi que "confirmado"
+  // significa que el vencimiento se corrio, no que se activo.
+  const renewingOnReturn = returning && initial.active && !initial.isAdmin;
+  const periodEndRef = useRef(initial.periodEnd);
 
   const verify = useCallback(async (signal?: AbortSignal) => {
     if (checking.current) return;
@@ -27,17 +31,24 @@ export default function AccountPanel({ initial, plans, returning }: { initial: A
       const response = await fetch("/api/cuenta/verificar-pago", { method: "POST", signal });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No pudimos verificar el pago.");
+      setAccount((previous) => ({ ...previous, active: result.active, destination: result.destination, mpStatus: result.mpStatus, periodEnd: result.periodEnd ?? null, renewable: Boolean(result.renewable) }));
+      if (renewingOnReturn) {
+        const extended = Boolean(result.periodEnd && result.periodEnd !== periodEndRef.current);
+        if (extended) activeRef.current = true;
+        setMessage(extended ? `Renovación confirmada. Tu suscripción ahora vence el ${formatDate(result.periodEnd)}.` : "La confirmación de la renovación sigue pendiente. No hace falta pagar de nuevo.");
+        return;
+      }
       activeRef.current = result.active;
-      setAccount((previous) => ({ ...previous, active: result.active, destination: result.destination, mpStatus: result.mpStatus }));
       setMessage(result.active ? "Tu servicio está activo." : "La confirmación del cobro sigue pendiente. No hace falta iniciar otra compra.");
       if (result.active && returning) window.location.replace(result.destination);
     } catch (e) {
       if (!signal?.aborted) setError(e instanceof Error ? e.message : "No pudimos verificar el pago.");
     } finally { checking.current = false; setBusy(false); }
-  }, [returning]);
+  }, [returning, renewingOnReturn]);
 
   useEffect(() => {
-    if (initial.isAdmin || initial.active || (!initial.hasSignup && !returning)) return;
+    if (initial.isAdmin || (!renewingOnReturn && (initial.active || (!initial.hasSignup && !returning)))) return;
+    if (renewingOnReturn) activeRef.current = false;
     const controller = new AbortController();
     let attempts = 0;
     const run = () => { attempts++; void verify(controller.signal); };
@@ -47,7 +58,7 @@ export default function AccountPanel({ initial, plans, returning }: { initial: A
       run();
     }, 10000);
     return () => { controller.abort(); window.clearTimeout(start); window.clearInterval(interval); };
-  }, [initial.active, initial.hasSignup, initial.isAdmin, returning, verify]);
+  }, [initial.active, initial.hasSignup, initial.isAdmin, returning, renewingOnReturn, verify]);
 
   async function checkout() {
     if (busy) return;
@@ -59,6 +70,13 @@ export default function AccountPanel({ initial, plans, returning }: { initial: A
       window.location.assign(result.checkoutUrl);
     } catch (e) { setError(e instanceof Error ? e.message : "No pudimos iniciar la suscripción."); setBusy(false); }
   }
+
+  const planPicker = <>
+    {plans.length > 1 && <label className="mt-6 block text-[10px] font-black uppercase tracking-[0.26em] text-[#f7f3ed]/55">Plan
+      <select value={planId} onChange={(e) => setPlanId(e.target.value)} className="mt-3 block h-14 w-full border border-white/[0.10] bg-black/25 px-4 text-sm font-semibold outline-none focus:border-[#ff3b24]/70">{plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+    </label>}
+    {plan && <div className="mt-7 border-t border-white/[0.08] pt-6"><p className="text-sm font-bold text-white/70">{plan.name}</p><p className="mt-2 text-4xl font-black tracking-[-0.04em]">{new Intl.NumberFormat("es-AR", { style: "currency", currency: plan.currency, maximumFractionDigits: 0 }).format(Number(plan.price_minor))}<span className="ml-2 text-sm font-normal text-white/40">/ {plan.billing_interval === "yearly" ? "año" : "mes"}</span></p></div>}
+  </>;
 
   return <main className="relative min-h-screen overflow-hidden bg-[#050505] px-5 py-6 text-[#f7f3ed] selection:bg-[#ff3b24] selection:text-white md:px-8 xl:px-10">
     {/* FONDO — luz neutra centrada, punto de llegada del recorrido */}
@@ -86,19 +104,25 @@ export default function AccountPanel({ initial, plans, returning }: { initial: A
         <section className="mt-10 border border-white/[0.09] bg-[#080706]/90 p-7 shadow-[0_30px_120px_rgba(0,0,0,.35),inset_0_1px_0_rgba(255,255,255,.035)] backdrop-blur-2xl sm:p-9">
           <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#ff7958]">{account.active ? "Servicio activo" : "Servicio bloqueado"}</p>
           <h2 className="mt-3 text-2xl font-black uppercase tracking-[-0.03em]">{account.active ? "Todo listo para trabajar" : "Activá tu suscripción"}</h2>
-          {account.active && account.periodEnd && !account.isAdmin && <p className="mt-3 text-sm leading-6 text-white/50">Tu suscripción vence el {new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "long", year: "numeric", timeZone: "America/Argentina/Buenos_Aires" }).format(new Date(account.periodEnd))}. Te avisamos por email antes de esa fecha.</p>}
+          {account.active && account.periodEnd && !account.isAdmin && <p className="mt-3 text-sm leading-6 text-white/50">Tu suscripción vence el {formatDate(account.periodEnd)}. {account.renewable ? "Ya podés renovarla." : "Te avisamos por email antes de esa fecha."}</p>}
           {account.active ? <Link href={account.destination} className="cp-punch mt-7 inline-flex h-14 items-center bg-[#ff3b24] px-6 text-[11px] font-black uppercase tracking-[0.24em] text-white shadow-[0_18px_50px_rgba(255,59,36,.3)] transition hover:scale-[1.02] hover:bg-[#ff4a32] active:scale-[0.99]">{account.isAdmin ? "Entrar al administrador" : "Entrar a mi panel"}</Link>
             : !account.canManage ? <p className="mt-4 text-sm leading-6 text-white/60">El organizador debe activar el servicio para habilitar tu acceso. Si tu cuenta fue deshabilitada, contactalo.</p>
             : <>
               <p className="mt-3 text-sm leading-7 text-white/50">Tu cuenta está creada. El servicio se habilita cuando se confirma el pago.</p>
-              {plans.length > 1 && <label className="mt-6 block text-[10px] font-black uppercase tracking-[0.26em] text-[#f7f3ed]/55">Plan
-                <select value={planId} onChange={(e) => setPlanId(e.target.value)} className="mt-3 block h-14 w-full border border-white/[0.10] bg-black/25 px-4 text-sm font-semibold outline-none focus:border-[#ff3b24]/70">{plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-              </label>}
-              {plan && <div className="mt-7 border-t border-white/[0.08] pt-6"><p className="text-sm font-bold text-white/70">{plan.name}</p><p className="mt-2 text-4xl font-black tracking-[-0.04em]">{new Intl.NumberFormat("es-AR", { style: "currency", currency: plan.currency, maximumFractionDigits: 0 }).format(Number(plan.price_minor))}<span className="ml-2 text-sm font-normal text-white/40">/ {plan.billing_interval === "yearly" ? "año" : "mes"}</span></p></div>}
+              {planPicker}
               {plan ? <button onClick={checkout} disabled={busy} className="cp-punch mt-7 h-14 w-full bg-[#ff3b24] px-6 text-[11px] font-black uppercase tracking-[0.24em] text-white shadow-[0_18px_50px_rgba(255,59,36,.3)] transition hover:scale-[1.01] hover:bg-[#ff4a32] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45">{busy ? "Procesando..." : account.hasSignup && account.mpStatus === "pending" ? "Continuar en Mercado Pago" : "Activar suscripción"}</button>
                 : <p className="mt-5 text-sm text-white/50">No hay planes disponibles en este momento.</p>}
             </>}
         </section>
+
+        {account.active && account.renewable && !account.isAdmin && account.periodEnd && <section className="mt-6 border border-[#ff5a2a]/20 bg-[#ff3b24]/[0.04] p-7 sm:p-9">
+          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#ff7958]">Renovación</p>
+          <h2 className="mt-3 text-2xl font-black uppercase tracking-[-0.03em]">Renová sin perder días</h2>
+          <p className="mt-3 text-sm leading-7 text-white/50">Lo que pagues hoy se suma a partir del {formatDate(account.periodEnd)}: no perdés ningún día del período actual.</p>
+          {planPicker}
+          {plan ? <button onClick={checkout} disabled={busy} className="cp-punch mt-7 h-14 w-full bg-[#ff3b24] px-6 text-[11px] font-black uppercase tracking-[0.24em] text-white shadow-[0_18px_50px_rgba(255,59,36,.3)] transition hover:scale-[1.01] hover:bg-[#ff4a32] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45">{busy ? "Procesando..." : "Renovar ahora"}</button>
+            : <p className="mt-5 text-sm text-white/50">No hay planes disponibles en este momento.</p>}
+        </section>}
 
         {!account.isAdmin && (account.active
           ? <div className="mt-6 border border-emerald-400/25 bg-emerald-500/[0.06] p-6">
@@ -114,4 +138,8 @@ export default function AccountPanel({ initial, plans, returning }: { initial: A
       </div>
     </div>
   </main>;
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "long", year: "numeric", timeZone: "America/Argentina/Buenos_Aires" }).format(new Date(value));
 }

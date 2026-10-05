@@ -18,7 +18,9 @@ export async function POST(request: NextRequest) {
   if (!user.email_confirmed_at) return NextResponse.json({ ok: false, error: "Confirma tu email." }, { status: 403 });
   try {
     const account = await reconcileUser(user);
-    if (account.active) return NextResponse.json({ ok: false, error: "Tu servicio ya esta activo. No hace falta otro pago." }, { status: 409 });
+    // Con el servicio activo solo se puede renovar en los ultimos 7 dias
+    // del periodo (cp_prepare_checkout vuelve a chequearlo en la base).
+    if (account.active && !account.renewable) return NextResponse.json({ ok: false, error: "Tu servicio ya esta activo. Vas a poder renovar desde 7 dias antes del vencimiento." }, { status: 409 });
     if (!account.organizationId) return NextResponse.json({ ok: false, error: "La suscripcion la administra el organizador." }, { status: 403 });
     const body = await request.json();
     if (typeof body.planId !== "string" || !/^[0-9a-f-]{36}$/i.test(body.planId)) {

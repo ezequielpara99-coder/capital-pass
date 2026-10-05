@@ -115,8 +115,10 @@ export default async function AdminOrganizationDetailPage({
         // returned" para esas organizaciones, mostrando "Sin suscripcion ni
         // solicitud registrada" aunque estuvieran pagando activamente.
         // cp_org_has_stock_access ya resuelve esto mismo con
-        // order by updated_at desc -- mismo criterio acá.
-        .order("updated_at", { ascending: false })
+        // order by updated_at desc. Despues se cambio a vencimiento mas
+        // lejano (20261016): "Verificar mi pago" refresca todas las
+        // solicitudes viejas y la mas actualizada puede ser la vieja.
+        .order("current_period_end", { ascending: false, nullsFirst: false })
         .limit(1)
         .maybeSingle(),
       admin
@@ -283,7 +285,7 @@ export default async function AdminOrganizationDetailPage({
           </p>
           {subscription ? (
             <div className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              <DataBlock label="Estado" value={subscription.status} />
+              <DataBlock label="Estado" value={effectiveStatus(subscription.status, subscription.current_period_end)} />
               <DataBlock label="Plan" value={subscription.plan_name ?? "Capital Pass"} />
               <DataBlock label="Monto" value={formatMoney(Number(subscription.amount_minor ?? 0))} />
               <DataBlock label="Vence" value={formatDate(subscription.current_period_end)} />
@@ -400,6 +402,16 @@ function DataBlock({ label, value }: { label: string; value: string }) {
       <p className="mt-2 truncate text-sm font-black text-white/68">{value}</p>
     </div>
   );
+}
+
+// El estado guardado solo se actualiza cuando llega un cobro: una
+// suscripcion vencida seguia diciendo "active". Fuera del componente porque
+// el linter marca Date.now() como impuro en el render.
+function effectiveStatus(status: string, periodEnd: string | null) {
+  const expired = Boolean(periodEnd && new Date(periodEnd).getTime() <= Date.now());
+  if (status === "active") return expired ? "vencida" : "activa";
+  if (status === "payment_required") return "vencida";
+  return status;
 }
 
 function formatMoney(value: number) {
