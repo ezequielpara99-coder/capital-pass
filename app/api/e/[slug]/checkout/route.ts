@@ -155,6 +155,12 @@ export async function POST(
           failure: `${getAppBaseUrl()}/e/${slug}?venta=${sale.sale_id}`,
         },
         auto_return: "approved",
+        // Solo pagos que se aprueban o rechazan en el momento (tarjeta,
+        // dinero en cuenta). Sin esto el comprador podia elegir Rapipago/
+        // Pago Facil: el carrito se cancela a los 30 minutos y libera el
+        // cupo, pero ese pago en efectivo se aprueba horas o dias despues,
+        // cuando ya puede no haber lugar -- pagaba y se quedaba sin entrada.
+        binary_mode: true,
       },
       requestOptions: { idempotencyKey: sale.sale_id },
     });

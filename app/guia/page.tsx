@@ -240,7 +240,7 @@ const GUIDE: Record<Role, RoleGuide> = {
       {
         title: "Comprar",
         steps: [
-          "Entrá a la página del evento (el link que te compartió el organizador), elegí tu tanda y pagá con Mercado Pago.",
+          "Entrá a la página del evento (el link que te compartió el organizador), elegí tu tanda y pagá con Mercado Pago, con tarjeta o dinero en cuenta (no se puede pagar en efectivo en Rapipago o Pago Fácil: la entrada se reserva solo por 30 minutos).",
           "La entrada te llega con su QR — no hace falta imprimir nada.",
         ],
       },

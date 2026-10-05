@@ -117,8 +117,8 @@ Escribí el mensaje en un archivo y usá `git commit -F archivo`. Si usás `-m`,
   - suscripción del organizador (renovación anticipada);
   - panel admin (suscripciones y organizaciones).
 - Auditados también (2026-10-05, segunda tanda): registro, login y recuperación; portal del comprador `/mi`; panel del RRPP y la elección de evento de todo el equipo (`lib/events/current-event.ts`).
+- Tareas automáticas (`app/api/cron/*`) auditadas el 2026-10-05: resumen de ventas corregido; checkout online con `binary_mode` (sin efectivo) y aviso al organizador si entra un pago aprobado sin cupo.
 - Falta auditar:
-  - tareas automáticas (`app/api/cron/*`);
   - Sales Agent (`/admin/sales-agent`);
   - resto del admin: finanzas, presupuestos y rentals desde el admin.
 - Pruebas reales pendientes de Eze:

@@ -10,6 +10,7 @@ import { createMemberPublicPath } from "../members/signature";
 import { createTicketPublicPath } from "../tickets/signature";
 import { ticketQrPngBuffer } from "../tickets/qr-image";
 import { getAppBaseUrl } from "../mercadopago/server";
+import { checkRateLimit } from "../http/rate-limit";
 import { accessTokenFor } from "../mercadopago/oauth";
 
 export type Signup = {
@@ -433,6 +434,29 @@ export async function applySalePayment(payment: ProviderPayment, saleId: string)
   const result = await admin.rpc("confirm_online_sale", { p_sale_id: saleId, p_status: verified.status });
   if (result.error) throw new Error("No se pudo confirmar la venta.");
   if (verified.status === "approved") {
+    // Pago aprobado pero sin cupo (ej. el carrito ya habia vencido y la
+    // tanda se agoto en el medio): confirm_online_sale deja la venta
+    // cancelada y antes solo dejaba un aviso interno en la base -- el
+    // comprador pagaba, no recibia entrada y nadie se enteraba. Ahora se le
+    // avisa al organizador para que devuelva la plata. checkRateLimit con
+    // tope 1 evita repetir el aviso si el webhook o "Verificar mi pago"
+    // vuelven a procesar el mismo pago.
+    const { data: after } = await admin.from("sales").select("status").eq("id", saleId).maybeSingle();
+    if (after?.status === "cancelled") {
+      console.error("VENTAS ONLINE: pago aprobado sin cupo, hay que devolver la plata.", saleId, String(payment.id));
+      if (await checkRateLimit(`pago-sin-cupo:${payment.id}`, 1, 3600)) {
+        try {
+          await sendPushToOrganizers(sale.organization_id as string, "bar_sale", {
+            title: "Pago sin entrada: hay que devolverlo",
+            body: `Entró un pago online aprobado de $${new Intl.NumberFormat("es-AR").format(Number(payment.transaction_amount))} pero ya no había lugar en la tanda. Devolvé el pago desde Mercado Pago.`,
+            url: "/panel",
+          });
+        } catch (pushError) {
+          console.error("VENTAS ONLINE: no se pudo avisar el pago sin cupo.", pushError);
+        }
+      }
+      return true;
+    }
     if (sale.table_id) {
       await sendOnlineSaleTicketEmail(saleId, { organizationId: sale.organization_id as string, tableId: sale.table_id as string });
     } else {

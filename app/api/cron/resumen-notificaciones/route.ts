@@ -90,15 +90,26 @@ export async function GET(request: NextRequest) {
 
       const since = item.last_summary_sent_at ?? new Date(0).toISOString();
 
+      // confirmed_at y no created_at: una compra online se crea pendiente y
+      // se confirma recien cuando se paga -- con created_at, una compra
+      // creada antes del ultimo resumen y pagada despues no entraba en
+      // ningun resumen.
       const [{ data: barSales }, { data: mesaSales }, { data: ticketSales }] = await Promise.all([
-        admin.from("bar_sales").select("total_minor").in("event_id", eventIds).is("cancelled_at", null).gt("created_at", since),
-        admin.from("sales").select("total_minor").in("event_id", eventIds).eq("channel", "mesa").eq("status", "confirmed").gt("created_at", since),
-        admin.from("sales").select("total_minor").in("event_id", eventIds).in("channel", ["organizer", "rrpp", "door", "online"]).eq("status", "confirmed").gt("created_at", since),
+        admin.from("bar_sales").select("total_minor, quantity").in("event_id", eventIds).is("cancelled_at", null).gt("created_at", since),
+        admin.from("sales").select("total_minor").in("event_id", eventIds).eq("channel", "mesa").eq("status", "confirmed").gt("confirmed_at", since),
+        admin.from("sales").select("id, total_minor").in("event_id", eventIds).in("channel", ["organizer", "rrpp", "door", "online"]).eq("status", "confirmed").gt("confirmed_at", since),
       ]);
 
-      const barCount = barSales?.length ?? 0;
+      // Cantidades reales: antes contaba OPERACIONES y las mostraba como
+      // "entradas"/"tragos" (una venta de 4 entradas decia "1 entrada").
+      const ticketSaleIds = (ticketSales ?? []).map((s) => s.id as string);
+      const { count: ticketTotal } = ticketSaleIds.length
+        ? await admin.from("tickets").select("id", { count: "exact", head: true }).in("sale_id", ticketSaleIds).neq("status", "cancelled")
+        : { count: 0 };
+
+      const barCount = (barSales ?? []).reduce((sum, s) => sum + Number(s.quantity ?? 1), 0);
       const mesaCount = mesaSales?.length ?? 0;
-      const ticketCount = ticketSales?.length ?? 0;
+      const ticketCount = ticketTotal ?? 0;
       const totalMinor =
         (barSales ?? []).reduce((sum, s) => sum + Number(s.total_minor), 0) +
         (mesaSales ?? []).reduce((sum, s) => sum + Number(s.total_minor), 0) +
