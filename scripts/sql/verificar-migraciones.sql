@@ -57,6 +57,7 @@ from (values
   ('20261015_verificacion_final_barra_y_colectivos', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'adjust_bar_stock' and position('-- Reintento de un ajuste que ya se aplico con exito (mismo caller, misma' in p.prosrc) > 0)),
   ('20261016_renovacion_anticipada_y_cobro_por_intento', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'cp_record_payment' and position('existing public.subscription_payments%rowtype;' in p.prosrc) > 0)),
   ('20261017_recargas_repetidas_y_mesas_de_socio', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'member_wallet_topup_apply' and position('v_other public.wallet_topups%rowtype;' in p.prosrc) > 0)),
-  ('20261018_usuario_y_celular_para_ingresar', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'cp_login_email' and position('join auth.users u on u.id = p.id' in p.prosrc) > 0))
+  ('20261018_usuario_y_celular_para_ingresar', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'cp_login_email' and position('join auth.users u on u.id = p.id' in p.prosrc) > 0)),
+  ('20261019_finanzas_fijos', to_regclass('public.finance_fixed_items') is not null)
 ) as m(migracion, aplicada)
 order by migracion;

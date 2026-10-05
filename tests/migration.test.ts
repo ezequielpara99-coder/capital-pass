@@ -109,6 +109,7 @@ const verificacionFinalBarraColectivosMigration = readFileSync(new URL("../supab
 const renovacionAnticipadaMigration = readFileSync(new URL("../supabase/migrations/20261016_renovacion_anticipada_y_cobro_por_intento.sql", import.meta.url), "utf8");
 const recargasRepetidasMesasSocioMigration = readFileSync(new URL("../supabase/migrations/20261017_recargas_repetidas_y_mesas_de_socio.sql", import.meta.url), "utf8");
 const usuarioCelularIngresarMigration = readFileSync(new URL("../supabase/migrations/20261018_usuario_y_celular_para_ingresar.sql", import.meta.url), "utf8");
+const finanzasFijosMigration = readFileSync(new URL("../supabase/migrations/20261019_finanzas_fijos.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -267,6 +268,7 @@ async function database() {
   await db.exec(renovacionAnticipadaMigration);
   await db.exec(recargasRepetidasMesasSocioMigration);
   await db.exec(usuarioCelularIngresarMigration);
+  await db.exec(finanzasFijosMigration);
   return db;
 }
 
@@ -3910,5 +3912,17 @@ test("ingreso con usuario o celular: cp_login_email traduce al email de la cuent
   await assert.rejects(() => db.query(`select cp_login_email('juanperez')`), /permission denied/);
   await db.exec("reset role;");
 
+  await db.close();
+});
+
+test("cuentas del mes: la tabla rechaza montos y dias invalidos y solo la usa el servidor", async () => {
+  const db = await database();
+  await db.exec(`insert into finance_fixed_items(scope, kind, name, amount, currency, day_of_month) values ('personal','gasto','Claude',20,'USD',10)`);
+  await assert.rejects(() => db.query(`insert into finance_fixed_items(kind, name, amount) values ('gasto','Cero',0)`), /check/i);
+  await assert.rejects(() => db.query(`insert into finance_fixed_items(kind, name, amount, day_of_month) values ('gasto','Dia',10,32)`), /check/i);
+  await assert.rejects(() => db.query(`insert into finance_fixed_items(kind, name, amount, currency) values ('gasto','Euros',10,'EUR')`), /check/i);
+  await db.exec("set role authenticated;");
+  await assert.rejects(() => db.query("select * from finance_fixed_items"), /permission denied/);
+  await db.exec("reset role;");
   await db.close();
 });
