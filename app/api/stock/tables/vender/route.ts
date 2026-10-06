@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createClient } from "../../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { sendPushToOrganizers } from "../../../../../lib/push/server";
@@ -42,7 +42,8 @@ export async function POST(request: NextRequest) {
 
     const result = data?.[0];
 
-    try {
+    // Aviso al organizador en after(): no demora la respuesta de la venta.
+    after(async () => { try {
       const admin = createAdminClient();
       const [{ data: event }, { data: table }] = await Promise.all([
         admin.from("events").select("organization_id").eq("id", eventId).maybeSingle(),
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
       }
     } catch (pushError) {
       console.error("PUSH mesa-sale:", pushError);
-    }
+    } });
 
     return NextResponse.json({ ok: true, saleId: result?.sale_id, totalMinor: Number(result?.total_minor ?? 0) });
   } catch {

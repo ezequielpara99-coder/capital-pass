@@ -119,6 +119,14 @@ const GUIDE: Record<Role, RoleGuide> = {
         ],
       },
       {
+        title: "Avisos al celular",
+        steps: [
+          "Desde Perfil → Notificaciones activá los avisos en cada celular donde los quieras: ventas de barra y mesa, stock bajo y un resumen cada tanto.",
+          "En iPhone primero agregá Capital Pass a la pantalla de inicio (Safari → Compartir → Agregar a inicio) y abrila desde ese ícono; desde Safari común el iPhone no permite avisos.",
+          "Tocar un aviso te lleva directo a la pantalla de esa venta o ese stock.",
+        ],
+      },
+      {
         title: "Informes y finanzas",
         steps: [
           "En Informes vas a ver ventas por canal (online, RRPP, puerta, mesas), comisiones y totales del evento.",

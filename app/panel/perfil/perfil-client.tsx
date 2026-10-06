@@ -45,6 +45,9 @@ export default function PerfilClient({
   const [error, setError] = useState("");
 
   const [pushSupported, setPushSupported] = useState(false);
+  // En iPhone/iPad los avisos solo existen si la app se agrego a la
+  // pantalla de inicio: desde Safari comun no hay PushManager.
+  const [needsHomeScreen, setNeedsHomeScreen] = useState(false);
   const [subscribed, setSubscribed] = useState(false);
   const [subscribing, setSubscribing] = useState(false);
   const [barSaleAlerts, setBarSaleAlerts] = useState(true);
@@ -64,6 +67,14 @@ export default function PerfilClient({
     } catch {
       // no bloquea el resto del perfil
     }
+
+    const isAppleMobile =
+      /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const isStandalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    if (isAppleMobile && !isStandalone) setNeedsHomeScreen(true);
 
     if ("serviceWorker" in navigator && "PushManager" in window) {
       setPushSupported(true);
@@ -329,7 +340,12 @@ export default function PerfilClient({
           <h2 className="text-lg font-bold">Notificaciones</h2>
           <p className="mt-1 text-xs text-white/40">Avisos en tiempo real de ventas de barra/mesa, stock bajo, y un resumen periódico.</p>
 
-          {!pushSupported ? (
+          {needsHomeScreen ? (
+            <p className="mt-4 text-sm text-white/50">
+              En iPhone, primero agregá Capital Pass a la pantalla de inicio: tocá el botón Compartir de Safari →
+              &quot;Agregar a inicio&quot;. Después abrila desde ese ícono y activá los avisos acá.
+            </p>
+          ) : !pushSupported ? (
             <p className="mt-4 text-sm text-white/35">Este navegador no soporta notificaciones push.</p>
           ) : !subscribed ? (
             <button

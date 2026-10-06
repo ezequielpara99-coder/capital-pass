@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { sendPushToOrganizers } from "../../../../lib/push/server";
@@ -57,8 +57,11 @@ export async function POST(request: NextRequest) {
 
     // Notificaciones push al organizador: venta en tiempo real, y stock
     // bajo si esta venta hizo que la barra cruce el umbral de alerta.
-    // No debe frenar la respuesta si algo falla acá.
-    try {
+    // No debe frenar la respuesta si algo falla acá, ni demorarla: va en
+    // after() para que el bartender vea la venta confirmada sin esperar
+    // las consultas y el envío del push (con mala señal en el boliche eso
+    // sumaba segundos a cada venta).
+    after(async () => { try {
       const [{ data: bar }, { data: barStock }] = await Promise.all([
         admin.from("bars").select("name, event_id").eq("id", barId).maybeSingle(),
         admin.from("bar_stock").select("quantity").eq("bar_id", barId).eq("event_product_id", eventProductId).maybeSingle(),
@@ -97,7 +100,7 @@ export async function POST(request: NextRequest) {
       }
     } catch (pushError) {
       console.error("PUSH bartender-sale:", pushError);
-    }
+    } });
 
     return NextResponse.json({
       ok: true,

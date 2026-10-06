@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createClient } from "../../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { sendPushToOrganizers } from "../../../../../lib/push/server";
@@ -37,7 +37,8 @@ export async function POST(request: NextRequest) {
     if (!row) return NextResponse.json({ error: "No se pudo canjear el combo." }, { status: 500 });
 
     // Best-effort: avisar al organizador, igual que una venta de barra normal.
-    try {
+    // En after() para no demorar la respuesta al bartender.
+    after(async () => { try {
       const admin = createAdminClient();
       const { data: bar } = await admin.from("bars").select("event_id, name").eq("id", barId).maybeSingle();
       if (bar) {
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
       }
     } catch (err) {
       console.error("COMBO REDEEM push:", err);
-    }
+    } });
 
     return NextResponse.json({
       ok: true,

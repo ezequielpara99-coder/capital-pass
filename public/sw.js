@@ -130,12 +130,22 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = event.notification.data?.url || "/panel";
 
+  // client.navigate() falla si esa pestaña no esta controlada por este
+  // service worker (ej. se abrio antes de que se instalara): antes la promesa
+  // rechazada se ignoraba y el aviso solo traia la app al frente, en la
+  // pantalla que estaba, sin ir a la venta. Ahora, si no puede navegar, abre
+  // la pagina del aviso en una ventana nueva.
   event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (clients) => {
       for (const client of clients) {
-        if (client.url.includes(self.location.origin) && "focus" in client) {
-          client.navigate(url);
-          return client.focus();
+        if (client.url.startsWith(self.location.origin) && "focus" in client) {
+          try {
+            const navigated = await client.navigate(url);
+            if (navigated) return navigated.focus();
+          } catch {
+            // sigue con openWindow
+          }
+          break;
         }
       }
       return self.clients.openWindow(url);

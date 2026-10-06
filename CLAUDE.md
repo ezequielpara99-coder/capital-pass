@@ -104,7 +104,7 @@ Eze va a seguir el proyecto desde otro Claude, así que todo lo que se haga tien
 
 ## Commits en esta máquina (Windows + PowerShell)
 
-Escribí el mensaje en un archivo y usá `git commit -F archivo`. Si usás `-m`, evitá `"`, `>`, `?` y rutas tipo `/control,`, porque rompen el comando.
+Escribí el mensaje en un archivo y usá `git commit -F archivo`. Cloná con `core.autocrlf=false`: con fin de línea de Windows (CRLF) falla el test del script de borrado de eventos de prueba. Si usás `-m`, evitá `"`, `>`, `?` y rutas tipo `/control,`, porque rompen el comando.
 
 ## Estado al 2026-10-05
 
@@ -120,7 +120,8 @@ Escribí el mensaje en un archivo y usá `git commit -F archivo`. Si usás `-m`,
 - Tareas automáticas (`app/api/cron/*`) auditadas el 2026-10-05: resumen de ventas corregido; checkout online con `binary_mode` (sin efectivo) y aviso al organizador si entra un pago aprobado sin cupo.
 - Sales Agent auditado el 2026-10-05: el filtro para no entrar a direcciones internas cubre IPv6 disfrazadas (`lib/sales-agent/private-ip.ts`), y el valor mensual de una conversión va en pesos enteros.
 - Nuevo (2026-10-05): **Admin → Finanzas → Cuentas del mes** (`/admin/finanzas/mensual`, migración 20261019, tabla `finance_fixed_items`). Son los ingresos y gastos fijos de Eze, separados en Negocio y Personal, en pesos o dólares. Los dólares se pasan con la cotización del día de dolarapi.com (`lib/finanzas/dolar.ts`), con dólar tarjeta por defecto. Tiene un tilde de IVA 21% para servicios del exterior, y el monotributo va como gasto fijo. El cálculo está en `lib/finanzas/fixed.ts`, con tests.
-- Para la próxima ronda: todo tuvo al menos una pasada. Conviene una segunda vuelta por los flujos de plata con datos reales (venta online, recarga, suscripción) apenas haya movimiento real, y revisar los avisos al celular (push) de punta a punta.
+- Avisos al celular (push) auditados el 2026-10-05 (tercera tanda): las ventas de barra, combos y mesas ya no esperan el envío del aviso para responder (van en `after()`); tocar un aviso abre la pantalla correcta aunque la pestaña no esté controlada por el service worker; en iPhone sin la app en la pantalla de inicio, Perfil explica cómo activarlos en vez de decir que no se puede. Al 2026-10-05 había 1 solo celular suscripto (Eze, Android) y 0 socios.
+- Para la próxima ronda: todo tuvo al menos una pasada. Conviene una segunda vuelta por los flujos de plata con datos reales (venta online, recarga, suscripción) apenas haya movimiento real.
 - Pruebas reales pendientes de Eze:
   1. Crear un RRPP de prueba, mandarle los datos por WhatsApp y entrar con usuario, celular y email.
   2. Comprar una entrada barata online en la cuenta QA y confirmar que llega el mail con el QR.
