@@ -42,3 +42,6 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# backups de la base (datos personales, van a Google Drive)
+/backups/

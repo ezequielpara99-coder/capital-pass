@@ -74,6 +74,16 @@ Eze va a seguir el proyecto desde otro Claude, así que todo lo que se haga tien
 - Cada cambio se commitea y se pushea a GitHub. No dejar trabajo sin subir.
 - Cuando cambie el estado (algo auditado, algo nuevo, una prueba pendiente, una decisión de Eze), actualizar este `CLAUDE.md` en el mismo commit. Lo mismo con el `CLAUDE.md` del otro proyecto.
 
+## Backup de la base en Google Drive (pedido de Eze, 2026-10-05)
+
+- Al terminar cada tanda de trabajo, corré `node scripts/backup/exportar-base.mjs`. Es solo lectura: baja todas las tablas y los usuarios a `backups/capital-pass-base-<fecha>.json.gz`. La carpeta `backups/` está en `.gitignore` porque tiene datos personales.
+- Después copiá el archivo a la carpeta de Drive **"Capital Pass – Backups"** (id `1YVc-rCcaAaiLYPnMCPT9L8jiZRjmOQwX`, privada).
+  - En la compu de Eze, Google Drive para escritorio está en `G:\Mi unidad\`, así que alcanza con copiar el archivo a `G:\Mi unidad\Capital Pass – Backups\`.
+  - Se guarda uno por fecha, sin pisar los anteriores.
+- El backup no incluye tokens ni secretos (por ejemplo, el token de Mercado Pago de cada organizador): si hay que restaurar, el organizador vuelve a conectar Mercado Pago.
+  - `payment_proofs` no se puede leer con service_role (permiso solo en Supabase); al 2026-10-05 estaba vacía.
+- Las claves (`.env.local`) NO van a Drive. Si se pierden, están en Vercel → Settings → Environment Variables.
+
 ## Proyectos
 
 - **capital-pass** (esta carpeta): la plataforma de entradas, en capitalpass.app.
