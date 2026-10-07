@@ -41,6 +41,7 @@ const GUIDE: Record<Role, RoleGuide> = {
         steps: [
           "Invitá un RRPP desde RRPPs → agregar. Asignalo al evento y definí su % de comisión.",
           "El % se congela en cada venta: si después lo cambiás, no afecta lo que ya vendió, solo las ventas nuevas.",
+          "Las mesas que vende un RRPP también le dan comisión, con el mismo %. Las que vendés vos no generan comisión.",
           "Podés dejar a tu equipo (RRPP, puerta, control, barra) asignado a varios eventos: cada uno ve siempre el evento en curso o el próximo, no uno que ya terminó.",
           "En Informes vas a ver cuánto generó cada RRPP y cuánto ya le pagaste. Si le pagás de más por error, el sistema te lo muestra aparte para que lo descuentes del próximo pago.",
         ],
@@ -157,6 +158,7 @@ const GUIDE: Record<Role, RoleGuide> = {
         title: "Tu comisión",
         steps: [
           "El % que cobrás por cada venta te lo asigna el organizador al evento — se congela en el momento de cada venta.",
+          "Cobrás comisión tanto por las entradas como por las mesas que vendés.",
           "Si se devuelve una entrada que vos vendiste, tu comisión de esa venta se descuenta del total que se te debe.",
         ],
       },

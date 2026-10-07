@@ -111,6 +111,7 @@ const recargasRepetidasMesasSocioMigration = readFileSync(new URL("../supabase/m
 const usuarioCelularIngresarMigration = readFileSync(new URL("../supabase/migrations/20261018_usuario_y_celular_para_ingresar.sql", import.meta.url), "utf8");
 const finanzasFijosMigration = readFileSync(new URL("../supabase/migrations/20261019_finanzas_fijos.sql", import.meta.url), "utf8");
 const qrVentasAnuladasMigration = readFileSync(new URL("../supabase/migrations/20261020_qr_de_ventas_anuladas.sql", import.meta.url), "utf8");
+const comisionRrppMesaMigration = readFileSync(new URL("../supabase/migrations/20261021_comision_rrpp_por_mesa.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -271,6 +272,7 @@ async function database() {
   await db.exec(usuarioCelularIngresarMigration);
   await db.exec(finanzasFijosMigration);
   await db.exec(qrVentasAnuladasMigration);
+  await db.exec(comisionRrppMesaMigration);
   return db;
 }
 
@@ -2103,6 +2105,24 @@ test("comision de RRPP: se congela en la venta, editar el % despues no cambia lo
     15,
     "la venta vieja NO cambia retroactivamente cuando se edita el % despues"
   );
+
+  // Una mesa que vende el RRPP tambien congela su % (le da comision).
+  const table = await scalar(`insert into bar_tables(event_id,name,capacity,price_minor) values ('${event}','Mesa VIP',6,80000) returning id::text`);
+  const tableSale = await scalar(
+    `select sale_id::text from sell_table('${event}','${table}','Cliente','Mesa','30333333','3462333333','efectivo')`
+  );
+  assert.equal(Number(await scalar(`select commission_percentage_snapshot from sales where id='${tableSale}'`)), 5, "la mesa vendida por un RRPP le da comision");
+
+  // La misma mesa vendida por el organizador no genera comision.
+  const organizerUser = "57575757-5757-4575-8575-575757575757";
+  await db.exec(`insert into auth.users values ('${organizerUser}','org-rrpp@example.test',now(),'{}');
+    insert into organization_members(organization_id,user_id,role,status) values ('${org}','${organizerUser}','organizer','active');
+    select set_config('request.jwt.claim.sub','${organizerUser}',false);`);
+  const table2 = await scalar(`insert into bar_tables(event_id,name,capacity,price_minor) values ('${event}','Mesa 2',6,50000) returning id::text`);
+  const organizerTableSale = await scalar(
+    `select sale_id::text from sell_table('${event}','${table2}','Cliente','Org','30444444','3462444444','efectivo')`
+  );
+  assert.equal(await scalar(`select commission_percentage_snapshot from sales where id='${organizerTableSale}'`), null, "si vende el organizador, no hay comision");
 
   await db.close();
 });

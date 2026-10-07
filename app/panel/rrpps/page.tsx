@@ -426,7 +426,9 @@ export default async function RRPPsPage({
       `)
         .eq("event_id", event.id)
         .eq("status", "confirmed")
-        .eq("channel", "rrpp")
+        // Las mesas que vende un RRPP tambien le dan comision (decision de
+        // Eze, 2026-10-06).
+        .in("channel", ["rrpp", "mesa"])
         .in("seller_member_id", assignedMemberIds)
         .order("id")
         .range(from, to)
@@ -608,10 +610,13 @@ export default async function RRPPsPage({
 
     current.salesCount += 1;
 
-    current.ticketsSold +=
-      ticketsBySale.get(
-        sale.id
-      ) ?? 0;
+    // La entrada (QR) de una mesa no cuenta como entrada vendida.
+    if (sale.channel !== "mesa") {
+      current.ticketsSold +=
+        ticketsBySale.get(
+          sale.id
+        ) ?? 0;
+    }
 
     const saleTotal =
       Number(
@@ -624,11 +629,15 @@ export default async function RRPPsPage({
     // El % se congela en el momento de la venta
     // (commission_percentage_snapshot) -- una venta vieja, de antes de este
     // fix, no lo tiene y usa el % vigente como antes.
+    // Una mesa sin % congelado la vendio alguien que no era RRPP en ese
+    // momento (ej. el organizador): no genera comision.
     const saleCommissionPct =
       sale.commission_percentage_snapshot !== null &&
       sale.commission_percentage_snapshot !== undefined
         ? Number(sale.commission_percentage_snapshot)
-        : commissionPctByMember.get(sale.seller_member_id) ?? 0;
+        : sale.channel === "mesa"
+          ? 0
+          : commissionPctByMember.get(sale.seller_member_id) ?? 0;
 
     // Si se devolvio (parte de) esta venta, la comision se calcula sobre lo
     // que efectivamente quedo cobrado -- antes esto no se descontaba nunca

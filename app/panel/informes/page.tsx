@@ -1140,11 +1140,17 @@ export default async function InformesPage() {
           // sobre plata de mesa/barra que no le corresponde (si quedaba
           // despues). "rrppStaff" no depende del canal de ninguna venta:
           // es la asignacion real de ese miembro como RRPP del evento.
+          // Las mesas que vende un RRPP tambien le dan comision (decision
+          // de Eze, 2026-10-06): sell_table congela el % solo cuando vende
+          // un RRPP, asi que una mesa sin % la vendio el organizador.
           const rrppSales =
             sellerSales.filter(
               (sale) =>
                 sale.channel ===
-                "rrpp"
+                  "rrpp" ||
+                (sale.channel === "mesa" &&
+                  sale.commission_percentage_snapshot !== null &&
+                  sale.commission_percentage_snapshot !== undefined)
             );
 
           const rrppSaleIds =

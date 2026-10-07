@@ -140,7 +140,10 @@ Escribí el mensaje en un archivo y usá `git commit -F archivo`. Cloná con `co
 - Comisiones de RRPP y compra online, segunda vuelta (2026-10-06):
   - la pantalla de RRPP descuenta de la comisión también las devoluciones con reintegro pendiente, igual que Informes (antes las dos pantallas mostraban números distintos);
   - las tandas a $0 ya no se ofrecen en la venta online, porque Mercado Pago rechaza montos en cero. El checkout las corta con un mensaje claro y libera el cupo.
-  - Decisión abierta para Eze: un RRPP que vende una mesa (canal `mesa`) no cobra comisión por esa venta. ¿Es así como lo quiere?
+- **Decisión de Eze (2026-10-06): las mesas que vende un RRPP también le dan comisión.** Migración 20261021, aplicada y verificada en vivo.
+  - `sell_table` congela el % del RRPP en `commission_percentage_snapshot`; si vende el organizador, queda null y no genera comisión.
+  - La pantalla de RRPP y la de Informes cuentan las ventas `mesa` que tienen ese %. La entrada de la mesa no suma como "entrada vendida".
+  - Al aplicarlo no había ninguna mesa vendida por un RRPP, así que no cambió ninguna comisión vieja.
 - **Trampa nueva:** la migración 20261020 parchea la definición VIVA de las funciones con `pg_temp.cp_patch`, que falla si no encuentra el texto. Si se reescribe una de esas funciones en el futuro, partí de `pg_get_functiondef` en vivo, no del repo: en vivo tenían CRLF y, antes de este arreglo, acentos rotos.
 - Para la próxima ronda: todo tuvo al menos una pasada. Conviene una segunda vuelta por los flujos de plata con datos reales (venta online, recarga, suscripción) apenas haya movimiento real.
 - Pruebas reales pendientes de Eze:
