@@ -112,6 +112,7 @@ const usuarioCelularIngresarMigration = readFileSync(new URL("../supabase/migrat
 const finanzasFijosMigration = readFileSync(new URL("../supabase/migrations/20261019_finanzas_fijos.sql", import.meta.url), "utf8");
 const qrVentasAnuladasMigration = readFileSync(new URL("../supabase/migrations/20261020_qr_de_ventas_anuladas.sql", import.meta.url), "utf8");
 const comisionRrppMesaMigration = readFileSync(new URL("../supabase/migrations/20261021_comision_rrpp_por_mesa.sql", import.meta.url), "utf8");
+const ingresoCelularCon15Migration = readFileSync(new URL("../supabase/migrations/20261022_ingreso_celular_con_15.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -273,6 +274,7 @@ async function database() {
   await db.exec(finanzasFijosMigration);
   await db.exec(qrVentasAnuladasMigration);
   await db.exec(comisionRrppMesaMigration);
+  await db.exec(ingresoCelularCon15Migration);
   return db;
 }
 
@@ -3944,6 +3946,15 @@ test("ingreso con usuario o celular: cp_login_email traduce al email de la cuent
   assert.equal(await scalar(`select cp_login_email('3462111222')`), null, "celular en dos cuentas: no adivina");
   assert.equal(await scalar(`select cp_login_email('noexiste')`), null);
   assert.equal(await scalar(`select cp_login_email('12345')`), null, "pocos digitos no matchea nada");
+
+  // El "15" de los celulares: guardado con 15 y tipeado sin, o al reves.
+  const con15 = "f5555555-5555-4555-8555-555555555555";
+  await db.exec(`insert into auth.users values ('${con15}','con15@example.test',now(),'{}');
+    insert into profiles(id, first_name, last_name, phone) values ('${con15}','Con','Quince','0341 15 555-6666');`);
+  assert.equal(await scalar(`select cp_login_email('3415556666')`), "con15@example.test", "guardado con 15, tipeado sin 15");
+  assert.equal(await scalar(`select cp_login_email('+54 9 341 555 6666')`), "con15@example.test");
+  assert.equal(await scalar(`select cp_login_email('3468 15 529047')`), "juan@example.test", "guardado sin 15, tipeado con 15");
+  assert.equal(await scalar(`select cp_login_email('011 15 5555-1234')`), "viejo@example.test", "AMBA con 15");
 
   // Usuario unico sin importar mayusculas, y con formato valido.
   await assert.rejects(() => db.query(`update profiles set username = 'JUANPEREZ' where id = '${a}'`), /profiles_username/);

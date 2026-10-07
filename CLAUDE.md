@@ -144,6 +144,11 @@ Escribí el mensaje en un archivo y usá `git commit -F archivo`. Cloná con `co
   - `sell_table` congela el % del RRPP en `commission_percentage_snapshot`; si vende el organizador, queda null y no genera comisión.
   - La pantalla de RRPP y la de Informes cuentan las ventas `mesa` que tienen ese %. La entrada de la mesa no suma como "entrada vendida".
   - Al aplicarlo no había ninguna mesa vendida por un RRPP, así que no cambió ninguna comisión vieja.
+- Alta del equipo e ingreso con usuario o celular, auditados el 2026-10-06 (migración 20261022, aplicada y verificada en vivo):
+  - el ingreso con celular reconoce el número con o sin "15", con 0 o con +54 9. La clave común la arma `cp_phone_key` en la base, con la misma lógica que `lib/whatsapp/phone.ts`;
+  - crear un RRPP ahora pide contraseña de 8 caracteres como mínimo, igual que puerta, control y barra;
+  - si el email ya tiene cuenta, el aviso sale en castellano, y la pantalla de RRPP ya no muestra errores técnicos de la base.
+  - Revisado y bien: un organizador solo puede generarle contraseña a su propio equipo, nunca a otro organizador ni al admin; el email nunca vuelve al navegador; hay tope de intentos por IP y por cuenta.
 - **Trampa nueva:** la migración 20261020 parchea la definición VIVA de las funciones con `pg_temp.cp_patch`, que falla si no encuentra el texto. Si se reescribe una de esas funciones en el futuro, partí de `pg_get_functiondef` en vivo, no del repo: en vivo tenían CRLF y, antes de este arreglo, acentos rotos.
 - Para la próxima ronda: todo tuvo al menos una pasada. Conviene una segunda vuelta por los flujos de plata con datos reales (venta online, recarga, suscripción) apenas haya movimiento real.
 - Pruebas reales pendientes de Eze:

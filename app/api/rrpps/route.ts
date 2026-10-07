@@ -576,12 +576,13 @@ export async function POST(
 
     if (
       !password ||
-      password.length < 6
+      password.length < 8
     ) {
+      // Mismo minimo que controladores, puerta y bartenders.
       return NextResponse.json(
         {
           error:
-            "La contraseña debe tener al menos 6 caracteres.",
+            "La contraseña debe tener al menos 8 caracteres.",
         },
         {
           status: 400,
@@ -737,11 +738,15 @@ export async function POST(
       authError ||
       !authData.user
     ) {
+      // Antes devolvia el mensaje crudo de Supabase, en ingles ("A user
+      // with this email address has already been registered").
+      console.error("ERROR CREANDO AUTH RRPP:", authError);
       return NextResponse.json(
         {
           error:
-            authError?.message ??
-            "No se pudo crear el usuario RRPP.",
+            authError?.message?.toLowerCase().includes("already")
+              ? "Ya existe una cuenta con ese email."
+              : "No se pudo crear el usuario RRPP.",
         },
         {
           status: 400,
@@ -847,10 +852,11 @@ export async function POST(
         rrppUser.id
       );
 
+      console.error("RRPP API:", memberError);
+
       return NextResponse.json(
         {
           error:
-            memberError?.message ??
             "No se pudo agregar el RRPP a la organización.",
         },
         {
@@ -952,10 +958,11 @@ export async function POST(
         rrppUser.id
       );
 
+      console.error("RRPP API:", staffError);
+
       return NextResponse.json(
         {
           error:
-            staffError?.message ??
             "No se pudo asignar el RRPP al evento.",
         },
         {
@@ -1313,10 +1320,10 @@ export async function PATCH(
         paymentError ||
         !payment
       ) {
+        console.error("RRPP API:", paymentError);
         return NextResponse.json(
           {
             error:
-              paymentError?.message ??
               "No se pudo registrar el pago.",
           },
           {
@@ -1768,10 +1775,10 @@ export async function PATCH(
       updateError ||
       !updatedStaff
     ) {
+      console.error("RRPP API:", updateError);
       return NextResponse.json(
         {
           error:
-            updateError?.message ??
             "No se pudo actualizar el RRPP.",
         },
         {
