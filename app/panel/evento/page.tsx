@@ -1707,7 +1707,7 @@ function ManageEventContent() {
 
         <Section
           title="Estado del evento"
-          description="Controlá en qué etapa se encuentra el evento."
+          description="Pasa solo a Activo 6 horas antes del inicio (ahí se habilitan la puerta y el escaneo) y a Finalizado 12 horas después del cierre. Si lo cambiás a mano, se respeta."
         >
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
 

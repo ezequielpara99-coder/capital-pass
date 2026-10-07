@@ -152,7 +152,11 @@ Escribí el mensaje en un archivo y usá `git commit -F archivo`. Cloná con `co
 - Ciclo de vida del evento, auditado el 2026-10-06:
   - **Riesgo conocido:** la puerta (escaneo y venta) solo funciona con el evento en "Activo", y el estado se cambia a mano. Si Eze se olvida, la noche del evento no se puede escanear. Además, un evento viejo que quedó en "Activo" tiene prioridad en `pickCurrentEvent`, así que el equipo podría ver ese en vez del de esta noche (al 2026-10-06 había uno así, de prueba).
   - Ya arreglado: Control y Puerta avisan de entrada si el evento no está Activo, Puerta explica por qué no se puede vender, y `validar-qr` devuelve el motivo real (errores P0001) en vez de "No se pudo validar la entrada".
-  - Pendiente de decisión de Eze: que el estado cambie solo (Próximo → Activo unas horas antes del inicio, Activo → Finalizado después del cierre).
+  - **Decisión de Eze (2026-10-06): el estado cambia solo.** Migración 20261023 y cron `/api/cron/estado-eventos`, cada 10 minutos.
+    - Próximo → Activo 6 h antes de `starts_at`; Próximo/Activo → Finalizado 12 h después de `ends_at` (o de `starts_at` + 12 h si no tiene hora de cierre).
+    - Cada cambio se hace una sola vez por evento (`auto_activated_at` / `auto_finished_at`): si Eze lo cambia a mano después, se respeta.
+    - Borradores y cancelados no se tocan nunca.
+    - En la primera corrida se finalizó "Evento QR Test" (organización de prueba), que había quedado Activo desde el 30/9.
 - **Trampa nueva:** la migración 20261020 parchea la definición VIVA de las funciones con `pg_temp.cp_patch`, que falla si no encuentra el texto. Si se reescribe una de esas funciones en el futuro, partí de `pg_get_functiondef` en vivo, no del repo: en vivo tenían CRLF y, antes de este arreglo, acentos rotos.
 - Para la próxima ronda: todo tuvo al menos una pasada. Conviene una segunda vuelta por los flujos de plata con datos reales (venta online, recarga, suscripción) apenas haya movimiento real.
 - Pruebas reales pendientes de Eze:

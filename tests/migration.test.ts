@@ -113,6 +113,7 @@ const finanzasFijosMigration = readFileSync(new URL("../supabase/migrations/2026
 const qrVentasAnuladasMigration = readFileSync(new URL("../supabase/migrations/20261020_qr_de_ventas_anuladas.sql", import.meta.url), "utf8");
 const comisionRrppMesaMigration = readFileSync(new URL("../supabase/migrations/20261021_comision_rrpp_por_mesa.sql", import.meta.url), "utf8");
 const ingresoCelularCon15Migration = readFileSync(new URL("../supabase/migrations/20261022_ingreso_celular_con_15.sql", import.meta.url), "utf8");
+const estadoAutomaticoEventosMigration = readFileSync(new URL("../supabase/migrations/20261023_estado_automatico_eventos.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -275,6 +276,7 @@ async function database() {
   await db.exec(qrVentasAnuladasMigration);
   await db.exec(comisionRrppMesaMigration);
   await db.exec(ingresoCelularCon15Migration);
+  await db.exec(estadoAutomaticoEventosMigration);
   return db;
 }
 
@@ -3977,5 +3979,46 @@ test("cuentas del mes: la tabla rechaza montos y dias invalidos y solo la usa el
   await db.exec("set role authenticated;");
   await assert.rejects(() => db.query("select * from finance_fixed_items"), /permission denied/);
   await db.exec("reset role;");
+  await db.close();
+});
+
+test("estado automatico: los eventos pasan solos a Activo y a Finalizado, una sola vez, sin tocar borradores ni cancelados", async () => {
+  const db = await database();
+  const scalar = async (sql: string) => Object.values((await db.query<Record<string, unknown>>(sql)).rows[0])[0];
+  const org = "a7a7a7a7-1111-4111-8111-111111111111";
+  const ev = (n: string) => `a7a7a7a7-2222-4222-8222-${n.padStart(12, "0")}`;
+  await db.exec(`insert into organizations(id,name,slug,complimentary) values ('${org}','Club Auto','club-auto',true);
+    insert into events(id,organization_id,status,starts_at,ends_at) values
+      ('${ev("1")}','${org}','upcoming', now() + interval '3 hours', null),
+      ('${ev("2")}','${org}','upcoming', now() + interval '2 days', null),
+      ('${ev("3")}','${org}','active',   now() - interval '3 days', now() - interval '2 days'),
+      ('${ev("4")}','${org}','active',   now() - interval '5 hours', now() + interval '2 hours'),
+      ('${ev("5")}','${org}','draft',    now() + interval '1 hour', null),
+      ('${ev("6")}','${org}','cancelled',now() + interval '1 hour', null),
+      ('${ev("7")}','${org}','upcoming', now() - interval '3 days', null);`);
+  const status = (n: string) => scalar(`select status::text from events where id='${ev(n)}'`);
+
+  const first = (await db.query<{ activated: number; finished: number }>(`select * from cp_auto_event_status()`)).rows[0];
+  assert.equal(await status("1"), "active", "arranca en 3 horas: ya se activa");
+  assert.equal(await status("2"), "upcoming", "falta mucho: no se toca");
+  assert.equal(await status("3"), "finished", "termino hace 2 dias: se finaliza");
+  assert.equal(await status("4"), "active", "esta en curso: sigue activo");
+  assert.equal(await status("5"), "draft", "un borrador nunca se toca");
+  assert.equal(await status("6"), "cancelled", "un cancelado nunca se toca");
+  assert.equal(await status("7"), "finished", "uno viejo que nunca se activo se finaliza directo");
+  assert.equal(Number(first.activated), 1);
+  assert.equal(Number(first.finished), 2);
+
+  // Si el organizador lo vuelve a poner a mano, se respeta.
+  await db.exec(`update events set status = 'upcoming' where id = '${ev("1")}'; update events set status = 'active' where id = '${ev("3")}';`);
+  await db.query(`select * from cp_auto_event_status()`);
+  assert.equal(await status("1"), "upcoming", "no se re-activa algo que el organizador cambio a mano");
+  assert.equal(await status("3"), "active", "no se re-finaliza algo que el organizador reactivo a mano");
+
+  // Solo el servidor puede correrla.
+  await db.exec(`set role authenticated;`);
+  await assert.rejects(() => db.query(`select * from cp_auto_event_status()`), /permission denied/);
+  await db.exec("reset role;");
+
   await db.close();
 });

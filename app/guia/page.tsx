@@ -18,7 +18,7 @@ const GUIDE: Record<Role, RoleGuide> = {
         steps: [
           "Entrá a Mis eventos → + Crear evento.",
           "Cargá nombre, fecha, lugar y ciudad. Podés subir una portada: esa misma imagen se usa de fondo (blureado) en la página pública del evento.",
-          "El evento arranca en estado \"Próximo\". Lo pasás a \"Activo\" el día del evento para habilitar la venta en puerta y el escaneo de entradas.",
+          "El evento arranca en estado \"Próximo\" y pasa solo a \"Activo\" 6 horas antes del inicio: ahí se habilitan la venta en puerta y el escaneo de entradas. 12 horas después del cierre pasa solo a \"Finalizado\". Si lo cambiás a mano, se respeta lo que elegiste.",
         ],
       },
       {
