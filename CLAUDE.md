@@ -137,6 +137,10 @@ Escribí el mensaje en un archivo y usá `git commit -F archivo`. Cloná con `co
   - `validate_ticket_manual` rechaza entradas de ventas no confirmadas, y lo mismo hacen el modo sin señal (`/api/control/preload`) y la página `/entrada/[id]`;
   - se arreglaron los acentos rotos en los mensajes de la base (`validate_ticket_manual` y `validate_transfer_ticket`).
   - Los celulares con "15" ahora se normalizan bien para WhatsApp: hay una sola copia en `lib/whatsapp/phone.ts`, con tests (antes eran cinco iguales).
+- Comisiones de RRPP y compra online, segunda vuelta (2026-10-06):
+  - la pantalla de RRPP descuenta de la comisión también las devoluciones con reintegro pendiente, igual que Informes (antes las dos pantallas mostraban números distintos);
+  - las tandas a $0 ya no se ofrecen en la venta online, porque Mercado Pago rechaza montos en cero. El checkout las corta con un mensaje claro y libera el cupo.
+  - Decisión abierta para Eze: un RRPP que vende una mesa (canal `mesa`) no cobra comisión por esa venta. ¿Es así como lo quiere?
 - **Trampa nueva:** la migración 20261020 parchea la definición VIVA de las funciones con `pg_temp.cp_patch`, que falla si no encuentra el texto. Si se reescribe una de esas funciones en el futuro, partí de `pg_get_functiondef` en vivo, no del repo: en vivo tenían CRLF y, antes de este arreglo, acentos rotos.
 - Para la próxima ronda: todo tuvo al menos una pasada. Conviene una segunda vuelta por los flujos de plata con datos reales (venta online, recarga, suscripción) apenas haya movimiento real.
 - Pruebas reales pendientes de Eze:

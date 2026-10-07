@@ -249,7 +249,10 @@ export default async function PublicEventPage({
   // total en Capital Pass y le cobraban uno mayor en el checkout de MP.
   const feePercent = Number(mpAccount?.processing_fee_percent ?? 0);
 
-  const mappedTicketTypes = (ticketTypes ?? []).map((ticket) => ({
+  // Una tanda a $0 (ej. "Free hasta la 1") no se puede cobrar por Mercado
+  // Pago (rechaza montos en cero): ofrecerla online terminaba en un error
+  // al pagar. Las gratis se dan por RRPP/puerta, no por la web.
+  const mappedTicketTypes = (ticketTypes ?? []).filter((ticket) => Number(ticket.price_minor) > 0).map((ticket) => ({
     id: ticket.id,
     name: ticket.name,
     description: ticket.description,

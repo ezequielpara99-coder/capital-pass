@@ -491,7 +491,11 @@ export default async function RRPPsPage({
         sale_id,
         refund_amount_minor
       `)
-        .eq("refund_status", "refunded")
+        // 'pending' tambien: esa plata se va a devolver, y Informes ya la
+        // descontaba -- antes esta pantalla mostraba mas comision pendiente
+        // que Informes hasta que se marcaba el reintegro, y si se pagaba en
+        // el medio quedaba pagado de mas. 'no_refund' tiene monto 0.
+        .in("refund_status", ["pending", "refunded"])
         .in("sale_id", saleIds)
         .order("id")
         .range(from, to)

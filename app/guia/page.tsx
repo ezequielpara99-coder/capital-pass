@@ -108,6 +108,7 @@ const GUIDE: Record<Role, RoleGuide> = {
         steps: [
           "Para vender entradas o mesas online, conectá tu cuenta de Mercado Pago desde el panel (OAuth, un click).",
           "Capital Pass no cobra comisión por entrada: lo único que se descuenta es lo que cobra Mercado Pago por el pago.",
+          "Las tandas gratis ($0) no aparecen en la venta online, porque Mercado Pago no cobra montos en cero: esas entradas se dan por RRPP o en la puerta.",
         ],
       },
       {

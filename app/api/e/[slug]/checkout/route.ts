@@ -98,6 +98,20 @@ export async function POST(
     // reales, no solo un caso de monto en cero.
     const saleTotalMinor = Number(sale.total_minor);
 
+    // Mercado Pago rechaza items en $0: una tanda gratis (la pagina ya no la
+    // ofrece, pero puede quedar un link o pestaña vieja) se corta aca con un
+    // mensaje claro y se libera el cupo, en vez del error generico de MP.
+    if (sale.items.some((item) => Number(item.line_total_minor) <= 0)) {
+      if (saleIdForRollback) {
+        const rolledBack = await admin.rpc("cp_cancel_online_sale", { p_sale_id: saleIdForRollback });
+        if (rolledBack.error) console.error("VENTAS ONLINE: no se pudo liberar el cupo.", rolledBack.error.message);
+      }
+      return NextResponse.json(
+        { ok: false, error: "Las entradas gratis no se sacan online: pedíselas al organizador o a un RRPP." },
+        { status: 400 }
+      );
+    }
+
     const feePercent = Number(account?.processing_fee_percent ?? 0);
     const feeAmount = Math.round(saleTotalMinor * (feePercent / 100));
 
