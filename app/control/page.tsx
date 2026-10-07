@@ -56,6 +56,7 @@ type EventRow = {
   starts_at: string | null;
   venue_name: string | null;
   city: string | null;
+  status?: string | null;
 };
 
 type ValidationResult = {
@@ -1602,6 +1603,23 @@ export default function ControlPage() {
                   .filter(Boolean)
                   .join(" · ")}
               </p>
+            )}
+
+            {/* validate_ticket_manual solo deja escanear con el evento
+                "Activo": avisarlo antes del primer escaneo, no despues. */}
+            {event.status && event.status !== "active" && (
+              <div className="mx-auto mt-5 max-w-md rounded-2xl border border-amber-400/30 bg-amber-500/10 px-5 py-4 text-left">
+                <p className="text-sm font-bold text-amber-200">
+                  {event.status === "finished"
+                    ? "Este evento ya figura como finalizado."
+                    : event.status === "cancelled"
+                      ? "Este evento está cancelado."
+                      : "El evento todavía no está Activo."}
+                </p>
+                <p className="mt-1 text-xs text-amber-100/70">
+                  Así no se pueden escanear entradas. Pedile al organizador que lo pase a “Activo” desde el panel del evento.
+                </p>
+              </div>
             )}
           </section>
         )}

@@ -198,12 +198,21 @@ export async function POST(request: NextRequest) {
         validationError
       );
 
+      // P0001 = "raise exception" de validate_ticket_manual: son avisos
+      // pensados para el controlador ("El evento no está habilitado para
+      // control de ingreso", "Demasiados intentos...") -- antes se tapaban
+      // con un generico y en la puerta nadie sabia que hacer. Cualquier
+      // otro error de la base sigue siendo generico.
+      const isBusinessError = validationError.code === "P0001" && Boolean(validationError.message);
+
       return NextResponse.json(
         {
-          error: "No se pudo validar la entrada.",
+          error: isBusinessError
+            ? validationError.message
+            : "No se pudo validar la entrada.",
         },
         {
-          status: 500,
+          status: isBusinessError ? 409 : 500,
         }
       );
     }

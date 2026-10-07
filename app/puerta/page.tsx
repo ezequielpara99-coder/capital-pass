@@ -481,6 +481,22 @@ export default function DoorSellerPage() {
       return true;
     }, [event, nowTick]);
 
+  // Por que no se puede vender: antes solo decia "Venta no disponible" y el
+  // vendedor de puerta no sabia a quien pedirle que.
+  const doorUnavailableReason = useMemo(() => {
+    if (!event || doorAvailable) return null;
+    if (event.status !== "active") {
+      return "El evento todavía no está Activo. Pedile al organizador que lo pase a “Activo” desde el panel del evento.";
+    }
+    if (!event.door_sales_enabled) {
+      return "El organizador no habilitó la venta en puerta para este evento.";
+    }
+    if (event.door_sales_start_at && nowTick < new Date(event.door_sales_start_at).getTime()) {
+      return `La venta en puerta abre el ${new Date(event.door_sales_start_at).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })}.`;
+    }
+    return "La venta en puerta ya cerró.";
+  }, [event, doorAvailable, nowTick]);
+
   // =====================================================
   // CREAR VENTA
   // =====================================================
@@ -1053,6 +1069,11 @@ export default function DoorSellerPage() {
                   ? "● Venta habilitada"
                   : "● Venta no disponible"}
               </span>
+              {doorUnavailableReason && (
+                <p className="mt-3 text-xs text-white/50">
+                  {doorUnavailableReason}
+                </p>
+              )}
             </div>
           </section>
         )}
