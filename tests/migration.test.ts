@@ -110,6 +110,7 @@ const renovacionAnticipadaMigration = readFileSync(new URL("../supabase/migratio
 const recargasRepetidasMesasSocioMigration = readFileSync(new URL("../supabase/migrations/20261017_recargas_repetidas_y_mesas_de_socio.sql", import.meta.url), "utf8");
 const usuarioCelularIngresarMigration = readFileSync(new URL("../supabase/migrations/20261018_usuario_y_celular_para_ingresar.sql", import.meta.url), "utf8");
 const finanzasFijosMigration = readFileSync(new URL("../supabase/migrations/20261019_finanzas_fijos.sql", import.meta.url), "utf8");
+const qrVentasAnuladasMigration = readFileSync(new URL("../supabase/migrations/20261020_qr_de_ventas_anuladas.sql", import.meta.url), "utf8");
 const q = (v: string) => '"' + v.replaceAll('"', '""') + '"';
 const str = (v: string) => "'" + v.replaceAll("'", "''") + "'";
 
@@ -269,6 +270,7 @@ async function database() {
   await db.exec(recargasRepetidasMesasSocioMigration);
   await db.exec(usuarioCelularIngresarMigration);
   await db.exec(finanzasFijosMigration);
+  await db.exec(qrVentasAnuladasMigration);
   return db;
 }
 
@@ -977,6 +979,11 @@ test("stock de barra: barras, bartenders, mesas y venta de tragos", async () => 
   await db.query(`select cancel_table_sale('${tableSale}','Cliente no llego')`);
   assert.equal(await scalar(`select status from sales where id='${tableSale}'`), "cancelled");
   assert.equal(await scalar(`select status from bar_tables where id='${table}'`), "available");
+  assert.equal(
+    await scalar(`select count(*)::int from tickets where sale_id='${tableSale}' and status='issued'`),
+    0,
+    "cancelar la mesa tiene que anular su QR: si no, el comprador cancelado entra igual"
+  );
 
   // Con la mesa liberada, se puede volver a vender.
   const resoldTable = await scalar(
@@ -2025,6 +2032,16 @@ test("control de ingreso: validate_ticket_manual valida, bloquea doble uso y reg
   );
   assert.equal(cancelled.rows[0].result, "cancelled");
 
+  // Entrada 'issued' de una venta reembolsada: la puerta la rechaza igual.
+  const refundedSale = "f9999999-9999-4999-8999-999999999999";
+  await db.exec(`insert into sales(id,organization_id,event_id,buyer_id,status,total_minor) values ('${refundedSale}','${org}','${event}','${buyer}','refunded',5000);
+    insert into tickets(sale_id,event_id,ticket_type_id,status,manual_code) values ('${refundedSale}','${event}','${ticketType}','issued','GHI789');`);
+  const refunded = await db.query<{ result: string }>(
+    `select * from validate_ticket_manual('${event}','GHI789','qr')`
+  );
+  assert.equal(refunded.rows[0].result, "cancelled", "una venta reembolsada no puede dejar entrar");
+  assert.equal(await scalar(`select status from tickets where manual_code = 'GHI789'`), "issued", "rechazar no la marca como usada");
+
   // Codigo inexistente.
   const invalid = await db.query<{ result: string; ticket_id: string | null }>(
     `select * from validate_ticket_manual('${event}','NOEXISTE','manual')`
@@ -2824,6 +2841,11 @@ test("mesas online: la mesa se reserva al pagar, se libera si no se paga o se re
   assert.equal(await scalar(`select status from sales where id='${s3.sale_id}'`), "cancelled", "la mesa ya era de otro comprador");
   assert.equal(await status(t3), "reserved", "la mesa sigue reservada para quien la tomo");
   assert.equal(await scalar(`select status from sales where id='${s4.sale_id}'`), "pending_approval");
+  assert.equal(
+    await scalar(`select count(*)::int from tickets where sale_id='${s3.sale_id}'`),
+    0,
+    "una venta cancelada porque la mesa ya era de otro no puede generar un QR valido"
+  );
 
   await db.close();
 });

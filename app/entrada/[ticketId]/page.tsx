@@ -135,7 +135,7 @@ export default async function EntradaPage({
     error: saleError,
   } = await admin
     .from("sales")
-    .select("buyer_id, table_id")
+    .select("buyer_id, table_id, status")
     .eq("id", ticket.sale_id)
     .maybeSingle();
 
@@ -258,8 +258,11 @@ export default async function EntradaPage({
     ticket.status === "used" ||
     Boolean(ticket.used_at);
 
+  // Una venta cancelada o reembolsada anula la entrada aunque la fila del
+  // ticket haya quedado 'issued' (la puerta tambien la rechaza).
   const isCancelled =
-    ticket.status === "cancelled";
+    ticket.status === "cancelled" ||
+    (ticket.status === "issued" && sale.status !== "confirmed");
 
   const status = isCancelled
     ? "cancelled"

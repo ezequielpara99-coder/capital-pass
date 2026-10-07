@@ -58,11 +58,19 @@ export async function GET(request: NextRequest) {
   const saleIds = [...new Set(rows.map((t) => t.sale_id).filter((id): id is string => Boolean(id)))];
   const ticketTypeIds = [...new Set(rows.map((t) => t.ticket_type_id).filter((id): id is string => Boolean(id)))];
 
-  const sales: { id: string; buyer_id: string | null }[] = [];
+  const sales: { id: string; buyer_id: string | null; status: string; table_id: string | null }[] = [];
   for (const group of chunks(saleIds)) {
-    const { data } = await admin.from("sales").select("id, buyer_id").in("id", group);
-    sales.push(...((data ?? []) as { id: string; buyer_id: string | null }[]));
+    const { data } = await admin.from("sales").select("id, buyer_id, status, table_id").in("id", group);
+    sales.push(...((data ?? []) as typeof sales));
   }
+
+  // Entradas de mesa: no tienen tanda, se muestran con el nombre de la mesa
+  // (igual que validate_ticket_manual en el modo con conexion).
+  const tableIds = [...new Set(sales.map((s) => s.table_id).filter((id): id is string => Boolean(id)))];
+  const { data: tables } = tableIds.length
+    ? await admin.from("bar_tables").select("id, name").in("id", tableIds)
+    : { data: [] as { id: string; name: string }[] };
+  const tableNameById = new Map((tables ?? []).map((t) => [t.id, t.name]));
 
   const { data: ticketTypes } = ticketTypeIds.length
     ? await admin.from("ticket_types").select("id, name").in("id", ticketTypeIds)
@@ -83,13 +91,21 @@ export async function GET(request: NextRequest) {
     const sale = ticket.sale_id ? saleById.get(ticket.sale_id) : null;
     const buyer = sale?.buyer_id ? buyerById.get(sale.buyer_id) : null;
 
+    // Sin conexion la puerta decide solo con este cache: una entrada de una
+    // venta cancelada o reembolsada tiene que figurar anulada, igual que la
+    // rechaza validate_ticket_manual con conexion.
+    const saleVoided = Boolean(sale) && sale?.status !== "confirmed";
+    const tableName = sale?.table_id ? tableNameById.get(sale.table_id) : null;
+
     return {
       ticketId: ticket.id,
       manualCode: (ticket.manual_code as string).toUpperCase(),
-      status: ticket.status as string,
+      status: saleVoided && ticket.status === "issued" ? "cancelled" : (ticket.status as string),
       buyerName: buyer ? `${buyer.first_name} ${buyer.last_name}`.trim() : "",
       buyerDni: buyer?.dni ?? null,
-      ticketType: ticket.ticket_type_id ? ticketTypeNameById.get(ticket.ticket_type_id) ?? "" : "",
+      ticketType: ticket.ticket_type_id
+        ? ticketTypeNameById.get(ticket.ticket_type_id) ?? ""
+        : tableName ? `${tableName} (mesa)` : "Mesa",
       // Firma real, calculada aca (unico lugar con el secret) para que el
       // modo offline pueda comparar contra ella sin confiar solo en que el
       // ticketId (publico) este en el cache.

@@ -11,6 +11,7 @@ import EventSwitcher from "../event-switcher";
 import RefundActionButton from "./refund-action-button";
 import DeliveryResolveButton from "./delivery-resolve-button";
 import SendWhatsAppButton from "./send-whatsapp-button";
+import { normalizeWhatsAppNumber } from "../../../lib/whatsapp/phone";
 
 // ============================================================
 // TYPES
@@ -100,24 +101,6 @@ type ProfileRow = {
     | null;
 };
 
-// Mismo criterio que ya usan las pantallas de venta (vender-client.tsx,
-// nueva-venta, puerta): un celular argentino real normalizado siempre
-// queda en 549 + 10 dígitos. Si no matchea, se rechaza en vez de adivinar
-// -- evita armar un link de WhatsApp a un número que no es el que corresponde.
-function normalizeWhatsAppNumber(value: string | null) {
-  if (!value) return "";
-  let digits = value.replace(/\D/g, "");
-  if (!digits) return "";
-  if (digits.startsWith("54")) {
-    let rest = digits.slice(2);
-    if (!rest.startsWith("9")) rest = `9${rest}`;
-    digits = `54${rest}`;
-  } else {
-    if (digits.startsWith("0")) digits = digits.slice(1);
-    digits = `549${digits}`;
-  }
-  return /^549\d{10}$/.test(digits) ? digits : "";
-}
 
 // ============================================================
 // PAGE
@@ -1847,11 +1830,11 @@ function buildWhatsAppUrl({
     | string
     | null;
 }) {
+  // Antes se usaban los digitos tal cual: "03462 15 555666" armaba un link
+  // a un numero que no existe. Si no se puede normalizar, wa.me/ sin numero
+  // deja elegir el contacto a mano en vez de mandarlo a cualquiera.
   const cleanPhone =
-    phone.replace(
-      /\D/g,
-      ""
-    );
+    normalizeWhatsAppNumber(phone);
 
   const message =
     [

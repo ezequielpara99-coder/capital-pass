@@ -131,6 +131,13 @@ Escribí el mensaje en un archivo y usá `git commit -F archivo`. Cloná con `co
 - Sales Agent auditado el 2026-10-05: el filtro para no entrar a direcciones internas cubre IPv6 disfrazadas (`lib/sales-agent/private-ip.ts`), y el valor mensual de una conversión va en pesos enteros.
 - Nuevo (2026-10-05): **Admin → Finanzas → Cuentas del mes** (`/admin/finanzas/mensual`, migración 20261019, tabla `finance_fixed_items`). Son los ingresos y gastos fijos de Eze, separados en Negocio y Personal, en pesos o dólares. Los dólares se pasan con la cotización del día de dolarapi.com (`lib/finanzas/dolar.ts`), con dólar tarjeta por defecto. Tiene un tilde de IVA 21% para servicios del exterior, y el monotributo va como gasto fijo. El cálculo está en `lib/finanzas/fixed.ts`, con tests.
 - Avisos al celular (push) auditados el 2026-10-05 (tercera tanda): las ventas de barra, combos y mesas ya no esperan el envío del aviso para responder (van en `after()`); tocar un aviso abre la pantalla correcta aunque la pestaña no esté controlada por el service worker; en iPhone sin la app en la pantalla de inicio, Perfil explica cómo activarlos en vez de decir que no se puede. Al 2026-10-05 había 1 solo celular suscripto (Eze, Android) y 0 socios.
+- Ventas con QR auditadas el 2026-10-06 (migración 20261020, aplicada y verificada en vivo):
+  - cancelar una mesa (`cancel_table_sale`) ahora anula su QR;
+  - una mesa online pagada tarde y ya tomada por otro no genera QR;
+  - `validate_ticket_manual` rechaza entradas de ventas no confirmadas, y lo mismo hacen el modo sin señal (`/api/control/preload`) y la página `/entrada/[id]`;
+  - se arreglaron los acentos rotos en los mensajes de la base (`validate_ticket_manual` y `validate_transfer_ticket`).
+  - Los celulares con "15" ahora se normalizan bien para WhatsApp: hay una sola copia en `lib/whatsapp/phone.ts`, con tests (antes eran cinco iguales).
+- **Trampa nueva:** la migración 20261020 parchea la definición VIVA de las funciones con `pg_temp.cp_patch`, que falla si no encuentra el texto. Si se reescribe una de esas funciones en el futuro, partí de `pg_get_functiondef` en vivo, no del repo: en vivo tenían CRLF y, antes de este arreglo, acentos rotos.
 - Para la próxima ronda: todo tuvo al menos una pasada. Conviene una segunda vuelta por los flujos de plata con datos reales (venta online, recarga, suscripción) apenas haya movimiento real.
 - Pruebas reales pendientes de Eze:
   1. Crear un RRPP de prueba, mandarle los datos por WhatsApp y entrar con usuario, celular y email.

@@ -11,6 +11,7 @@ import {
 import { useRouter } from "next/navigation";
 import { createClient } from "../../../lib/supabase/client";
 import { pickCurrentEvent } from "../../../lib/events/current-event";
+import { normalizeWhatsAppNumber } from "../../../lib/whatsapp/phone";
 
 type EventRow = {
   id: string;
@@ -116,33 +117,6 @@ function formatTicketNumber(
   →
   5493468529047
 */
-// Un celular argentino real normalizado siempre queda en 549 + 10 digitos
-// (13 en total) -- antes, un numero que no matcheaba ningun patron conocido
-// (ej. un digito de mas por error de tipeo) se devolvia TAL CUAL sin el
-// prefijo 549, y esa cadena podia coincidir por casualidad con un WhatsApp
-// real de otra persona (ej. un +34 de España): el link con el nombre/entrada
-// del comprador se mandaba a un desconocido. Ahora, si el resultado no
-// tiene exactamente esa forma, se rechaza (string vacio) en vez de adivinar.
-function normalizeWhatsAppNumber(
-  value: string | null
-) {
-  if (!value) return "";
-
-  let digits = value.replace(/\D/g, "");
-
-  if (!digits) return "";
-
-  if (digits.startsWith("54")) {
-    let rest = digits.slice(2);
-    if (!rest.startsWith("9")) rest = `9${rest}`;
-    digits = `54${rest}`;
-  } else {
-    if (digits.startsWith("0")) digits = digits.slice(1);
-    digits = `549${digits}`;
-  }
-
-  return /^549\d{10}$/.test(digits) ? digits : "";
-}
 
 export default function NuevaVentaRRPPPage() {
   const router = useRouter();

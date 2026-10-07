@@ -11,6 +11,7 @@ import {
 import { createClient } from "../../lib/supabase/client";
 import { pickCurrentEvent } from "../../lib/events/current-event";
 import { friendlyErrorMessage } from "../../lib/errors/friendly-message";
+import { normalizeWhatsAppNumber as normalizeWhatsApp } from "../../lib/whatsapp/phone";
 
 type EventData = {
   id: string;
@@ -82,27 +83,6 @@ function formatMoney(value: number) {
   }).format(value);
 }
 
-// Un celular argentino real normalizado siempre queda en 549 + 10 digitos
-// (13 en total) -- antes, un numero que no matcheaba ningun patron conocido
-// se devolvia TAL CUAL sin el prefijo 549, y esa cadena podia coincidir por
-// casualidad con un WhatsApp real de otra persona: el link con el
-// nombre/entrada del comprador se mandaba a un desconocido. Ahora, si el
-// resultado no tiene exactamente esa forma, se rechaza (string vacio).
-function normalizeWhatsApp(value: string) {
-  let digits = value.replace(/\D/g, "");
-  if (!digits) return "";
-
-  if (digits.startsWith("54")) {
-    let rest = digits.slice(2);
-    if (!rest.startsWith("9")) rest = `9${rest}`;
-    digits = `54${rest}`;
-  } else {
-    if (digits.startsWith("0")) digits = digits.slice(1);
-    digits = `549${digits}`;
-  }
-
-  return /^549\d{10}$/.test(digits) ? digits : "";
-}
 
 // Fuera del componente: el linter marca "Date.now()" como impuro si se
 // llama directo dentro de un componente/hook.

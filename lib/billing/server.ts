@@ -448,7 +448,7 @@ export async function applySalePayment(payment: ProviderPayment, saleId: string)
         try {
           await sendPushToOrganizers(sale.organization_id as string, "bar_sale", {
             title: "Pago sin entrada: hay que devolverlo",
-            body: `Entró un pago online aprobado de $${new Intl.NumberFormat("es-AR").format(Number(payment.transaction_amount))} pero ya no había lugar en la tanda. Devolvé el pago desde Mercado Pago.`,
+            body: `Entró un pago online aprobado de $${new Intl.NumberFormat("es-AR").format(Number(payment.transaction_amount))} pero ${sale.table_id ? "esa mesa ya la había reservado otra persona" : "ya no había lugar en la tanda"}. Devolvé el pago desde Mercado Pago.`,
             url: "/panel",
           });
         } catch (pushError) {

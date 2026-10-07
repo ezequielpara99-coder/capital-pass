@@ -10,6 +10,7 @@ import {
 
 import { useRouter } from "next/navigation";
 import { createClient } from "../../../lib/supabase/client";
+import { normalizeWhatsAppNumber } from "../../../lib/whatsapp/phone";
 
 export type TicketTypeRow = {
   id: string;
@@ -71,29 +72,6 @@ function formatTicketNumber(value: number | string) {
   return String(value).padStart(7, "0");
 }
 
-// Convierte números argentinos cargados de forma local (ej. 03468529047)
-// al formato que espera wa.me (5493468529047). Un celular argentino real
-// normalizado siempre queda en 549 + 10 dígitos (13 en total) -- antes, un
-// número que no matcheaba ningún patrón conocido (ej. un dígito de más por
-// error de tipeo) se devolvía TAL CUAL sin el prefijo 549, y esa cadena
-// podía coincidir por casualidad con un WhatsApp real de otra persona (ej.
-// un +34 de España): el link armado con el nombre/entrada del comprador se
-// mandaba a un desconocido. Ahora, si el resultado no tiene exactamente esa
-// forma, se rechaza (string vacío) en vez de adivinar.
-function normalizeWhatsAppNumber(value: string | null) {
-  if (!value) return "";
-  let digits = value.replace(/\D/g, "");
-  if (!digits) return "";
-  if (digits.startsWith("54")) {
-    let rest = digits.slice(2);
-    if (!rest.startsWith("9")) rest = `9${rest}`;
-    digits = `54${rest}`;
-  } else {
-    if (digits.startsWith("0")) digits = digits.slice(1);
-    digits = `549${digits}`;
-  }
-  return /^549\d{10}$/.test(digits) ? digits : "";
-}
 
 export default function VenderClient({
   event,

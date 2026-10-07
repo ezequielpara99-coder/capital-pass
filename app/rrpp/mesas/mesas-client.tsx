@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { friendlyErrorMessage } from "../../../lib/errors/friendly-message";
+import { normalizeWhatsAppNumber } from "../../../lib/whatsapp/phone";
 
 type Table = { id: string; name: string; capacity: number | null; price_minor: number | null; status: string };
 
@@ -10,25 +11,6 @@ function money(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
 }
 
-// Mismo criterio que ya usan nueva-venta/puerta/vender-client: exige que el
-// numero quede en la forma exacta de un celular argentino (549 + 10
-// digitos) o lo rechaza -- un numero que no matchea ningun patron conocido
-// NO se devuelve "tal cual" (esa version vieja podia coincidir por
-// casualidad con el WhatsApp real de otra persona y mandarle el link con
-// el nombre/mesa de un comprador ajeno).
-function normalizeWhatsAppNumber(value: string) {
-  let digits = value.replace(/\D/g, "");
-  if (!digits) return "";
-  if (digits.startsWith("54")) {
-    let rest = digits.slice(2);
-    if (!rest.startsWith("9")) rest = `9${rest}`;
-    digits = `54${rest}`;
-  } else {
-    if (digits.startsWith("0")) digits = digits.slice(1);
-    digits = `549${digits}`;
-  }
-  return /^549\d{10}$/.test(digits) ? digits : "";
-}
 
 export default function MesasClient({ eventId, eventName }: { eventId: string; eventName: string }) {
   const [tables, setTables] = useState<Table[]>([]);
